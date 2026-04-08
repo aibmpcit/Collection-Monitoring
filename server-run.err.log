@@ -1,0 +1,24 @@
+error: duplicate key value violates unique constraint "branches_pkey"
+    at C:\xampp\htdocs\collection-monitoring-app\node_modules\pg\lib\client.js:631:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (C:\xampp\htdocs\collection-monitoring-app\server\src\routes\branches.ts:62:28)
+    at async withTransaction (C:\xampp\htdocs\collection-monitoring-app\server\src\config\db.ts:29:20)
+    at async <anonymous> (C:\xampp\htdocs\collection-monitoring-app\server\src\routes\branches.ts:61:21) {
+  length: 189,
+  severity: 'ERROR',
+  code: '23505',
+  detail: 'Key (id)=(1) already exists.',
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: 'public',
+  table: 'branches',
+  column: undefined,
+  dataType: undefined,
+  constraint: 'branches_pkey',
+  file: 'nbtinsert.c',
+  line: '666',
+  routine: '_bt_check_unique'
+}
