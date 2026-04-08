@@ -214,6 +214,7 @@ function LoanRecordField({ label, value }: { label: string; value: ReactNode }) 
 export function LoansPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const isCollector = user?.role === "staff";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin" || user?.role === "staff";
   const canDeleteLoans = user?.role === "super_admin" || user?.role === "branch_admin";
@@ -254,6 +255,7 @@ export function LoansPage() {
   const [openMenuLoan, setOpenMenuLoan] = useState<{ loanId: number; top: number; left: number; openUp: boolean } | null>(null);
   const [loanPendingDelete, setLoanPendingDelete] = useState<LoanQuickRef | null>(null);
   const [isDeletePending, setIsDeletePending] = useState(false);
+  const [mobileLoanPreview, setMobileLoanPreview] = useState<LoanRow | null>(null);
   const [loanBulkDeleteIds, setLoanBulkDeleteIds] = useState<number[]>([]);
   const [isBulkLoanDeletePending, setIsBulkLoanDeletePending] = useState(false);
   const [selectedLoanIds, setSelectedLoanIds] = useState<number[]>([]);
@@ -431,6 +433,12 @@ export function LoansPage() {
     setBranches(branchData);
   }
 
+  async function refreshLoanImportData() {
+    const [memberData, loanData] = await Promise.all([apiRequest<Borrower[]>("/borrowers"), apiRequest<LoanRow[]>("/loans")]);
+    setMembers(memberData);
+    setLoans(loanData);
+  }
+
   useEffect(() => {
     void loadData();
   }, []);
@@ -543,7 +551,10 @@ export function LoansPage() {
       setLoanImportFile(null);
       setLoanImportInputKey((current) => current + 1);
       setIsImportOpen(false);
-      await loadData();
+      setIsImportPending(false);
+      void refreshLoanImportData().catch((refreshError) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Import finished but list refresh failed");
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to import loan file");
     } finally {
@@ -853,6 +864,14 @@ export function LoansPage() {
     setPaymentError("");
   }
 
+  function openMobileLoanPreview(loan: LoanRow) {
+    setMobileLoanPreview(loan);
+  }
+
+  function closeMobileLoanPreview() {
+    setMobileLoanPreview(null);
+  }
+
   async function handleSubmitPayment(event: React.FormEvent) {
     event.preventDefault();
     if (!paymentLoan) return;
@@ -978,6 +997,79 @@ export function LoansPage() {
                   <button type="submit" className="btn-primary">{editingId ? "Update" : "Create Loan"}</button>
                 </div>
               </form>
+            </div>
+          </section>,
+          document.body
+        )
+      : null;
+
+  const mobileLoanPreviewModal =
+    user?.role === "staff" && mobileLoanPreview
+      ? createPortal(
+          <section className="modal-shell" onClick={closeMobileLoanPreview}>
+            <div className="modal-card max-w-xl" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold">{mobileLoanPreview.memberName}</h3>
+                  <p className="mt-1 break-all text-xs text-slate-500">{mobileLoanPreview.loanAccountNo}</p>
+                </div>
+                <button type="button" className="btn-muted" onClick={closeMobileLoanPreview}>
+                  Close
+                </button>
+              </div>
+
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <span className={loanStatusClass(mobileLoanPreview.status)}>{mobileLoanPreview.status}</span>
+                <p className="text-sm font-semibold text-slate-700">${mobileLoanPreview.loanAmount.toLocaleString()}</p>
+              </div>
+
+              <div className="mobile-record-grid">
+                <LoanRecordField label="CIF Key" value={mobileLoanPreview.cifKey} />
+                <LoanRecordField label="Loan Type" value={mobileLoanPreview.loanType} />
+                <LoanRecordField label="Date Release" value={formatDate(mobileLoanPreview.dateRelease)} />
+                <LoanRecordField label="Maturity Date" value={formatDate(mobileLoanPreview.maturityDate)} />
+                <LoanRecordField label="Principal Due" value={`$${mobileLoanPreview.principalDue.toLocaleString()}`} />
+                <LoanRecordField label="Penalty Due" value={`$${mobileLoanPreview.penaltyDue.toLocaleString()}`} />
+                <LoanRecordField label="Interest" value={`$${mobileLoanPreview.interest.toLocaleString()}`} />
+                <LoanRecordField label="Other Charges" value={`$${mobileLoanPreview.otherCharges.toLocaleString()}`} />
+                <LoanRecordField label="PAR Age" value={mobileLoanPreview.parAge} />
+                <LoanRecordField label="Contact" value={mobileLoanPreview.contactInfo || "-"} />
+                <LoanRecordField label="Address" value={mobileLoanPreview.address || "-"} />
+                <LoanRecordField label="Notes" value={mobileLoanPreview.notes?.trim() ? mobileLoanPreview.notes : "-"} />
+              </div>
+
+              <div className="mobile-action-row">
+                <button
+                  type="button"
+                  className="btn-primary btn-page w-full sm:w-auto"
+                  onClick={() => {
+                    closeMobileLoanPreview();
+                    navigate(`/loan-details/${mobileLoanPreview.id}`);
+                  }}
+                >
+                  Open Loan
+                </button>
+                <button
+                  type="button"
+                  className="btn-muted btn-page w-full sm:w-auto"
+                  onClick={() => {
+                    closeMobileLoanPreview();
+                    void openRemarksModal(mobileLoanPreview);
+                  }}
+                >
+                  Remarks
+                </button>
+                <button
+                  type="button"
+                  className="btn-muted btn-page w-full sm:w-auto"
+                  onClick={() => {
+                    closeMobileLoanPreview();
+                    void openPaymentModal(mobileLoanPreview);
+                  }}
+                >
+                  Payment Notes
+                </button>
+              </div>
             </div>
           </section>,
           document.body
@@ -1339,6 +1431,7 @@ export function LoansPage() {
     <main className="page-shell min-w-0 overflow-x-hidden">
       {loanFormModal}
       {loanImportModal}
+      {mobileLoanPreviewModal}
       {remarksModal}
       {paymentModal}
       {deleteLoanModal}
@@ -1348,7 +1441,7 @@ export function LoansPage() {
 
       <PageHeader
         title="Collections"
-        subtitle="Manage loans and open each record for collector payment notes and loan remarks."
+        subtitle={isCollector ? "Review assigned loan records and open each account for payment notes and remarks." : "Manage loans and open each record for collector payment notes and loan remarks."}
         eyebrow="Loan Operations"
         actions={<PageMetaStamp />}
       />
@@ -1357,28 +1450,28 @@ export function LoansPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
-            <p className="text-xs text-slate-600">Manage loan entries and collector payment notes.</p>
+            <p className="text-xs text-slate-600">{isCollector ? "Open a loan to review details, add remarks, and record payment notes." : "Manage loan entries and collector payment notes."}</p>
           </div>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <button
-              type="button"
-              className="btn-muted w-full sm:w-auto"
-              onClick={openImportModal}
-              disabled={!canAddLoans}
-              title={!canAddLoans ? "Branch admin or super admin only" : "Import loan records from CSV/Excel"}
-            >
-              Import CSV
-            </button>
-            <button
-              type="button"
-              className={`btn-primary w-full sm:w-auto ${!canAddLoans ? "cursor-not-allowed opacity-60" : ""}`}
-              onClick={openCreateModal}
-              disabled={!canAddLoans}
-              title={!canAddLoans ? "Branch admin or super admin only" : "Add a new loan"}
-            >
-              Add Loan
-            </button>
-          </div>
+          {canAddLoans && (
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <button
+                type="button"
+                className="btn-muted w-full sm:w-auto"
+                onClick={openImportModal}
+                title="Import loan records from CSV/Excel"
+              >
+                Import CSV
+              </button>
+              <button
+                type="button"
+                className="btn-primary w-full sm:w-auto"
+                onClick={openCreateModal}
+                title="Add a new loan"
+              >
+                Add Loan
+              </button>
+            </div>
+          )}
         </div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
@@ -1403,7 +1496,6 @@ export function LoansPage() {
         {importMessage && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
         {message && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
         {error && <p className="mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        {!canAddLoans && <p className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Staff can open a loan row to add payment notes and remarks for their branch. Only branch admin and super admin can add or delete loans and payment records.</p>}
         {activeRecordsTab === "loans" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1445,67 +1537,91 @@ export function LoansPage() {
                 </div>
               )}
             </div>
-            <div className="mobile-record-list mt-3">
-              {paginatedLoans.map((loan) => (
-                <article key={loan.id} className="mobile-record-card">
-                  <div className="flex items-start justify-between gap-3">
+            {user?.role === "staff" ? (
+              <div className="mobile-record-list mt-3">
+                {paginatedLoans.map((loan) => (
+                  <button
+                    key={loan.id}
+                    type="button"
+                    className="collector-loan-list-item text-left"
+                    onClick={() => openMobileLoanPreview(loan)}
+                  >
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                      <p className="truncate text-sm font-semibold text-slate-900">{loan.memberName}</p>
                       <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>
+                      <p className="mt-1 text-xs text-slate-500">{loan.loanType}</p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
-                      {canDeleteLoans && (
-                        <input
-                          type="checkbox"
-                          aria-label={`Select loan ${loan.loanAccountNo}`}
-                          checked={selectedLoanIdSet.has(loan.id)}
-                          onChange={(event) => toggleLoanSelection(loan.id, event.target.checked)}
-                          className="h-4 w-4 accent-teal-600"
-                        />
-                      )}
                       <span className={loanStatusClass(loan.status)}>{loan.status}</span>
+                      <span className="text-sm font-semibold text-slate-700">${loan.loanAmount.toLocaleString()}</span>
                     </div>
-                  </div>
+                  </button>
+                ))}
+                {filteredLoans.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
+              </div>
+            ) : (
+              <div className="mobile-record-list mt-3">
+                {paginatedLoans.map((loan) => (
+                  <article key={loan.id} className="mobile-record-card">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                        <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        {canDeleteLoans && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select loan ${loan.loanAccountNo}`}
+                            checked={selectedLoanIdSet.has(loan.id)}
+                            onChange={(event) => toggleLoanSelection(loan.id, event.target.checked)}
+                            className="h-4 w-4 accent-teal-600"
+                          />
+                        )}
+                        <span className={loanStatusClass(loan.status)}>{loan.status}</span>
+                      </div>
+                    </div>
 
-                  <div className="mobile-record-grid">
-                    <LoanRecordField label="CIF Key" value={loan.cifKey} />
-                    <LoanRecordField label="Loan Type" value={loan.loanType} />
-                    <LoanRecordField label="Date Release" value={new Date(loan.dateRelease).toLocaleDateString()} />
-                    <LoanRecordField label="Maturity Date" value={new Date(loan.maturityDate).toLocaleDateString()} />
-                    <LoanRecordField label="Loan Amount" value={`$${loan.loanAmount.toLocaleString()}`} />
-                    <LoanRecordField label="Principal Due" value={`$${loan.principalDue.toLocaleString()}`} />
-                    <LoanRecordField label="Penalty Due" value={`$${loan.penaltyDue.toLocaleString()}`} />
-                    <LoanRecordField label="Interest" value={`$${loan.interest.toLocaleString()}`} />
-                    <LoanRecordField label="Other Charges" value={`$${loan.otherCharges.toLocaleString()}`} />
-                    <LoanRecordField label="PAR Age" value={loan.parAge} />
-                    <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
-                    <LoanRecordField label="Address" value={loan.address || "-"} />
-                    <LoanRecordField label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
-                  </div>
+                    <div className="mobile-record-grid">
+                      <LoanRecordField label="CIF Key" value={loan.cifKey} />
+                      <LoanRecordField label="Loan Type" value={loan.loanType} />
+                      <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
+                      <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
+                      <LoanRecordField label="Loan Amount" value={`$${loan.loanAmount.toLocaleString()}`} />
+                      <LoanRecordField label="Principal Due" value={`$${loan.principalDue.toLocaleString()}`} />
+                      <LoanRecordField label="Penalty Due" value={`$${loan.penaltyDue.toLocaleString()}`} />
+                      <LoanRecordField label="Interest" value={`$${loan.interest.toLocaleString()}`} />
+                      <LoanRecordField label="Other Charges" value={`$${loan.otherCharges.toLocaleString()}`} />
+                      <LoanRecordField label="PAR Age" value={loan.parAge} />
+                      <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
+                      <LoanRecordField label="Address" value={loan.address || "-"} />
+                      <LoanRecordField label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
+                    </div>
 
-                  <div className="mobile-action-row">
-                    <button
-                      type="button"
-                      className="btn-primary btn-page w-full sm:w-auto"
-                      onClick={() => navigate(`/loan-details/${loan.id}`)}
-                    >
-                      Open Loan
-                    </button>
-                    {canEditLoans && (
-                      <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => startEdit(loan)}>
-                        Edit
+                    <div className="mobile-action-row">
+                      <button
+                        type="button"
+                        className="btn-primary btn-page w-full sm:w-auto"
+                        onClick={() => navigate(`/loan-details/${loan.id}`)}
+                      >
+                        Open Loan
                       </button>
-                    )}
-                    {canDeleteLoans && (
-                      <button type="button" className="btn-danger btn-page w-full sm:w-auto" onClick={() => handleDeleteLoanRow(loan)}>
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {filteredLoans.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
-            </div>
+                      {canEditLoans && (
+                        <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => startEdit(loan)}>
+                          Edit
+                        </button>
+                      )}
+                      {canDeleteLoans && (
+                        <button type="button" className="btn-danger btn-page w-full sm:w-auto" onClick={() => handleDeleteLoanRow(loan)}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+                {filteredLoans.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
+              </div>
+            )}
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
               <table className="table-clean loan-records-table w-[2200px] text-xs">

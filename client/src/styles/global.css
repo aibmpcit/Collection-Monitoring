@@ -358,6 +358,14 @@
     @apply surface-soft p-3;
   }
 
+  .collector-loan-list-item {
+    @apply surface-soft flex w-full items-center justify-between gap-3 p-3 text-left transition;
+  }
+
+  .collector-loan-list-item:hover {
+    @apply bg-white;
+  }
+
   .mobile-record-grid {
     @apply mt-3 grid gap-2 sm:grid-cols-2;
   }

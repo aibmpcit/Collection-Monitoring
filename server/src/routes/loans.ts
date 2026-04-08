@@ -447,6 +447,18 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
           null;
 
         if (borrower) {
+          const nextBranchId = borrower.branch_id ?? params.branchId;
+          const isUnchanged =
+            (borrower.cif_key ?? "") === params.cifKey &&
+            Number(nextBranchId ?? 0) === Number(borrower.branch_id ?? 0) &&
+            (borrower.member_name ?? "") === params.memberName &&
+            (borrower.contact_info ?? "") === params.contactInfo &&
+            (borrower.address ?? "") === params.address;
+
+          if (isUnchanged) {
+            return borrower;
+          }
+
           const result = await client.query<BorrowerImportRecord>(
             `UPDATE borrowers
              SET cif_key = $1,
@@ -461,7 +473,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
              RETURNING id, branch_id, cif_key, member_name, contact_info, address`,
             [
               params.cifKey,
-              borrower.branch_id ?? params.branchId,
+              nextBranchId,
               params.memberName,
               params.contactInfo,
               params.address,

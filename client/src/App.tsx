@@ -11,6 +11,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -136,7 +137,9 @@ function WorkspaceSidebar({
 }
 
 function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pathname: string }) {
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <nav
       className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] flex items-center gap-2 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
       aria-label="Collector navigation"
@@ -159,7 +162,8 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
           </NavLink>
         );
       })}
-    </nav>
+    </nav>,
+    document.body
   );
 }
 
