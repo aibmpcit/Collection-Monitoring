@@ -22,3 +22,4 @@ error: duplicate key value violates unique constraint "branches_pkey"
   line: '666',
   routine: '_bt_check_unique'
 }
+^C^C

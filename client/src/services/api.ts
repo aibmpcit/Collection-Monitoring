@@ -1,7 +1,13 @@
-const API_BASE =
-  import.meta.env.VITE_REACT_APP_API_BASE_URL ??
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://localhost:4000/api";
+const configuredApiBase = import.meta.env.PROD
+  ? import.meta.env.VITE_API_BASE_URL
+  : import.meta.env.VITE_REACT_APP_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL;
+const API_BASE = (
+  configuredApiBase
+    ? configuredApiBase
+    : import.meta.env.PROD
+      ? "/api"
+      : "http://localhost:4000/api"
+).replace(/\/$/, "");
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 

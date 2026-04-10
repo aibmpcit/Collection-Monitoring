@@ -1,0 +1,17 @@
+node_modules
+client/node_modules
+server/node_modules
+
+.env
+.env.*
+!.env.example
+
+client/dist
+server/dist
+client/tsconfig.tsbuildinfo
+
+server-run*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

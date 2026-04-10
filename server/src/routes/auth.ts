@@ -1,11 +1,13 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { requiredEnv } from "../config/env.js";
 import { query } from "../config/db.js";
 import { verifyPassword } from "../services/access.js";
 import type { Role } from "../types/models.js";
 
 const router = Router();
+const jwtSecret = requiredEnv("JWT_SECRET");
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -58,7 +60,7 @@ router.post("/login", async (req, res, next) => {
         role: user.role,
         branchId: user.branch_id
       },
-      process.env.JWT_SECRET ?? "",
+      jwtSecret,
       { expiresIn: "8h" }
     );
 
