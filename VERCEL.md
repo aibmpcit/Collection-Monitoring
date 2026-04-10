@@ -27,10 +27,13 @@ For Supabase, use a connection string that works from hosted serverless function
 Vercel can read these from `vercel.json`:
 
 ```text
+Root Directory: ./
 Install Command: npm install
 Build Command: npm run vercel-build
 Output Directory: client/dist
 ```
+
+Do not set the Vercel root directory to `client`. The API functions live in the repository-level `api/` directory, so deploying from `client` only will build the frontend without the Express API.
 
 ## Deploy Checklist
 
