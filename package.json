@@ -3,12 +3,15 @@
   "private": true,
   "workspaces": ["client", "server"],
   "scripts": {
-    "dev": "powershell -NoProfile -Command \"Start-Process npm -ArgumentList 'run dev --workspace server'; npm run dev --workspace client\"",
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
     "dev:client": "npm run dev --workspace client",
     "dev:server": "npm run dev --workspace server",
     "build": "npm run build --workspace server && npm run build --workspace client",
     "build:client": "npm run build --workspace client",
     "vercel-build": "npm run build && node scripts/prepare-vercel-output.cjs",
     "test": "npm run test --workspace server && npm run test --workspace client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

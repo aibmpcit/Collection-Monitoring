@@ -1,26 +1,42 @@
-const configuredApiBase = import.meta.env.PROD
-  ? import.meta.env.VITE_API_BASE_URL
-  : import.meta.env.VITE_REACT_APP_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL;
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_REACT_APP_API_BASE_URL;
+
+function isLoopbackApiBase(value: string) {
+  try {
+    const parsed = new URL(value);
+    return ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 const API_BASE = (
-  configuredApiBase
-    ? configuredApiBase
-    : import.meta.env.PROD
-      ? "/api"
-      : "http://localhost:4000/api"
+  import.meta.env.PROD && configuredApiBase && isLoopbackApiBase(configuredApiBase)
+    ? "/api"
+    : configuredApiBase || "/api"
 ).replace(/\/$/, "");
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
 export async function apiRequest<T>(path: string, method: HttpMethod = "GET", body?: unknown): Promise<T> {
   const token = localStorage.getItem("token");
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error("API is unreachable. Start the backend server or check the deployed /api route.");
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({ message: "Unknown error" }));
