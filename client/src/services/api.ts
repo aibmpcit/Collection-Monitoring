@@ -39,8 +39,20 @@ export async function apiRequest<T>(path: string, method: HttpMethod = "GET", bo
   }
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({ message: "Unknown error" }));
-    throw new Error(errorBody.message ?? "Request failed");
+    const responseText = await response.text();
+
+    try {
+      const errorBody = JSON.parse(responseText) as { message?: string };
+      throw new Error(errorBody.message ?? `Request failed (${response.status})`);
+    } catch {
+      const compactText = responseText.replace(/\s+/g, " ").trim();
+      const fallbackMessage =
+        compactText && !compactText.startsWith("<")
+          ? compactText.slice(0, 180)
+          : `Request failed (${response.status})`;
+
+      throw new Error(fallbackMessage);
+    }
   }
 
   return response.json() as Promise<T>;

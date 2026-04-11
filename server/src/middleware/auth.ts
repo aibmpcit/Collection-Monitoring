@@ -7,8 +7,6 @@ interface AuthedRequest extends Request {
   user?: JwtUser;
 }
 
-const jwtSecret = requiredEnv("JWT_SECRET");
-
 export function authenticate(req: AuthedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
@@ -19,7 +17,7 @@ export function authenticate(req: AuthedRequest, res: Response, next: NextFuncti
   const token = authHeader.slice("Bearer ".length);
 
   try {
-    const payload = jwt.verify(token, jwtSecret) as JwtUser;
+    const payload = jwt.verify(token, requiredEnv("JWT_SECRET")) as JwtUser;
     req.user = payload;
     return next();
   } catch {

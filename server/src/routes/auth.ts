@@ -7,7 +7,6 @@ import { verifyPassword } from "../services/access.js";
 import type { Role } from "../types/models.js";
 
 const router = Router();
-const jwtSecret = requiredEnv("JWT_SECRET");
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -60,7 +59,7 @@ router.post("/login", async (req, res, next) => {
         role: user.role,
         branchId: user.branch_id
       },
-      jwtSecret,
+      requiredEnv("JWT_SECRET"),
       { expiresIn: "8h" }
     );
 

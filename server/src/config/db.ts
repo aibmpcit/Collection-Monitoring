@@ -1,29 +1,39 @@
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 import "./env.js";
 
-const connectionString = process.env.DATABASE_URL;
+let db: Pool | null = null;
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required");
+function getDb() {
+  if (db) {
+    return db;
+  }
+
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is required");
+  }
+
+  const needsSsl = /sslmode=require/i.test(connectionString) || connectionString.includes("supabase.co");
+
+  db = new Pool({
+    connectionString,
+    ssl: needsSsl
+      ? {
+          rejectUnauthorized: false
+        }
+      : undefined
+  });
+
+  return db;
 }
 
-const needsSsl = /sslmode=require/i.test(connectionString) || connectionString.includes("supabase.co");
-
-export const db = new Pool({
-  connectionString,
-  ssl: needsSsl
-    ? {
-        rejectUnauthorized: false
-      }
-    : undefined
-});
-
 export async function query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
-  return db.query<T>(text, params);
+  return getDb().query<T>(text, params);
 }
 
 export async function withTransaction<T>(handler: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await db.connect();
+  const client = await getDb().connect();
   try {
     await client.query("BEGIN");
     const result = await handler(client);
