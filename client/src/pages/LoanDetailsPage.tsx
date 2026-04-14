@@ -172,9 +172,9 @@ export function LoanDetailsPage() {
       setPaymentOrNo("");
       setPaymentDateTime(getLocalDateTimeInputValue());
       await loadPayments(loan.id);
-      setMessage("Payment note recorded.");
+      setMessage("Payment recorded.");
     } catch (e) {
-      setPaymentError(e instanceof Error ? e.message : "Unable to record payment note.");
+      setPaymentError(e instanceof Error ? e.message : "Unable to record payment.");
     } finally {
       setPaymentsSubmitting(false);
     }
@@ -242,10 +242,10 @@ export function LoanDetailsPage() {
             <section className="panel p-4">
               <div className="mb-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-slate-900">Payment Notes</h2>
-                  <p className="text-xs text-slate-600">Saved for collector reference only. Loan balances do not change here.</p>
+                  <h2 className="text-lg font-semibold text-slate-900">Add Payments</h2>
+                  <p className="text-xs text-slate-600">Payments recorded here are for tracking only. Loan balances do not change automatically.</p>
                 </div>
-                <span className="glass-pill">{payments.length} note(s)</span>
+                <span className="glass-pill">{payments.length} payment(s)</span>
               </div>
 
               <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleAddPayment}>
@@ -282,17 +282,17 @@ export function LoanDetailsPage() {
                 </label>
                 <div className="flex justify-stretch sm:col-span-2 sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={paymentsSubmitting}>
-                    {paymentsSubmitting ? "Saving..." : "Save Payment Note"}
+                    {paymentsSubmitting ? "Saving..." : "Save Payment"}
                   </button>
                 </div>
               </form>
 
               {paymentError && <p className="mt-3 text-sm text-red-700">{paymentError}</p>}
-              {paymentsLoading && <p className="mt-3 text-sm text-slate-600">Loading payment notes...</p>}
+              {paymentsLoading && <p className="mt-3 text-sm text-slate-600">Loading payments...</p>}
 
               <div className="surface-soft mt-3 max-h-[28rem] overflow-y-auto">
                 {payments.length === 0 && !paymentsLoading ? (
-                  <p className="p-3 text-sm text-slate-600">No payment notes yet.</p>
+                  <p className="p-3 text-sm text-slate-600">No payments yet.</p>
                 ) : (
                   <ul className="divide-y divide-black/10">
                     {payments.map((item) => (

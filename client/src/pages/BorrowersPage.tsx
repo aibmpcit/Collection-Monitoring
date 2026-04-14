@@ -1,7 +1,6 @@
 import { Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import * as XLSX from "xlsx";
 import { BorrowerList } from "../components/BorrowerList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
@@ -60,6 +59,13 @@ const pesoFormatter = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 2
 });
 
+let xlsxLoader: Promise<typeof import("xlsx")> | null = null;
+
+function loadXlsx() {
+  xlsxLoader ??= import("xlsx");
+  return xlsxLoader;
+}
+
 function formatCurrency(value: number): string {
   return pesoFormatter.format(value || 0);
 }
@@ -74,8 +80,21 @@ function formatDateTime(value: string): string {
   return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString();
 }
 
+function MemberHistoryField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mobile-record-field">
+      <p className="mobile-record-label">{label}</p>
+      <p className="mobile-record-value">{value}</p>
+    </div>
+  );
+}
+
 export function BorrowersPage() {
   const { user } = useAuth();
+  const canManageMembers = user?.role === "super_admin" || user?.role === "branch_admin";
+  const canImportMembers = canManageMembers;
+  const canViewMemberHistory = true;
+  const canViewMemberActions = canManageMembers;
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [form, setForm] = useState<BorrowerPayload>(EMPTY_FORM);
@@ -115,8 +134,12 @@ export function BorrowersPage() {
 
   useEffect(() => {
     void loadBorrowers();
-    void loadBranches();
-  }, []);
+    if (canManageMembers) {
+      void loadBranches();
+    } else {
+      setBranches([]);
+    }
+  }, [canManageMembers]);
 
   useEffect(() => {
     if (user?.role === "super_admin" && importBranchId === 0 && branches.length > 0) {
@@ -130,8 +153,8 @@ export function BorrowersPage() {
     setError("");
 
     try {
-      if (editingId && user?.role === "staff") {
-        setError("Staff can only add members.");
+      if (!canManageMembers) {
+        setError("Only admins can manage members.");
         return;
       }
 
@@ -179,7 +202,7 @@ export function BorrowersPage() {
   }
 
   function handleDeleteSelectedBorrowers(selectedBorrowers: Borrower[]) {
-    if (!canEditDeleteMembers || selectedBorrowers.length === 0) return;
+    if (!canManageMembers || selectedBorrowers.length === 0) return;
     setBorrowersPendingBulkDelete(selectedBorrowers);
   }
 
@@ -228,8 +251,8 @@ export function BorrowersPage() {
   }
 
   function startEdit(borrower: Borrower) {
-    if (user?.role === "staff") {
-      setError("Staff can only add members.");
+    if (!canManageMembers) {
+      setError("Only admins can edit members.");
       return;
     }
     setEditingId(borrower.id);
@@ -249,6 +272,7 @@ export function BorrowersPage() {
   }
 
   function openCreateForm() {
+    if (!canManageMembers) return;
     const defaultBranchId = user?.role === "super_admin" && branches.length > 0 ? branches[0].id : 0;
     setEditingId(null);
     setForm({
@@ -259,8 +283,10 @@ export function BorrowersPage() {
   }
 
   function openImportModal() {
+    if (!canImportMembers) return;
     setMessage("");
     setError("");
+    void loadXlsx();
     if (user?.role === "super_admin" && importBranchId === 0 && branches.length > 0) {
       setImportBranchId(branches[0].id);
     }
@@ -374,6 +400,7 @@ export function BorrowersPage() {
       }
 
       const buffer = await file.arrayBuffer();
+      const XLSX = await loadXlsx();
       const workbook = XLSX.read(buffer, { type: "array" });
       const firstSheet = workbook.SheetNames[0];
       const sheet = workbook.Sheets[firstSheet];
@@ -405,7 +432,9 @@ export function BorrowersPage() {
 
       setImportMessage(`Imported members: ${result.inserted} new, ${result.updated} updated.`);
       setIsImportOpen(false);
-      await loadBorrowers();
+      void loadBorrowers().catch((refreshError) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Import finished but member list refresh failed");
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to import file");
     } finally {
@@ -413,15 +442,13 @@ export function BorrowersPage() {
     }
   }
 
-  const canAddMembers = user?.role === "super_admin" || user?.role === "branch_admin" || user?.role === "staff";
-  const canEditDeleteMembers = user?.role === "super_admin" || user?.role === "branch_admin";
   const totalPaid = historyPayments.reduce((sum, row) => sum + row.amount, 0);
   const totalOutstanding = historyLoans.reduce(
     (sum, row) => sum + row.principalDue + row.interest + row.penaltyDue + row.otherCharges,
     0
   );
 
-  const memberFormModal = isFormOpen && canAddMembers
+  const memberFormModal = isFormOpen && canManageMembers
     ? createPortal(
         <section className="modal-shell">
           <div className="modal-card max-w-xl">
@@ -478,7 +505,7 @@ export function BorrowersPage() {
       )
     : null;
 
-  const memberImportModal = isImportOpen && canAddMembers
+  const memberImportModal = isImportOpen && canImportMembers
     ? createPortal(
         <section className="modal-shell">
           <div className="modal-card max-w-xl">
@@ -563,7 +590,37 @@ export function BorrowersPage() {
                     <h4 className="text-sm font-semibold text-slate-800">Loan History</h4>
                     <span className="glass-pill">Outstanding {formatCurrency(totalOutstanding)}</span>
                   </div>
-                  <div className="table-shell max-h-[48vh] overflow-auto">
+                  <div className="mobile-record-list md:hidden">
+                    {historyLoans.map((loan) => (
+                      <article key={loan.id} className="mobile-record-card">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-semibold text-slate-900">{loan.loanAccountNo}</p>
+                            <p className="mt-1 text-xs text-slate-500">{loan.loanType}</p>
+                          </div>
+                          <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
+                            {loan.status}
+                          </span>
+                        </div>
+
+                        <div className="mobile-record-grid">
+                          <MemberHistoryField label="Released" value={formatDate(loan.dateRelease)} />
+                          <MemberHistoryField label="Maturity" value={formatDate(loan.maturityDate)} />
+                          <MemberHistoryField label="Amount" value={formatCurrency(loan.loanAmount)} />
+                          <MemberHistoryField label="Principal Due" value={formatCurrency(loan.principalDue)} />
+                          <MemberHistoryField label="Penalty Due" value={formatCurrency(loan.penaltyDue)} />
+                          <MemberHistoryField label="Interest" value={formatCurrency(loan.interest)} />
+                          <MemberHistoryField label="Other Charges" value={formatCurrency(loan.otherCharges)} />
+                        </div>
+                      </article>
+                    ))}
+                    {historyLoans.length === 0 && (
+                      <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">
+                        No loan history found for this member.
+                      </p>
+                    )}
+                  </div>
+                  <div className="table-shell hidden max-h-[48vh] overflow-auto md:block">
                     <table className="table-clean text-xs">
                       <thead>
                         <tr>
@@ -615,7 +672,30 @@ export function BorrowersPage() {
                     <h4 className="text-sm font-semibold text-slate-800">Payment History</h4>
                     <span className="glass-pill">{historyPayments.length} payment(s)</span>
                   </div>
-                  <div className="table-shell max-h-[48vh] overflow-auto">
+                  <div className="mobile-record-list md:hidden">
+                    {historyPayments.map((payment) => (
+                      <article key={payment.id} className="mobile-record-card">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-semibold text-slate-900">{payment.paymentId}</p>
+                            <p className="mt-1 text-xs text-slate-500">{payment.loanAccountNo}</p>
+                          </div>
+                          <p className="text-sm font-semibold text-emerald-700">{formatCurrency(payment.amount)}</p>
+                        </div>
+
+                        <div className="mobile-record-grid">
+                          <MemberHistoryField label="Collected By" value={payment.collectedBy || "System"} />
+                          <MemberHistoryField label="Collected At" value={formatDateTime(payment.collectedAt)} />
+                        </div>
+                      </article>
+                    ))}
+                    {historyPayments.length === 0 && (
+                      <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">
+                        No payment history found for this member.
+                      </p>
+                    )}
+                  </div>
+                  <div className="table-shell hidden max-h-[48vh] overflow-auto md:block">
                     <table className="table-clean text-xs">
                       <thead>
                         <tr>
@@ -777,7 +857,7 @@ export function BorrowersPage() {
 
       <PageHeader
         title="Members"
-        subtitle="Create, import, and maintain member records with branch-level access controls."
+        subtitle={canManageMembers ? "Create, import, and maintain member records with branch-level access controls." : "View member records linked to your branch."}
         eyebrow="Member Registry"
         actions={<PageMetaStamp />}
       />
@@ -785,8 +865,6 @@ export function BorrowersPage() {
       {importMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
       {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {user?.role === "staff" && <p className="glass-pill w-fit">Staff can add members for their own branch only.</p>}
-      {!canAddMembers && <p className="glass-pill w-fit">Only super admin, branch admin, and staff can access members.</p>}
 
       <BorrowerList
         borrowers={borrowers}
@@ -797,11 +875,11 @@ export function BorrowersPage() {
         onDeleteSelected={handleDeleteSelectedBorrowers}
         onImport={openImportModal}
         onAdd={openCreateForm}
-        canImport={canAddMembers}
-        canAdd={canAddMembers}
-        canEditDelete={canEditDeleteMembers}
-        canViewHistory={canAddMembers}
-        canViewRemarks={canAddMembers}
+        canImport={canImportMembers}
+        canAdd={canManageMembers}
+        canEditDelete={canManageMembers}
+        canViewHistory={canViewMemberHistory}
+        canViewRemarks={canViewMemberActions}
       />
     </main>
   );

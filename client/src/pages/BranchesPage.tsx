@@ -73,6 +73,15 @@ function PaginationControls({
   );
 }
 
+function BranchField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mobile-record-field">
+      <p className="mobile-record-label">{label}</p>
+      <p className="mobile-record-value">{value}</p>
+    </div>
+  );
+}
+
 export function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [form, setForm] = useState<BranchForm>(EMPTY_FORM);
@@ -249,9 +258,9 @@ export function BranchesPage() {
                 Close
               </button>
             </div>
-            <p className="text-sm text-black/70">Branch: {credentials.branchName}</p>
-            <p className="text-sm text-black/70">Username: <strong>{credentials.username}</strong></p>
-            <p className="text-sm text-black/70">Password: <strong>{credentials.password}</strong></p>
+            <p className="break-words text-sm text-black/70">Branch: {credentials.branchName}</p>
+            <p className="break-words text-sm text-black/70">Username: <strong>{credentials.username}</strong></p>
+            <p className="break-words text-sm text-black/70">Password: <strong>{credentials.password}</strong></p>
             <p className="mt-2 text-xs text-black/60">This branch admin password stays the same unless changed in code/database.</p>
           </section>
         </div>
@@ -294,7 +303,32 @@ export function BranchesPage() {
         {message && <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
         {error && <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-        <div className="table-shell mt-3">
+        <div className="mobile-record-list mt-3 md:hidden">
+          {paginatedBranches.map((branch) => (
+            <article key={branch.id} className="mobile-record-card">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-slate-900">{branch.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{branch.code}</p>
+                </div>
+              </div>
+
+              <div className="mobile-record-grid">
+                <BranchField label="Address" value={branch.address || "-"} />
+                <BranchField label="Branch Admin" value={branch.branchAdminUsername || "-"} />
+              </div>
+
+              <div className="mobile-action-row">
+                <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => void handleShowAdminCredentials(branch)}>
+                  Show Admin Login
+                </button>
+              </div>
+            </article>
+          ))}
+          {filteredBranches.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No branches yet.</p>}
+        </div>
+
+        <div className="table-shell mt-3 hidden md:block">
           <table className="table-clean">
             <thead>
               <tr>

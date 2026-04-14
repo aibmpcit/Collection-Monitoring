@@ -58,7 +58,7 @@ router.post("/:loanId/draft", authenticate, async (req: AuthedRequest, res, next
       toNumber(loan.other_charges ?? 0);
     const memberName = loan.member_name || loan.name || "Member";
     const maturityDate = loan.maturity_date || loan.due_date || "";
-    const draft = `Hello ${memberName}, this is a reminder that your due amount of $${total.toFixed(2)} was scheduled on ${maturityDate}. Please contact us for payment assistance.`;
+    const draft = `Hello ${memberName}, this is a reminder that your due amount of PHP ${total.toFixed(2)} was scheduled on ${maturityDate}. Please contact us for payment assistance.`;
 
     return res.json({ draft });
   } catch (error) {

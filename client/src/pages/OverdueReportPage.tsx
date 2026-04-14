@@ -12,6 +12,15 @@ const pesoFormatter = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 2
 });
 
+function OverdueField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mobile-record-field">
+      <p className="mobile-record-label">{label}</p>
+      <p className="mobile-record-value">{value}</p>
+    </div>
+  );
+}
+
 export function OverdueReportPage() {
   const [rows, setRows] = useState<OverdueAccount[]>([]);
   const [error, setError] = useState("");
@@ -76,7 +85,31 @@ export function OverdueReportPage() {
           </div>
         </div>
 
-        <div className="table-shell">
+        <div className="mobile-record-list md:hidden">
+          {rows.map((row) => (
+            <article key={row.loanId} className="mobile-record-card">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-slate-900">{row.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{row.phone || "-"}</p>
+                </div>
+                <span className="status-danger gap-1">
+                  <AlertOctagon size={12} />
+                  High
+                </span>
+              </div>
+
+              <div className="mobile-record-grid">
+                <OverdueField label="Due Date" value={new Date(row.dueDate).toLocaleDateString()} />
+                <OverdueField label="Days Overdue" value={String(row.daysOverdue)} />
+                <OverdueField label="Outstanding" value={pesoFormatter.format(row.totalOutstanding)} />
+              </div>
+            </article>
+          ))}
+          {rows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No overdue accounts found.</p>}
+        </div>
+
+        <div className="table-shell hidden md:block">
           <table className="table-clean">
             <thead>
               <tr>

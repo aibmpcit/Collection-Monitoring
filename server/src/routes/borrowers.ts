@@ -28,6 +28,17 @@ const borrowerImportSchema = z.object({
   branchId: z.coerce.number().int().positive().optional()
 });
 
+type BorrowerImportPayload = z.infer<typeof borrowerImportSchema>;
+
+type NormalizedBorrowerImportRow = {
+  cifKey: string;
+  branchId: number;
+  memberName: string;
+  contactInfo: string;
+  address: string;
+  email: string;
+};
+
 function borrowerEmail(cifKey: string): string {
   return `na+${cifKey.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}@example.com`;
 }
@@ -172,7 +183,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
   }
 });
 
-router.post("/", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const parsed = borrowerSchema.safeParse(req.body);
@@ -217,7 +228,7 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin", "staff"
   }
 });
 
-router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
@@ -225,55 +236,91 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin", "st
       return res.status(400).json({ message: "No member rows provided" });
     }
 
-    let inserted = 0;
-    let updated = 0;
+    const normalizedRows: NormalizedBorrowerImportRow[] = [];
 
-    for (const row of rows) {
-      const parsed = borrowerImportSchema.safeParse(row);
-      if (!parsed.success) continue;
+    for (const row of rows as unknown[]) {
+      const result = borrowerImportSchema.safeParse(row);
+      if (!result.success) continue;
 
-      const branchId = isSuperAdmin(user) ? Number(parsed.data.branchId ?? 0) : userBranchId(user);
+      const payload: BorrowerImportPayload = result.data;
+      const branchId = isSuperAdmin(user) ? Number(payload.branchId ?? 0) : userBranchId(user);
       if (branchId <= 0) continue;
 
-      const existing = await query<{ id: number }>("SELECT id FROM borrowers WHERE cif_key = $1 LIMIT 1", [
-        parsed.data.cifKey.trim()
-      ]);
+      const cifKey = payload.cifKey.trim();
+      const memberName = payload.memberName.trim();
+      const contactInfo = payload.contactInfo.trim();
+      const address = payload.address.trim();
 
-      if (existing.rows.length > 0) {
-        await query(
-          `UPDATE borrowers
-           SET branch_id = $1, member_name = $2, contact_info = $3, address = $4, name = $5, phone = $6, email = $7
-           WHERE id = $8`,
-          [
-            branchId,
-            parsed.data.memberName.trim(),
-            parsed.data.contactInfo.trim(),
-            parsed.data.address.trim(),
-            parsed.data.memberName.trim(),
-            parsed.data.contactInfo.trim(),
-            borrowerEmail(parsed.data.cifKey),
-            existing.rows[0].id
-          ]
-        );
-        updated += 1;
-      } else {
-        await query(
-          `INSERT INTO borrowers (cif_key, branch_id, member_name, contact_info, address, name, phone, email)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            parsed.data.cifKey.trim(),
-            branchId,
-            parsed.data.memberName.trim(),
-            parsed.data.contactInfo.trim(),
-            parsed.data.address.trim(),
-            parsed.data.memberName.trim(),
-            parsed.data.contactInfo.trim(),
-            borrowerEmail(parsed.data.cifKey)
-          ]
-        );
-        inserted += 1;
-      }
+      normalizedRows.push({
+        cifKey,
+        branchId,
+        memberName,
+        contactInfo,
+        address,
+        email: borrowerEmail(cifKey)
+      });
     }
+
+    if (normalizedRows.length === 0) {
+      return res.status(400).json({ message: "No valid member rows provided" });
+    }
+
+    const uniqueRows = Array.from(
+      normalizedRows.reduce((map: Map<string, NormalizedBorrowerImportRow>, row: NormalizedBorrowerImportRow) => {
+        map.set(row.cifKey.toLowerCase(), row);
+        return map;
+      }, new Map<string, NormalizedBorrowerImportRow>()).values()
+    );
+
+    const existingResult = await query<{ cif_key: string }>(
+      "SELECT cif_key FROM borrowers WHERE cif_key = ANY($1::text[])",
+      [uniqueRows.map((row) => row.cifKey)]
+    );
+    const existingCifKeys = new Set(existingResult.rows.map((row) => row.cif_key.toLowerCase()));
+
+    const inserted = uniqueRows.filter((row) => !existingCifKeys.has(row.cifKey.toLowerCase())).length;
+    const updated = uniqueRows.length - inserted;
+
+    await query(
+      `INSERT INTO borrowers (cif_key, branch_id, member_name, contact_info, address, name, phone, email)
+       SELECT
+         item.cif_key,
+         item.branch_id,
+         item.member_name,
+         item.contact_info,
+         item.address,
+         item.member_name,
+         item.contact_info,
+         item.email
+       FROM json_to_recordset($1::json) AS item(
+         cif_key text,
+         branch_id int,
+         member_name text,
+         contact_info text,
+         address text,
+         email text
+       )
+       ON CONFLICT (cif_key) DO UPDATE
+       SET branch_id = EXCLUDED.branch_id,
+           member_name = EXCLUDED.member_name,
+           contact_info = EXCLUDED.contact_info,
+           address = EXCLUDED.address,
+           name = EXCLUDED.name,
+           phone = EXCLUDED.phone,
+           email = EXCLUDED.email`,
+      [
+        JSON.stringify(
+          uniqueRows.map((row) => ({
+            cif_key: row.cifKey,
+            branch_id: row.branchId,
+            member_name: row.memberName,
+            contact_info: row.contactInfo,
+            address: row.address,
+            email: row.email
+          }))
+        )
+      ]
+    );
 
     return res.json({ inserted, updated });
   } catch (error) {

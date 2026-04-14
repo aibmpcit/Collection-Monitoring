@@ -2,7 +2,6 @@ import { MoreVertical, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import * as XLSX from "xlsx";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageMetaStamp } from "../components/PageMetaStamp";
@@ -45,6 +44,13 @@ interface LoanImportSkipRow {
   loanAccountNo: string;
   cifKey: string;
   reason: string;
+}
+
+let xlsxLoader: Promise<typeof import("xlsx")> | null = null;
+
+function loadXlsx() {
+  xlsxLoader ??= import("xlsx");
+  return xlsxLoader;
 }
 
 function parseMoney(value: unknown): number {
@@ -110,8 +116,15 @@ function normalizeDate(value: unknown): string {
   return "";
 }
 
+const pesoFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString()}`;
+  return pesoFormatter.format(value || 0);
 }
 
 function formatDate(value: string): string {
@@ -216,7 +229,7 @@ export function LoansPage() {
   const navigate = useNavigate();
   const isCollector = user?.role === "staff";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
-  const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin" || user?.role === "staff";
+  const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canDeleteLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canDeletePayments = user?.role === "super_admin" || user?.role === "branch_admin";
   const canUseLoanActions = canEditLoans;
@@ -268,6 +281,7 @@ export function LoansPage() {
     typeof window === "undefined" ? 13 : computeRowsPerPage(window.innerHeight)
   );
   const [importBranchId, setImportBranchId] = useState(0);
+  const [membersNeedRefresh, setMembersNeedRefresh] = useState(false);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === form.borrowerId) ?? null,
@@ -420,6 +434,17 @@ export function LoansPage() {
     });
   }
 
+  async function loadMembers() {
+    const memberData = await apiRequest<Borrower[]>("/borrowers");
+    setMembers(memberData);
+    setMembersNeedRefresh(false);
+  }
+
+  async function loadLoans() {
+    const loanData = await apiRequest<LoanRow[]>("/loans");
+    setLoans(loanData);
+  }
+
   async function loadData() {
     const [memberData, loanData, paymentsData, branchData] = await Promise.all([
       apiRequest<Borrower[]>("/borrowers"),
@@ -428,15 +453,15 @@ export function LoansPage() {
       apiRequest<Branch[]>("/branches").catch(() => [])
     ]);
     setMembers(memberData);
+    setMembersNeedRefresh(false);
     setLoans(loanData);
     setPaymentRecords(paymentsData);
     setBranches(branchData);
   }
 
   async function refreshLoanImportData() {
-    const [memberData, loanData] = await Promise.all([apiRequest<Borrower[]>("/borrowers"), apiRequest<LoanRow[]>("/loans")]);
-    setMembers(memberData);
-    setLoans(loanData);
+    await loadLoans();
+    setMembersNeedRefresh(true);
   }
 
   useEffect(() => {
@@ -491,6 +516,7 @@ export function LoansPage() {
 
     try {
       const buffer = await file.arrayBuffer();
+      const XLSX = await loadXlsx();
       const workbook = XLSX.read(buffer, { type: "array" });
       const firstSheet = workbook.SheetNames[0];
       const sheet = workbook.Sheets[firstSheet];
@@ -565,6 +591,9 @@ export function LoansPage() {
   async function openCreateModal() {
     setError("");
     setMessage("");
+    if (membersNeedRefresh) {
+      await loadMembers();
+    }
     setEditingId(null);
     setForm(EMPTY_FORM);
     setIsFormOpen(true);
@@ -576,6 +605,7 @@ export function LoansPage() {
     setMessage("");
     setLoanImportFile(null);
     setLoanImportInputKey((current) => current + 1);
+    void loadXlsx();
     if (user?.role === "super_admin" && importBranchId === 0 && branches.length > 0) {
       setImportBranchId(branches[0].id);
     }
@@ -589,9 +619,12 @@ export function LoansPage() {
     setIsImportOpen(false);
   }
 
-  function startEdit(loan: LoanRow) {
+  async function startEdit(loan: LoanRow) {
     setError("");
     setMessage("");
+    if (membersNeedRefresh) {
+      await loadMembers();
+    }
     setEditingId(loan.id);
     setForm({
       borrowerId: loan.borrowerId,
@@ -896,7 +929,7 @@ export function LoansPage() {
       setPaymentAmount("");
       setPaymentOrNo("");
       await loadPayments(paymentLoan.id);
-      setMessage("Payment note recorded.");
+      setMessage("Payment recorded.");
     } catch (e) {
       setPaymentError(e instanceof Error ? e.message : "Unable to record payment");
     }
@@ -1020,7 +1053,7 @@ export function LoansPage() {
 
               <div className="mb-3 flex items-center justify-between gap-2">
                 <span className={loanStatusClass(mobileLoanPreview.status)}>{mobileLoanPreview.status}</span>
-                <p className="text-sm font-semibold text-slate-700">${mobileLoanPreview.loanAmount.toLocaleString()}</p>
+                <p className="text-sm font-semibold text-slate-700">{formatCurrency(mobileLoanPreview.loanAmount)}</p>
               </div>
 
               <div className="mobile-record-grid">
@@ -1028,10 +1061,11 @@ export function LoansPage() {
                 <LoanRecordField label="Loan Type" value={mobileLoanPreview.loanType} />
                 <LoanRecordField label="Date Release" value={formatDate(mobileLoanPreview.dateRelease)} />
                 <LoanRecordField label="Maturity Date" value={formatDate(mobileLoanPreview.maturityDate)} />
-                <LoanRecordField label="Principal Due" value={`$${mobileLoanPreview.principalDue.toLocaleString()}`} />
-                <LoanRecordField label="Penalty Due" value={`$${mobileLoanPreview.penaltyDue.toLocaleString()}`} />
-                <LoanRecordField label="Interest" value={`$${mobileLoanPreview.interest.toLocaleString()}`} />
-                <LoanRecordField label="Other Charges" value={`$${mobileLoanPreview.otherCharges.toLocaleString()}`} />
+                <LoanRecordField label="Loan Amount" value={formatCurrency(mobileLoanPreview.loanAmount)} />
+                <LoanRecordField label="Principal Due" value={formatCurrency(mobileLoanPreview.principalDue)} />
+                <LoanRecordField label="Penalty Due" value={formatCurrency(mobileLoanPreview.penaltyDue)} />
+                <LoanRecordField label="Interest" value={formatCurrency(mobileLoanPreview.interest)} />
+                <LoanRecordField label="Other Charges" value={formatCurrency(mobileLoanPreview.otherCharges)} />
                 <LoanRecordField label="PAR Age" value={mobileLoanPreview.parAge} />
                 <LoanRecordField label="Contact" value={mobileLoanPreview.contactInfo || "-"} />
                 <LoanRecordField label="Address" value={mobileLoanPreview.address || "-"} />
@@ -1067,7 +1101,7 @@ export function LoansPage() {
                     void openPaymentModal(mobileLoanPreview);
                   }}
                 >
-                  Payment Notes
+                  Add Payments
                 </button>
               </div>
             </div>
@@ -1230,7 +1264,7 @@ export function LoansPage() {
             <div className="modal-card max-w-2xl">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-lg font-semibold">Loan Payment</h3>
+                  <h3 className="text-lg font-semibold">Add Payments</h3>
                   <p className="text-xs text-black/70">
                     {paymentLoan.loanAccountNo} | {paymentLoan.memberName}
                   </p>
@@ -1295,8 +1329,8 @@ export function LoansPage() {
                         <p className="text-xs font-semibold text-black/70">{item.paymentId}</p>
                         <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
                         <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
-                        <p className="text-sm font-semibold">${item.amount.toLocaleString()}</p>
-                        <p className="mt-1 text-xs text-black/60">{new Date(item.collectedAt).toLocaleString()}</p>
+                        <p className="text-sm font-semibold">{formatCurrency(item.amount)}</p>
+                        <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
                       </li>
                     ))}
                   </ul>
@@ -1356,13 +1390,13 @@ export function LoansPage() {
     <ConfirmDialog
       open={paymentBulkDeleteIds.length > 0}
       tone="danger"
-      title="Delete selected payment notes?"
+      title="Delete selected payments?"
       description={
         paymentBulkDeleteIds.length > 0
-          ? `${paymentBulkDeleteIds.length} selected payment note(s) will be deleted.`
+          ? `${paymentBulkDeleteIds.length} selected payment record(s) will be deleted.`
           : ""
       }
-      confirmLabel={isBulkPaymentDeletePending ? "Deleting..." : "Delete Selected Payment Notes"}
+      confirmLabel={isBulkPaymentDeletePending ? "Deleting..." : "Delete Selected Payments"}
       cancelLabel="Cancel"
       disabled={isBulkPaymentDeletePending}
       onCancel={() => {
@@ -1404,7 +1438,7 @@ export function LoansPage() {
                 className="action-menu-item"
                 onClick={() => {
                   setOpenMenuLoan(null);
-                  startEdit(activeMenuLoan);
+                  void startEdit(activeMenuLoan);
                 }}
               >
                 Edit
@@ -1441,7 +1475,7 @@ export function LoansPage() {
 
       <PageHeader
         title="Collections"
-        subtitle={isCollector ? "Review assigned loan records and open each account for payment notes and remarks." : "Manage loans and open each record for collector payment notes and loan remarks."}
+        subtitle={isCollector ? "Review assigned loan records and open each account to add payments and remarks." : "Manage loan records and open each account for payments and loan remarks."}
         eyebrow="Loan Operations"
         actions={<PageMetaStamp />}
       />
@@ -1450,7 +1484,7 @@ export function LoansPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
-            <p className="text-xs text-slate-600">{isCollector ? "Open a loan to review details, add remarks, and record payment notes." : "Manage loan entries and collector payment notes."}</p>
+            <p className="text-xs text-slate-600">{isCollector ? "Open a loan to review details, add remarks, and record payments." : "Manage loan entries and recorded payments."}</p>
           </div>
           {canAddLoans && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1465,7 +1499,7 @@ export function LoansPage() {
               <button
                 type="button"
                 className="btn-primary w-full sm:w-auto"
-                onClick={openCreateModal}
+                onClick={() => void openCreateModal()}
                 title="Add a new loan"
               >
                 Add Loan
@@ -1483,15 +1517,17 @@ export function LoansPage() {
           >
             Loan Records
           </button>
-          <button
-            type="button"
-            className={`tab-btn ${
-              activeRecordsTab === "payments" ? "tab-btn-active" : ""
-            }`}
-            onClick={() => setActiveRecordsTab("payments")}
-          >
-            Payment Notes
-          </button>
+          {!isCollector && (
+            <button
+              type="button"
+              className={`tab-btn ${
+                activeRecordsTab === "payments" ? "tab-btn-active" : ""
+              }`}
+              onClick={() => setActiveRecordsTab("payments")}
+            >
+              Payments
+            </button>
+          )}
         </div>
         {importMessage && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
         {message && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
@@ -1553,7 +1589,7 @@ export function LoansPage() {
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <span className={loanStatusClass(loan.status)}>{loan.status}</span>
-                      <span className="text-sm font-semibold text-slate-700">${loan.loanAmount.toLocaleString()}</span>
+                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(loan.loanAmount)}</span>
                     </div>
                   </button>
                 ))}
@@ -1587,11 +1623,11 @@ export function LoansPage() {
                       <LoanRecordField label="Loan Type" value={loan.loanType} />
                       <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
                       <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
-                      <LoanRecordField label="Loan Amount" value={`$${loan.loanAmount.toLocaleString()}`} />
-                      <LoanRecordField label="Principal Due" value={`$${loan.principalDue.toLocaleString()}`} />
-                      <LoanRecordField label="Penalty Due" value={`$${loan.penaltyDue.toLocaleString()}`} />
-                      <LoanRecordField label="Interest" value={`$${loan.interest.toLocaleString()}`} />
-                      <LoanRecordField label="Other Charges" value={`$${loan.otherCharges.toLocaleString()}`} />
+                      <LoanRecordField label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
+                      <LoanRecordField label="Principal Due" value={formatCurrency(loan.principalDue)} />
+                      <LoanRecordField label="Penalty Due" value={formatCurrency(loan.penaltyDue)} />
+                      <LoanRecordField label="Interest" value={formatCurrency(loan.interest)} />
+                      <LoanRecordField label="Other Charges" value={formatCurrency(loan.otherCharges)} />
                       <LoanRecordField label="PAR Age" value={loan.parAge} />
                       <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
                       <LoanRecordField label="Address" value={loan.address || "-"} />
@@ -1607,7 +1643,7 @@ export function LoansPage() {
                         Open Loan
                       </button>
                       {canEditLoans && (
-                        <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => startEdit(loan)}>
+                        <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => void startEdit(loan)}>
                           Edit
                         </button>
                       )}
@@ -1719,11 +1755,11 @@ export function LoansPage() {
                       </td>
                       <td>{new Date(loan.dateRelease).toLocaleDateString()}</td>
                       <td>{new Date(loan.maturityDate).toLocaleDateString()}</td>
-                      <td>${loan.loanAmount.toLocaleString()}</td>
-                      <td>${loan.principalDue.toLocaleString()}</td>
-                      <td>${loan.penaltyDue.toLocaleString()}</td>
-                      <td>${loan.interest.toLocaleString()}</td>
-                      <td>${loan.otherCharges.toLocaleString()}</td>
+                      <td>{formatCurrency(loan.loanAmount)}</td>
+                      <td>{formatCurrency(loan.principalDue)}</td>
+                      <td>{formatCurrency(loan.penaltyDue)}</td>
+                      <td>{formatCurrency(loan.interest)}</td>
+                      <td>{formatCurrency(loan.otherCharges)}</td>
                       <td>{loan.parAge}</td>
                       <td>
                         <span className={loanStatusClass(loan.status)}>
@@ -1762,7 +1798,7 @@ export function LoansPage() {
                   className="field pl-9"
                   value={paymentQuery}
                   onChange={(event) => setPaymentQuery(event.target.value)}
-                  placeholder="Search payment notes"
+                  placeholder="Search payments"
                 />
               </div>
               {canDeletePayments && (
@@ -1817,14 +1853,14 @@ export function LoansPage() {
 
                   <div className="mobile-record-grid">
                     <LoanRecordField label="OR No" value={row.orNo || "-"} />
-                    <LoanRecordField label="Updated By" value={row.collectedBy || "System"} />
+                    <LoanRecordField label="Collected By" value={row.collectedBy || "System"} />
                     <LoanRecordField label="CIF Key" value={row.cifKey} />
-                    <LoanRecordField label="Amount" value={`$${row.amount.toLocaleString()}`} />
-                    <LoanRecordField label="Collected At" value={new Date(row.collectedAt).toLocaleString()} />
+                    <LoanRecordField label="Amount" value={formatCurrency(row.amount)} />
+                    <LoanRecordField label="Collected At" value={formatDateTime(row.collectedAt)} />
                   </div>
                 </article>
               ))}
-              {filteredPaymentRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No payment notes found.</p>}
+              {filteredPaymentRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No payments found.</p>}
             </div>
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
@@ -1845,7 +1881,7 @@ export function LoansPage() {
                     )}
                     <th>Payment ID</th>
                     <th>OR No</th>
-                    <th>Updated By</th>
+                    <th>Collected By</th>
                     <th>Loan Account No</th>
                     <th>CIF Key</th>
                     <th>Member Name</th>
@@ -1873,13 +1909,13 @@ export function LoansPage() {
                       <td>{row.loanAccountNo}</td>
                       <td>{row.cifKey}</td>
                       <td>{row.memberName}</td>
-                      <td>${row.amount.toLocaleString()}</td>
-                      <td>{new Date(row.collectedAt).toLocaleString()}</td>
+                      <td>{formatCurrency(row.amount)}</td>
+                      <td>{formatDateTime(row.collectedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {filteredPaymentRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No payment notes found.</p>}
+              {filteredPaymentRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No payments found.</p>}
             </div>
             <PaginationControls
               currentPage={paymentPage}

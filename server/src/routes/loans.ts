@@ -387,10 +387,28 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
       const loansByIdBorrower = new Map<string, LoanImportMatchRecord>();
       const loansByCifAccount = new Map<string, LoanImportMatchRecord>();
       const loansByAccountNo = new Map<string, LoanImportMatchRecord>();
+      const loanIdsByBorrowerId = new Map<number, Set<number>>();
+
+      const rememberLoanForBorrower = (borrowerId: number, loanId: number) => {
+        const relatedLoanIds = loanIdsByBorrowerId.get(borrowerId) ?? new Set<number>();
+        relatedLoanIds.add(loanId);
+        loanIdsByBorrowerId.set(borrowerId, relatedLoanIds);
+      };
+
+      const forgetLoanForBorrower = (borrowerId: number, loanId: number) => {
+        const relatedLoanIds = loanIdsByBorrowerId.get(borrowerId);
+        if (!relatedLoanIds) return;
+        relatedLoanIds.delete(loanId);
+        if (relatedLoanIds.size === 0) {
+          loanIdsByBorrowerId.delete(borrowerId);
+        }
+      };
 
       const syncCachedLoansForBorrower = (borrower: BorrowerImportRecord) => {
-        for (const loan of Array.from(loansById.values())) {
-          if (loan.borrower_id !== borrower.id) continue;
+        const relatedLoanIds = Array.from(loanIdsByBorrowerId.get(borrower.id) ?? []);
+        for (const loanId of relatedLoanIds) {
+          const loan = loansById.get(loanId);
+          if (!loan) continue;
           cacheLoan({
             ...loan,
             branch_id: borrower.branch_id,
@@ -421,10 +439,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
           if (previous.loan_account_no) {
             loansByAccountNo.delete(normalizedLoanAccountKey(previous.loan_account_no));
           }
+          forgetLoanForBorrower(previous.borrower_id, previous.id);
         }
 
         loansById.set(loan.id, loan);
         loansByIdBorrower.set(loanIdBorrowerKey(loan.id, loan.borrower_id), loan);
+        rememberLoanForBorrower(loan.borrower_id, loan.id);
         if (loan.cif_key && loan.loan_account_no) {
           loansByCifAccount.set(loanCifAccountKey(loan.cif_key, loan.loan_account_no), loan);
         }

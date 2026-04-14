@@ -197,6 +197,7 @@ export function BorrowerList({
   const hasRemarksAction = canViewRemarks && typeof onRemarks === "function";
   const canOpenActionMenu = hasHistoryAction || hasRemarksAction || canEditDelete;
   const actionItemCount = (hasHistoryAction ? 1 : 0) + (hasRemarksAction ? 1 : 0) + (canEditDelete ? 2 : 0);
+  const isReadOnlyView = !canImport && !canAdd && !canOpenActionMenu && !canBulkDelete;
 
   function toggleMenu(button: HTMLButtonElement, borrowerId: number) {
     const rect = button.getBoundingClientRect();
@@ -247,7 +248,7 @@ export function BorrowerList({
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Member Records</h2>
-            <p className="text-xs text-slate-600">Manage branch member profiles.</p>
+            <p className="text-xs text-slate-600">{isReadOnlyView ? "View branch member profiles." : "Manage branch member profiles."}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {onImport && canImport && (
@@ -416,7 +417,7 @@ export function BorrowerList({
                           </button>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-600">Add only</span>
+                        <span className="text-xs text-slate-600">View only</span>
                       )}
                     </div>
                   </td>

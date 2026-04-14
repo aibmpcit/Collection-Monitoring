@@ -12,7 +12,7 @@ export function PageHeader({ title, subtitle, actions, eyebrow = "Operations Hub
     <header className="page-header">
       <span className="page-eyebrow">{eyebrow}</span>
       <div className="page-header-row">
-        <div>
+        <div className="min-w-0">
           <h1 className="page-title">{title}</h1>
           {subtitle && <p className="page-subtitle">{subtitle}</p>}
         </div>

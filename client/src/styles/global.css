@@ -46,6 +46,7 @@
       radial-gradient(circle at 50% 100%, rgba(59, 130, 246, 0.08), transparent 40%),
       linear-gradient(165deg, #f6f7ef 0%, #edf4ef 50%, #edf3f9 100%);
     background-attachment: fixed;
+    overflow-x: hidden;
   }
 
   body::before {
@@ -152,6 +153,10 @@
 
   .page-actions {
     @apply flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end;
+  }
+
+  .page-actions > * {
+    max-width: 100%;
   }
 
   .glass-pill {
@@ -269,8 +274,10 @@
   }
 
   .table-shell {
-    @apply overflow-auto rounded-2xl border border-slate-200 bg-white/85;
+    @apply max-w-full overflow-auto rounded-2xl border border-slate-200 bg-white/85;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
   .table-clean {
@@ -411,6 +418,59 @@
   .loan-records-scroll::-webkit-scrollbar-thumb {
     background: linear-gradient(180deg, rgba(31, 152, 153, 0.92) 0%, rgba(24, 121, 130, 0.95) 100%);
     border-radius: 9999px;
+  }
+}
+
+@media (max-width: 767px) {
+  @layer components {
+    .app-shell {
+      @apply p-2.5;
+    }
+
+    .content-panel,
+    .page-header,
+    .panel,
+    .modal-card,
+    .side-panel {
+      border-radius: 1.5rem;
+    }
+
+    .content-panel {
+      @apply p-3.5;
+    }
+
+    .page-header {
+      @apply p-4;
+    }
+
+    .page-shell {
+      @apply gap-4;
+    }
+
+    .metric-grid {
+      @apply grid-cols-1;
+    }
+
+    .btn {
+      min-width: 0;
+    }
+
+    .table-shell {
+      border-radius: 1rem;
+    }
+
+    .table-clean {
+      font-size: 0.8125rem;
+    }
+
+    .table-clean th,
+    .table-clean td {
+      padding: 0.65rem 0.75rem;
+    }
+
+    .cell-clip {
+      max-width: 112px;
+    }
   }
 }
 
