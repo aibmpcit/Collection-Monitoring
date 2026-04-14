@@ -62,6 +62,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       id: number;
       cif_key: string | null;
       branch_id: number | null;
+      branch_name: string | null;
       member_name: string | null;
       contact_info: string | null;
       address: string | null;
@@ -90,6 +91,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          b.id,
          b.cif_key,
          b.branch_id,
+         br.name AS branch_name,
          b.member_name,
          b.contact_info,
          b.address,
@@ -114,6 +116,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          latest.due_date,
          latest.status
        FROM borrowers b
+       LEFT JOIN branches br ON br.id = b.branch_id
        LEFT JOIN LATERAL (
          SELECT
            l.id AS loan_id,
@@ -149,6 +152,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
         id: row.id,
         cifKey: row.cif_key ?? "",
         branchId: row.branch_id,
+        branchName: row.branch_name ?? "",
         memberName: row.member_name ?? row.name ?? "",
         contactInfo: row.contact_info ?? row.phone ?? "",
         address: row.address ?? "",

@@ -1,5 +1,5 @@
 import { Upload } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BorrowerList } from "../components/BorrowerList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -121,6 +121,7 @@ export function BorrowersPage() {
   const [remarksSubmitting, setRemarksSubmitting] = useState(false);
   const [remarksError, setRemarksError] = useState("");
   const [importBranchId, setImportBranchId] = useState(0);
+  const [selectedBranchId, setSelectedBranchId] = useState(0);
 
   async function loadBorrowers() {
     const data = await apiRequest<Borrower[]>("/borrowers");
@@ -146,6 +147,14 @@ export function BorrowersPage() {
       setImportBranchId(branches[0].id);
     }
   }, [user?.role, branches, importBranchId]);
+
+  const filteredBorrowers = useMemo(() => {
+    if (user?.role !== "super_admin" || selectedBranchId <= 0) {
+      return borrowers;
+    }
+
+    return borrowers.filter((borrower) => Number(borrower.branchId ?? 0) === selectedBranchId);
+  }, [borrowers, selectedBranchId, user?.role]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -558,7 +567,7 @@ export function BorrowersPage() {
               </button>
             </div>
 
-            <div className="mb-3 grid gap-2 sm:grid-cols-3">
+            <div className="mb-3 grid grid-cols-2 gap-2">
               <div className="surface-soft p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Loan Records</p>
                 <p className="mt-1 text-lg font-semibold text-slate-900">{historyLoans.length}</p>
@@ -567,7 +576,7 @@ export function BorrowersPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Payment Records</p>
                 <p className="mt-1 text-lg font-semibold text-slate-900">{historyPayments.length}</p>
               </div>
-              <div className="surface-soft p-3">
+              <div className="surface-soft col-span-2 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Total Collections</p>
                 <p className="mt-1 text-lg font-semibold text-emerald-700">{formatCurrency(totalPaid)}</p>
               </div>
@@ -865,9 +874,32 @@ export function BorrowersPage() {
       {importMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
       {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {user?.role === "super_admin" && (
+        <section className="panel p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid min-w-0 flex-1 gap-1 text-sm font-medium text-black/80 sm:max-w-xs">
+              Branch Filter
+              <select
+                className="field"
+                value={selectedBranchId}
+                onChange={(event) => setSelectedBranchId(Number(event.target.value))}
+                aria-label="Filter members by branch"
+              >
+                <option value={0}>All Branches</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.code} - {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-slate-600">{filteredBorrowers.length} member(s) in view</p>
+          </div>
+        </section>
+      )}
 
       <BorrowerList
-        borrowers={borrowers}
+        borrowers={filteredBorrowers}
         onEdit={startEdit}
         onDelete={handleDelete}
         onHistory={handleViewHistory}

@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { apiRequest } from "../services/api";
@@ -85,10 +86,12 @@ function BranchField({ label, value }: { label: string; value: string }) {
 export function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [form, setForm] = useState<BranchForm>(EMPTY_FORM);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [credentials, setCredentials] = useState<{ branchName: string; username: string; password: string } | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [branchPendingDelete, setBranchPendingDelete] = useState<Branch | null>(null);
+  const [isDeletePending, setIsDeletePending] = useState(false);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(() =>
@@ -118,7 +121,7 @@ export function BranchesPage() {
     const q = query.trim().toLowerCase();
     if (!q) return branches;
     return branches.filter((branch) =>
-      [branch.code, branch.name, branch.address, branch.branchAdminUsername ?? ""]
+      [branch.code, branch.name, branch.address, String(branch.branchAdminCount ?? 0)]
         .join(" ")
         .toLowerCase()
         .includes(q)
@@ -143,11 +146,26 @@ export function BranchesPage() {
   function openCreateModal() {
     setError("");
     setMessage("");
+    setEditingBranch(null);
     setForm(EMPTY_FORM);
     setIsCreateOpen(true);
   }
 
+  function openEditModal(branch: Branch) {
+    setError("");
+    setMessage("");
+    setEditingBranch(branch);
+    setForm({
+      code: branch.code,
+      name: branch.name,
+      address: branch.address
+    });
+    setIsCreateOpen(true);
+  }
+
   function closeCreateModal() {
+    setEditingBranch(null);
+    setForm(EMPTY_FORM);
     setIsCreateOpen(false);
   }
 
@@ -157,40 +175,53 @@ export function BranchesPage() {
     setMessage("");
 
     try {
-      const response = await apiRequest<{ name: string; branchAdmin?: { username: string; password: string } }>("/branches", "POST", {
-        code: form.code.trim().toUpperCase(),
-        name: form.name.trim(),
-        address: form.address.trim()
-      });
-      setMessage("Branch created.");
-      if (response.branchAdmin) {
-        setCredentials({
-          branchName: response.name,
-          username: response.branchAdmin.username,
-          password: response.branchAdmin.password
+      if (editingBranch) {
+        await apiRequest(`/branches/${editingBranch.id}`, "PATCH", {
+          code: form.code.trim().toUpperCase(),
+          name: form.name.trim(),
+          address: form.address.trim()
         });
+        setMessage(`Branch updated: ${form.name.trim()}`);
+      } else {
+        await apiRequest("/branches", "POST", {
+          code: form.code.trim().toUpperCase(),
+          name: form.name.trim(),
+          address: form.address.trim()
+        });
+        setMessage("Branch created. Add branch admin accounts from the Accounts page.");
       }
+      setEditingBranch(null);
       setForm(EMPTY_FORM);
       setIsCreateOpen(false);
       await loadBranches();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to create branch");
+      setError(e instanceof Error ? e.message : editingBranch ? "Unable to update branch" : "Unable to create branch");
     }
   }
 
-  async function handleShowAdminCredentials(branch: Branch) {
+  function handleDeleteBranch(branch: Branch) {
+    setBranchPendingDelete(branch);
+  }
+
+  async function handleConfirmDeleteBranch() {
+    if (!branchPendingDelete) return;
+    const branch = branchPendingDelete;
     setError("");
     setMessage("");
+    setIsDeletePending(true);
+
     try {
-      const response = await apiRequest<{ username: string; password: string }>(`/branches/${branch.id}/admin-credentials`, "POST");
-      setCredentials({
-        branchName: branch.name,
-        username: response.username,
-        password: response.password
-      });
+      await apiRequest(`/branches/${branch.id}`, "DELETE");
+      setMessage(`Branch deleted: ${branch.name}`);
+      if (editingBranch?.id === branch.id) {
+        closeCreateModal();
+      }
       await loadBranches();
+      setBranchPendingDelete(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to fetch admin credentials");
+      setError(e instanceof Error ? e.message : "Unable to delete branch");
+    } finally {
+      setIsDeletePending(false);
     }
   }
 
@@ -200,7 +231,7 @@ export function BranchesPage() {
       <section className="modal-shell">
         <div className="modal-card max-w-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold">Create Branch</h3>
+            <h3 className="text-lg font-semibold">{editingBranch ? "Edit Branch" : "Create Branch"}</h3>
             <button type="button" className="btn-muted" onClick={closeCreateModal}>
               Close
             </button>
@@ -238,7 +269,7 @@ export function BranchesPage() {
             </label>
             <div className="md:col-span-3">
               <button type="submit" className="btn-primary">
-                Add Branch
+                {editingBranch ? "Save Changes" : "Add Branch"}
               </button>
             </div>
           </form>
@@ -247,43 +278,41 @@ export function BranchesPage() {
       document.body
     );
 
-  const credentialsModal =
-    credentials && (
-      <section className="modal-shell" onClick={() => setCredentials(null)}>
-        <div className="mx-auto mt-4 w-full max-w-md" onClick={(event) => event.stopPropagation()}>
-          <section className="modal-card max-w-md p-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Branch Admin Credentials</h2>
-              <button type="button" className="btn-muted" onClick={() => setCredentials(null)}>
-                Close
-              </button>
-            </div>
-            <p className="break-words text-sm text-black/70">Branch: {credentials.branchName}</p>
-            <p className="break-words text-sm text-black/70">Username: <strong>{credentials.username}</strong></p>
-            <p className="break-words text-sm text-black/70">Password: <strong>{credentials.password}</strong></p>
-            <p className="mt-2 text-xs text-black/60">This branch admin password stays the same unless changed in code/database.</p>
-          </section>
-        </div>
-      </section>
-    );
-
   return (
     <main className="page-shell">
       {createModal}
-      {credentialsModal}
 
       <PageHeader
         title="Branches"
-        subtitle="Manage branch records and branch admin access in one place."
+        subtitle="Manage branch records, then assign one or more branch admins from the Accounts page."
         eyebrow="Network Control"
         actions={<PageMetaStamp />}
+      />
+      <ConfirmDialog
+        open={Boolean(branchPendingDelete)}
+        tone="danger"
+        title="Delete this branch?"
+        description={
+          branchPendingDelete
+            ? `${branchPendingDelete.name} will be removed. Linked users and members will become unassigned from a branch.`
+            : ""
+        }
+        confirmLabel={isDeletePending ? "Deleting..." : "Delete Branch"}
+        cancelLabel="Cancel"
+        disabled={isDeletePending}
+        onCancel={() => {
+          if (!isDeletePending) {
+            setBranchPendingDelete(null);
+          }
+        }}
+        onConfirm={() => void handleConfirmDeleteBranch()}
       />
 
       <section className="panel p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Branch Records</h2>
-            <p className="text-xs text-slate-600">Manage branch details and admin login access.</p>
+            <p className="text-xs text-slate-600">Manage branch details and track how many branch admins are assigned.</p>
           </div>
           <button type="button" className="btn-primary" onClick={openCreateModal}>
             Add Branch
@@ -315,12 +344,15 @@ export function BranchesPage() {
 
               <div className="mobile-record-grid">
                 <BranchField label="Address" value={branch.address || "-"} />
-                <BranchField label="Branch Admin" value={branch.branchAdminUsername || "-"} />
+                <BranchField label="Branch Admins" value={String(branch.branchAdminCount ?? 0)} />
               </div>
 
               <div className="mobile-action-row">
-                <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => void handleShowAdminCredentials(branch)}>
-                  Show Admin Login
+                <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => openEditModal(branch)}>
+                  Edit
+                </button>
+                <button type="button" className="btn-danger btn-page w-full sm:w-auto" onClick={() => handleDeleteBranch(branch)}>
+                  Delete
                 </button>
               </div>
             </article>
@@ -335,7 +367,7 @@ export function BranchesPage() {
                 <th>Code</th>
                 <th>Name</th>
                 <th>Address</th>
-                <th>Branch Admin</th>
+                <th>Branch Admins</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -345,11 +377,16 @@ export function BranchesPage() {
                   <td>{branch.code}</td>
                   <td>{branch.name}</td>
                   <td>{branch.address}</td>
-                  <td>{branch.branchAdminUsername || "-"}</td>
+                  <td>{branch.branchAdminCount ?? 0}</td>
                   <td>
-                    <button type="button" className="btn-muted btn-table" onClick={() => void handleShowAdminCredentials(branch)}>
-                      Show Admin Login
-                    </button>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <button type="button" className="btn-muted btn-table" onClick={() => openEditModal(branch)}>
+                        Edit
+                      </button>
+                      <button type="button" className="btn-danger btn-table" onClick={() => handleDeleteBranch(branch)}>
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

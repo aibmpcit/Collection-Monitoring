@@ -35,14 +35,18 @@ router.get("/overview", authenticate, authorize(["super_admin", "branch_admin"])
          FROM collections c
          INNER JOIN loans l ON l.id = c.loan_id
          INNER JOIN borrowers b ON b.id = l.borrower_id
-         WHERE DATE(c.collected_at) = CURRENT_DATE ${branchFilter}`,
+         WHERE DATE(c.collected_at) = CURRENT_DATE
+           AND l.status != 'closed'
+           ${branchFilter}`,
         params
       ),
       query<{ value: string | number }>(
         `SELECT COALESCE(SUM(COALESCE(l.principal_due, l.principal) + l.interest + COALESCE(l.penalty_due, l.penalty) + COALESCE(l.other_charges, 0)), 0) AS value
          FROM loans l
          INNER JOIN borrowers b ON b.id = l.borrower_id
-         WHERE DATE(COALESCE(l.maturity_date, l.due_date)) = CURRENT_DATE ${branchFilter}`,
+         WHERE DATE(COALESCE(l.maturity_date, l.due_date)) = CURRENT_DATE
+           AND l.status != 'closed'
+           ${branchFilter}`,
         params
       )
     ]);

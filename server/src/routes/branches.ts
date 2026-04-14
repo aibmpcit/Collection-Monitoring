@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query, withTransaction } from "../config/db.js";
+import { query } from "../config/db.js";
 import { authenticate, authorize } from "../middleware/auth.js";
-import { branchAdminPassword, hashPassword, uniqueBranchAdminUsername, verifyPassword } from "../services/access.js";
 
 const router = Router();
 
@@ -19,21 +18,19 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
       code: string;
       name: string;
       address: string | null;
-      branch_admin_username: string | null;
+      branch_admin_count: number;
     }>(
       `SELECT
          b.id,
          b.code,
          b.name,
          b.address,
-         (
-           SELECT u.username
-           FROM users u
-           WHERE u.branch_id = b.id AND u.role = 'branch_admin'
-           ORDER BY u.id ASC
-           LIMIT 1
-         ) AS branch_admin_username
+         COUNT(u.id)::int AS branch_admin_count
        FROM branches b
+       LEFT JOIN users u
+         ON u.branch_id = b.id
+        AND u.role = 'branch_admin'
+       GROUP BY b.id, b.code, b.name, b.address
        ORDER BY b.name ASC`
     );
 
@@ -43,7 +40,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
         code: row.code,
         name: row.name,
         address: row.address ?? "",
-        branchAdminUsername: row.branch_admin_username ?? ""
+        branchAdminCount: row.branch_admin_count
       }))
     );
   } catch (error) {
@@ -58,93 +55,80 @@ router.post("/", authenticate, authorize(["super_admin"]), async (req, res, next
       return res.status(400).json({ message: "Branch code and name are required" });
     }
 
-    const payload = await withTransaction(async (client) => {
-      const branchResult = await client.query<{ id: number }>(
-        "INSERT INTO branches (code, name, address) VALUES ($1, $2, $3) RETURNING id",
-        [parsed.data.code.trim().toUpperCase(), parsed.data.name.trim(), parsed.data.address.trim()]
-      );
+    const result = await query<{ id: number; code: string; name: string; address: string | null }>(
+      "INSERT INTO branches (code, name, address) VALUES ($1, $2, $3) RETURNING id, code, name, address",
+      [parsed.data.code.trim().toUpperCase(), parsed.data.name.trim(), parsed.data.address.trim()]
+    );
 
-      const branchId = branchResult.rows[0].id;
-      const username = await uniqueBranchAdminUsername(client, parsed.data.code, branchId);
-      const plainPassword = branchAdminPassword(parsed.data.code, branchId);
-      const passwordHash = await hashPassword(plainPassword);
-
-      const adminResult = await client.query<{ id: number }>(
-        "INSERT INTO users (username, password_hash, role, branch_id) VALUES ($1, $2, 'branch_admin', $3) RETURNING id",
-        [username, passwordHash, branchId]
-      );
-
-      return {
-        id: branchId,
-        code: parsed.data.code.trim().toUpperCase(),
-        name: parsed.data.name.trim(),
-        address: parsed.data.address.trim(),
-        branchAdmin: {
-          id: adminResult.rows[0].id,
-          username,
-          password: plainPassword
-        }
-      };
+    const branch = result.rows[0];
+    return res.status(201).json({
+      id: branch.id,
+      code: branch.code,
+      name: branch.name,
+      address: branch.address ?? "",
+      branchAdminCount: 0
     });
-
-    return res.status(201).json(payload);
   } catch (error) {
     return next(error);
   }
 });
 
-router.post("/:branchId/admin-credentials", authenticate, authorize(["super_admin"]), async (req, res, next) => {
+router.patch("/:branchId", authenticate, authorize(["super_admin"]), async (req, res, next) => {
   try {
     const branchId = Number(req.params.branchId);
     if (!Number.isInteger(branchId) || branchId <= 0) {
       return res.status(400).json({ message: "Invalid branch id" });
     }
 
-    const branchResult = await query<{ id: number; code: string }>(
-      "SELECT id, code FROM branches WHERE id = $1 LIMIT 1",
-      [branchId]
+    const parsed = branchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Branch code and name are required" });
+    }
+
+    const result = await query<{ id: number; code: string; name: string; address: string | null }>(
+      `UPDATE branches
+       SET code = $1, name = $2, address = $3
+       WHERE id = $4
+       RETURNING id, code, name, address`,
+      [
+        parsed.data.code.trim().toUpperCase(),
+        parsed.data.name.trim(),
+        parsed.data.address.trim(),
+        branchId
+      ]
     );
-    const branch = branchResult.rows[0];
+
+    const branch = result.rows[0];
     if (!branch) {
       return res.status(404).json({ message: "Branch not found" });
     }
 
-    const plainPassword = branchAdminPassword(branch.code, branchId);
-    const accountResult = await query<{ id: number; username: string; password_hash: string }>(
-      "SELECT id, username, password_hash FROM users WHERE branch_id = $1 AND role = 'branch_admin' ORDER BY id ASC LIMIT 1",
-      [branchId]
-    );
+    return res.json({
+      id: branch.id,
+      code: branch.code,
+      name: branch.name,
+      address: branch.address ?? ""
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 
-    const account = accountResult.rows[0];
-    if (account) {
-      const matches = await verifyPassword(plainPassword, account.password_hash);
-      if (!matches) {
-        const passwordHash = await hashPassword(plainPassword);
-        await query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, account.id]);
-      }
-
-      return res.json({
-        branchId,
-        username: account.username,
-        password: plainPassword
-      });
+router.delete("/:branchId", authenticate, authorize(["super_admin"]), async (req, res, next) => {
+  try {
+    const branchId = Number(req.params.branchId);
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      return res.status(400).json({ message: "Invalid branch id" });
     }
 
-    const created = await withTransaction(async (client) => {
-      const username = await uniqueBranchAdminUsername(client, branch.code, branchId);
-      const passwordHash = await hashPassword(plainPassword);
-      await client.query(
-        "INSERT INTO users (username, password_hash, role, branch_id) VALUES ($1, $2, 'branch_admin', $3)",
-        [username, passwordHash, branchId]
-      );
-      return username;
-    });
+    const existing = await query<{ id: number; name: string }>("SELECT id, name FROM branches WHERE id = $1 LIMIT 1", [branchId]);
+    const branch = existing.rows[0];
+    if (!branch) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
 
-    return res.status(201).json({
-      branchId,
-      username: created,
-      password: plainPassword
-    });
+    await query("DELETE FROM branches WHERE id = $1", [branchId]);
+    return res.json({ message: `Branch deleted: ${branch.name}` });
   } catch (error) {
     return next(error);
   }

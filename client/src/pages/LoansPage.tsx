@@ -12,6 +12,7 @@ import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark } from "../
 
 interface LoanRow extends LoanPayload {
   id: number;
+  branchId?: number;
   cifKey: string;
   memberName: string;
   contactInfo: string;
@@ -22,6 +23,7 @@ interface PaymentRecordRow {
   id: number;
   paymentId: string;
   loanId: number;
+  branchId?: number;
   loanAccountNo: string;
   cifKey: string;
   memberName: string;
@@ -68,6 +70,14 @@ function parseInteger(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseWholeNumber(value: unknown): number {
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  const cleaned = raw.replace(/,/g, "");
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
 function normalizeImportedLoanStatus(value: unknown): string {
   const raw = String(value ?? "")
     .trim()
@@ -93,16 +103,40 @@ function describeLoanImportSkip(item: LoanImportSkipRow): string {
 function normalizeDate(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (isoMatch) {
-    const [, y, m, d] = isoMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 0) {
+      const utcDays = Math.floor(serial - 25569);
+      const utcValue = utcDays * 86400 * 1000;
+      const parsed = new Date(utcValue);
+      if (!Number.isNaN(parsed.getTime())) {
+        const y = parsed.getUTCFullYear();
+        const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(parsed.getUTCDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+    }
   }
 
-  const mdYMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdYMatch) {
-    const [, m, d, y] = mdYMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const [, y, first, second] = isoMatch;
+    const firstNumber = Number(first);
+    const secondNumber = Number(second);
+    const month = firstNumber > 12 && secondNumber <= 12 ? second : first;
+    const day = firstNumber > 12 && secondNumber <= 12 ? first : second;
+    return `${y}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const slashMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (slashMatch) {
+    const [, first, second, y] = slashMatch;
+    const firstNumber = Number(first);
+    const secondNumber = Number(second);
+    const month = firstNumber > 12 && secondNumber <= 12 ? second : first;
+    const day = firstNumber > 12 && secondNumber <= 12 ? first : second;
+    return `${y}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
 
   const parsed = new Date(raw);
@@ -282,6 +316,7 @@ export function LoansPage() {
   );
   const [importBranchId, setImportBranchId] = useState(0);
   const [membersNeedRefresh, setMembersNeedRefresh] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState(0);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === form.borrowerId) ?? null,
@@ -290,9 +325,13 @@ export function LoansPage() {
 
   const filteredLoans = useMemo(() => {
     const q = loanQuery.trim().toLowerCase();
-    if (!q) return loans;
-    return loans.filter((loan) =>
-      [
+    return loans.filter((loan) => {
+      if (loan.status === "closed") return false;
+      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId;
+      if (!matchesBranch) return false;
+      if (!q) return true;
+
+      return [
         loan.cifKey,
         loan.loanAccountNo,
         loan.memberName,
@@ -304,15 +343,18 @@ export function LoansPage() {
       ]
         .join(" ")
         .toLowerCase()
-        .includes(q)
-    );
-  }, [loanQuery, loans]);
+        .includes(q);
+    });
+  }, [loanQuery, loans, selectedBranchId, user?.role]);
 
   const filteredPaymentRecords = useMemo(() => {
     const q = paymentQuery.trim().toLowerCase();
-    if (!q) return paymentRecords;
-    return paymentRecords.filter((row) =>
-      [
+    return paymentRecords.filter((row) => {
+      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(row.branchId ?? 0) === selectedBranchId;
+      if (!matchesBranch) return false;
+      if (!q) return true;
+
+      return [
         row.paymentId,
         row.orNo ?? "",
         row.collectedBy ?? "",
@@ -324,9 +366,9 @@ export function LoansPage() {
       ]
         .join(" ")
         .toLowerCase()
-        .includes(q)
-    );
-  }, [paymentQuery, paymentRecords]);
+        .includes(q);
+    });
+  }, [paymentQuery, paymentRecords, selectedBranchId, user?.role]);
 
   const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / rowsPerPage));
   const totalPaymentPages = Math.max(1, Math.ceil(filteredPaymentRecords.length / rowsPerPage));
@@ -544,7 +586,7 @@ export function LoansPage() {
             penaltyDue: parseMoney(normalized["penalty due"] || normalized["penaltydue"] || 0),
             interest: parseMoney(normalized["interest"] || 0),
             otherCharges: parseMoney(normalized["other charges"] || normalized["othercharges"] || 0),
-            parAge: parseMoney(normalized["par age"] || normalized["parage"] || 0),
+            parAge: parseWholeNumber(normalized["par age"] || normalized["parage"] || 0),
             status: normalizeImportedLoanStatus(normalized["status"] || "active"),
             notes: normalized["remarks"] || normalized["notes"] || "",
             ...(user?.role === "super_admin"
@@ -1056,7 +1098,7 @@ export function LoansPage() {
                 <p className="text-sm font-semibold text-slate-700">{formatCurrency(mobileLoanPreview.loanAmount)}</p>
               </div>
 
-              <div className="mobile-record-grid">
+              <div className="mt-3 grid grid-cols-2 gap-2">
                 <LoanRecordField label="CIF Key" value={mobileLoanPreview.cifKey} />
                 <LoanRecordField label="Loan Type" value={mobileLoanPreview.loanType} />
                 <LoanRecordField label="Date Release" value={formatDate(mobileLoanPreview.dateRelease)} />
@@ -1068,8 +1110,12 @@ export function LoansPage() {
                 <LoanRecordField label="Other Charges" value={formatCurrency(mobileLoanPreview.otherCharges)} />
                 <LoanRecordField label="PAR Age" value={mobileLoanPreview.parAge} />
                 <LoanRecordField label="Contact" value={mobileLoanPreview.contactInfo || "-"} />
-                <LoanRecordField label="Address" value={mobileLoanPreview.address || "-"} />
-                <LoanRecordField label="Notes" value={mobileLoanPreview.notes?.trim() ? mobileLoanPreview.notes : "-"} />
+                <div className="col-span-2">
+                  <LoanRecordField label="Address" value={mobileLoanPreview.address || "-"} />
+                </div>
+                <div className="col-span-2">
+                  <LoanRecordField label="Notes" value={mobileLoanPreview.notes?.trim() ? mobileLoanPreview.notes : "-"} />
+                </div>
               </div>
 
               <div className="mobile-action-row">
@@ -1507,6 +1553,29 @@ export function LoansPage() {
             </div>
           )}
         </div>
+        {user?.role === "super_admin" && (
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <label className="grid min-w-0 flex-1 gap-1 text-sm font-medium text-black/80 sm:max-w-xs">
+              Branch Filter
+              <select
+                className="field"
+                value={selectedBranchId}
+                onChange={(event) => setSelectedBranchId(Number(event.target.value))}
+                aria-label="Filter collections by branch"
+              >
+                <option value={0}>All Branches</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.code} - {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-slate-600">
+              {activeRecordsTab === "loans" ? `${filteredLoans.length} loan(s) in view` : `${filteredPaymentRecords.length} payment(s) in view`}
+            </p>
+          </div>
+        )}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
             type="button"

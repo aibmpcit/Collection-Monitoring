@@ -17,6 +17,7 @@ router.get("/overdue", authenticate, async (req: AuthedRequest, res, next) => {
     const result = await query<{
       loan_id: number;
       borrower_id: number;
+      loan_account_no: string | null;
       member_name: string | null;
       name: string | null;
       contact_info: string | null;
@@ -35,6 +36,7 @@ router.get("/overdue", authenticate, async (req: AuthedRequest, res, next) => {
       `SELECT
          l.id AS loan_id,
          b.id AS borrower_id,
+         l.loan_account_no,
          b.member_name,
          b.name,
          b.contact_info,
@@ -66,6 +68,7 @@ router.get("/overdue", authenticate, async (req: AuthedRequest, res, next) => {
         return {
           loanId: row.loan_id,
           borrowerId: row.borrower_id,
+          loanAccountNo: row.loan_account_no ?? "",
           name: row.member_name ?? row.name ?? "",
           phone: row.contact_info ?? row.phone ?? "",
           email: row.email ?? "",

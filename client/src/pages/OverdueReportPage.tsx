@@ -12,6 +12,41 @@ const pesoFormatter = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 2
 });
 
+function formatDate(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
+}
+
+function formatPastDueAge(daysOverdue: number): string {
+  if (daysOverdue >= 365) {
+    const years = Math.floor(daysOverdue / 365);
+    const remainingDays = daysOverdue % 365;
+    const months = Math.floor(remainingDays / 30);
+    return months > 0 ? `${years} yr ${months} mo` : `${years} yr`;
+  }
+
+  if (daysOverdue >= 30) {
+    const months = Math.floor(daysOverdue / 30);
+    const remainingDays = daysOverdue % 30;
+    return remainingDays > 0 ? `${months} mo ${remainingDays} d` : `${months} mo`;
+  }
+
+  return `${daysOverdue} day(s)`;
+}
+
+function riskBadge(daysOverdue: number): { label: string; className: string } {
+  if (daysOverdue >= 180) {
+    return { label: "Critical", className: "status-danger" };
+  }
+  if (daysOverdue >= 90) {
+    return { label: "High", className: "status-danger" };
+  }
+  if (daysOverdue >= 30) {
+    return { label: "Medium", className: "status-warning" };
+  }
+  return { label: "New", className: "status-success" };
+}
+
 function OverdueField({ label, value }: { label: string; value: string }) {
   return (
     <div className="mobile-record-field">
@@ -54,25 +89,25 @@ export function OverdueReportPage() {
   return (
     <main className="page-shell">
       <PageHeader
-        title="Overdue Accounts Report"
-        subtitle="Focus on high-risk borrowers and prioritize follow-up actions."
+        title="Past-Due Accounts Report"
+        subtitle="Review overdue accounts in clearer collection terms so follow-up can be prioritized faster."
         eyebrow="Collections Risk Desk"
         actions={<PageMetaStamp />}
       />
 
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="metric-grid">
+      <section className="metric-grid md:grid-cols-3">
         <article className="panel p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Overdue Accounts</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Past-Due Accounts</p>
           <h3 className="mt-2 text-2xl font-bold text-slate-900">{totals.count.toLocaleString()}</h3>
         </article>
         <article className="panel p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Total Outstanding</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Total Past-Due Balance</p>
           <h3 className="mt-2 text-2xl font-bold text-slate-900">{pesoFormatter.format(totals.totalOutstanding)}</h3>
         </article>
         <article className="panel p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Largest Exposure</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Largest Past-Due Balance</p>
           <h3 className="mt-2 text-2xl font-bold text-slate-900">{pesoFormatter.format(totals.highest)}</h3>
         </article>
       </section>
@@ -80,32 +115,34 @@ export function OverdueReportPage() {
       <section className="panel p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold text-slate-800">Overdue Borrowers</h2>
-            <p className="text-xs text-slate-600">Sorted from API feed for immediate collection follow-up.</p>
+            <h2 className="text-sm font-semibold text-slate-800">Past-Due Accounts</h2>
+            <p className="text-xs text-slate-600">Oldest due dates appear first so the collection team can work the most delayed accounts first.</p>
           </div>
         </div>
 
         <div className="mobile-record-list md:hidden">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const risk = riskBadge(row.daysOverdue);
+            return (
             <article key={row.loanId} className="mobile-record-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="break-words text-sm font-semibold text-slate-900">{row.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">{row.phone || "-"}</p>
+                  <p className="mt-1 text-xs text-slate-500">{row.loanAccountNo || "-"} | {row.phone || "-"}</p>
                 </div>
-                <span className="status-danger gap-1">
+                <span className={`${risk.className} gap-1`}>
                   <AlertOctagon size={12} />
-                  High
+                  {risk.label}
                 </span>
               </div>
 
               <div className="mobile-record-grid">
-                <OverdueField label="Due Date" value={new Date(row.dueDate).toLocaleDateString()} />
-                <OverdueField label="Days Overdue" value={String(row.daysOverdue)} />
-                <OverdueField label="Outstanding" value={pesoFormatter.format(row.totalOutstanding)} />
+                <OverdueField label="Past Due Since" value={formatDate(row.dueDate)} />
+                <OverdueField label="Past Due For" value={formatPastDueAge(row.daysOverdue)} />
+                <OverdueField label="Outstanding Balance" value={pesoFormatter.format(row.totalOutstanding)} />
               </div>
             </article>
-          ))}
+          )})}
           {rows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No overdue accounts found.</p>}
         </div>
 
@@ -113,30 +150,34 @@ export function OverdueReportPage() {
           <table className="table-clean">
             <thead>
               <tr>
-                <th>Borrower</th>
+                <th>Member</th>
+                <th>Loan Account</th>
                 <th>Phone</th>
-                <th>Due Date</th>
-                <th>Days Overdue</th>
-                <th>Total Outstanding</th>
-                <th>Risk</th>
+                <th>Past Due Since</th>
+                <th>Past Due For</th>
+                <th>Outstanding Balance</th>
+                <th>Priority</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const risk = riskBadge(row.daysOverdue);
+                return (
                 <tr key={row.loanId}>
                   <td>{row.name}</td>
+                  <td>{row.loanAccountNo || "-"}</td>
                   <td>{row.phone}</td>
-                  <td>{new Date(row.dueDate).toLocaleDateString()}</td>
-                  <td>{row.daysOverdue}</td>
+                  <td>{formatDate(row.dueDate)}</td>
+                  <td>{formatPastDueAge(row.daysOverdue)}</td>
                   <td>{pesoFormatter.format(row.totalOutstanding)}</td>
                   <td>
-                    <span className="status-danger gap-1">
+                    <span className={`${risk.className} gap-1`}>
                       <AlertOctagon size={12} />
-                      High
+                      {risk.label}
                     </span>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           {rows.length === 0 && <p className="p-3 text-sm text-slate-600">No overdue accounts found.</p>}

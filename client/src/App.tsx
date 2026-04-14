@@ -54,7 +54,7 @@ const NAV_ITEMS: NavDefinition[] = [
   },
   {
     to: "/staff",
-    label: "Staff",
+    label: "Accounts",
     icon: <UsersRound size={18} />,
     visible: (role) => role === "super_admin" || role === "branch_admin"
   },
@@ -141,8 +141,8 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
 
   return createPortal(
     <nav
-      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] flex items-center gap-2 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
-      aria-label="Collector navigation"
+      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] flex items-center gap-2 overflow-x-auto rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
+      aria-label="Mobile navigation"
     >
       {navItems.map((item) => {
         const isActive = pathname === item.to || (item.to === "/loans" && pathname.startsWith("/loan-details/"));
@@ -151,7 +151,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
           <NavLink
             key={item.to}
             to={item.to}
-            className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
+            className={`flex min-w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
               isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.28)]" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -164,6 +164,54 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
       })}
     </nav>,
     document.body
+  );
+}
+
+function SimpleMobileSidebar({
+  username,
+  role,
+  navItems,
+  onLogout,
+  onNavigate
+}: {
+  username?: string;
+  role?: string;
+  navItems: NavDefinition[];
+  onLogout: () => void;
+  onNavigate: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col rounded-[24px] border border-white/80 bg-white/95 p-4 text-slate-900 shadow-[0_20px_50px_rgba(8,24,36,0.22)] backdrop-blur-xl">
+      <div className="border-b border-slate-200 pb-3">
+        <p className="truncate text-sm font-semibold text-slate-900">{username ?? "Admin"}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{role?.replace("_", " ") ?? "admin"}</p>
+      </div>
+
+      <nav className="mt-3 grid gap-2">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
+                isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.2)]" : "text-slate-700 hover:bg-slate-100"
+              }`
+            }
+          >
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-inherit">
+              {item.icon}
+            </span>
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      <button type="button" className="btn-muted mt-4 w-full justify-center" onClick={onLogout}>
+        <LogOut size={16} />
+        <span>Sign Out</span>
+      </button>
+    </div>
   );
 }
 
@@ -186,6 +234,13 @@ function ShellLayout() {
   function handleLogout() {
     setLogoutConfirmOpen(true);
   }
+
+  const mobileWorkspaceLabel =
+    user?.role === "super_admin"
+      ? "Super Admin Workspace"
+      : user?.role === "branch_admin"
+        ? "Branch Admin Workspace"
+        : "Collector Workspace";
 
   return (
     <div className="app-shell">
@@ -228,37 +283,39 @@ function ShellLayout() {
                 initial={{ opacity: 0, x: -24 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -24 }}
-                transition={{ duration: 0.2 }}
-                className="side-panel fixed left-3 top-3 z-[95] h-[calc(100vh-1.5rem)] w-[min(82vw,320px)] lg:hidden"
+                transition={{ duration: 0.18 }}
+                className="fixed left-3 top-3 z-[95] h-[calc(100vh-1.5rem)] w-[min(78vw,300px)] lg:hidden"
               >
-                <div className="absolute right-3 top-3">
-                  <button
-                    type="button"
-                    className="btn-muted h-8 w-8 rounded-lg border-white/30 bg-white/10 p-0 text-white hover:bg-white/20"
-                    onClick={() => setMobileOpen(false)}
-                    aria-label="Close menu"
-                  >
-                    <X size={16} />
-                  </button>
+                <div className="relative h-full">
+                  <div className="absolute right-3 top-3 z-10">
+                    <button
+                      type="button"
+                      className="btn-muted h-8 w-8 rounded-lg p-0"
+                      onClick={() => setMobileOpen(false)}
+                      aria-label="Close menu"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <SimpleMobileSidebar
+                    username={user?.username}
+                    role={user?.role}
+                    navItems={navItems}
+                    onLogout={handleLogout}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
                 </div>
-                <WorkspaceSidebar
-                  username={user?.username}
-                  role={user?.role}
-                  navItems={navItems}
-                  onLogout={handleLogout}
-                  onNavigate={() => setMobileOpen(false)}
-                />
               </motion.aside>
             </>
           )}
         </AnimatePresence>
 
-        <section className={`content-panel ${isCollectorMobileNav ? "pb-24 lg:pb-6" : ""}`}>
+        <section className="content-panel pb-24 lg:pb-6">
           {isCollectorMobileNav ? (
             <div className="mobile-shell-bar mobile-shell-bar-sticky lg:hidden">
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "Collector"}</p>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Collector Workspace</p>
+                <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "User"}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">{mobileWorkspaceLabel}</p>
               </div>
               <button type="button" className="btn-muted h-9 gap-1.5 px-3" onClick={handleLogout} aria-label="Sign out">
                 <LogOut size={15} />
@@ -266,12 +323,15 @@ function ShellLayout() {
               </button>
             </div>
           ) : (
-            <div className="mobile-shell-bar lg:hidden">
+            <div className="mobile-shell-bar mobile-shell-bar-sticky lg:hidden">
               <button type="button" className="btn-muted h-9 w-9 p-0" onClick={() => setMobileOpen(true)} aria-label="Open menu">
                 <Menu size={16} />
               </button>
-              <span />
-              <span />
+              <div className="min-w-0 flex-1 text-center">
+                <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "Admin"}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">{mobileWorkspaceLabel}</p>
+              </div>
+              <span className="h-9 w-9" />
             </div>
           )}
 

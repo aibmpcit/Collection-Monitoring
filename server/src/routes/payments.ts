@@ -30,6 +30,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     const result = await query<{
       id: number;
       loan_id: number;
+      branch_id: number | null;
       amount: string | number;
       or_no: string | null;
       collected_at: string;
@@ -41,6 +42,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       `SELECT
          c.id,
          c.loan_id,
+         b.branch_id,
          c.amount,
          c.or_no,
          c.collected_at,
@@ -62,6 +64,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
         id: row.id,
         paymentId: formatPaymentId(row.id),
         loanId: row.loan_id,
+        branchId: Number(row.branch_id ?? 0),
         loanAccountNo: row.loan_account_no,
         cifKey: row.cif_key ?? "",
         memberName: row.member_name ?? "",

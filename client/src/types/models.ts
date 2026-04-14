@@ -13,7 +13,7 @@ export interface Branch {
   code: string;
   name: string;
   address: string;
-  branchAdminUsername?: string;
+  branchAdminCount?: number;
 }
 
 export interface Loan {
@@ -39,6 +39,8 @@ export interface Loan {
 export interface Borrower {
   id: number;
   cifKey: string;
+  branchId?: number | null;
+  branchName?: string | null;
   memberName: string;
   contactInfo: string;
   address: string;
@@ -75,6 +77,7 @@ export interface LoanPayload {
 export interface OverdueAccount {
   loanId: number;
   borrowerId: number;
+  loanAccountNo: string;
   name: string;
   phone: string;
   email: string;

@@ -8,28 +8,38 @@ import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
 import type { Branch, Role } from "../types/models";
 
-interface StaffRow {
+type ManagedRole = Exclude<Role, "super_admin">;
+
+interface AccountRow {
   id: number;
   username: string;
-  role: Role;
+  role: ManagedRole;
   branchId?: number | null;
   branchName?: string | null;
 }
 
-interface StaffForm {
+interface AccountForm {
   username: string;
   password: string;
   branchId: number;
+  role: ManagedRole;
 }
 
-interface StaffEditForm {
+interface AccountEditForm {
   branchId: number;
+  password: string;
 }
 
-const EMPTY_FORM: StaffForm = {
+const EMPTY_FORM: AccountForm = {
   username: "",
   password: "",
-  branchId: 0
+  branchId: 0,
+  role: "staff"
+};
+
+const EMPTY_EDIT_FORM: AccountEditForm = {
+  branchId: 0,
+  password: ""
 };
 
 function computeRowsPerPage(viewportHeight: number): number {
@@ -37,6 +47,10 @@ function computeRowsPerPage(viewportHeight: number): number {
   const rowHeight = 42;
   const rawRows = Math.floor((viewportHeight - reservedHeight) / rowHeight);
   return Math.max(8, Math.min(22, rawRows));
+}
+
+function formatRoleLabel(role: ManagedRole): string {
+  return role === "branch_admin" ? "Branch Admin" : "Collector";
 }
 
 function PaginationControls({
@@ -87,7 +101,7 @@ function PaginationControls({
   );
 }
 
-function StaffField({ label, value }: { label: string; value: string }) {
+function AccountField({ label, value }: { label: string; value: string }) {
   return (
     <div className="mobile-record-field">
       <p className="mobile-record-label">{label}</p>
@@ -100,16 +114,15 @@ export function StaffPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
   const isBranchAdmin = user?.role === "branch_admin";
-  const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [form, setForm] = useState<StaffForm>(EMPTY_FORM);
-  const [editingUserId, setEditingUserId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<StaffEditForm>({ branchId: 0 });
+  const [form, setForm] = useState<AccountForm>(EMPTY_FORM);
+  const [editingAccount, setEditingAccount] = useState<AccountRow | null>(null);
+  const [editForm, setEditForm] = useState<AccountEditForm>(EMPTY_EDIT_FORM);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [credentials, setCredentials] = useState<{ username: string; password: string } | null>(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [staffPendingDelete, setStaffPendingDelete] = useState<StaffRow | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [accountPendingDelete, setAccountPendingDelete] = useState<AccountRow | null>(null);
   const [isDeletePending, setIsDeletePending] = useState(false);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -118,8 +131,8 @@ export function StaffPage() {
   );
 
   async function loadData() {
-    const [staffData, branchData] = await Promise.all([apiRequest<StaffRow[]>("/staff"), apiRequest<Branch[]>("/branches")]);
-    setStaff(staffData);
+    const [accountData, branchData] = await Promise.all([apiRequest<AccountRow[]>("/staff"), apiRequest<Branch[]>("/branches")]);
+    setAccounts(accountData);
     setBranches(branchData);
     if (isSuperAdmin && branchData.length > 0 && form.branchId === 0) {
       setForm((current) => ({ ...current, branchId: branchData[0].id }));
@@ -144,15 +157,18 @@ export function StaffPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const filteredStaff = useMemo(() => {
+  const filteredAccounts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return staff;
-    return staff.filter((row) =>
-      [row.username, row.role, row.branchName ?? ""].join(" ").toLowerCase().includes(q)
+    if (!q) return accounts;
+    return accounts.filter((row) =>
+      [row.username, row.role, formatRoleLabel(row.role), row.branchName ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
     );
-  }, [query, staff]);
+  }, [accounts, query]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredStaff.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(filteredAccounts.length / rowsPerPage));
 
   useEffect(() => {
     setPage(1);
@@ -162,25 +178,42 @@ export function StaffPage() {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
-  const paginatedStaff = useMemo(() => {
+  const paginatedAccounts = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
-    return filteredStaff.slice(start, start + rowsPerPage);
-  }, [filteredStaff, page, rowsPerPage]);
+    return filteredAccounts.slice(start, start + rowsPerPage);
+  }, [filteredAccounts, page, rowsPerPage]);
 
   function openCreateModal() {
     setError("");
     setMessage("");
-    setForm((current) => ({
+    setEditingAccount(null);
+    setEditForm(EMPTY_EDIT_FORM);
+    setForm({
       ...EMPTY_FORM,
       branchId: isSuperAdmin
-        ? (current.branchId || branches[0]?.id || 0)
-        : ((user?.branchId as number) ?? 0)
-    }));
-    setIsCreateOpen(true);
+        ? (form.branchId || branches[0]?.id || 0)
+        : ((user?.branchId as number) ?? 0),
+      role: "staff"
+    });
+    setIsModalOpen(true);
   }
 
-  function closeCreateModal() {
-    setIsCreateOpen(false);
+  function openEditModal(account: AccountRow) {
+    setError("");
+    setMessage("");
+    setEditingAccount(account);
+    setEditForm({
+      branchId: account.branchId ?? branches[0]?.id ?? 0,
+      password: ""
+    });
+    setIsModalOpen(true);
+  }
+
+  function closeModal() {
+    setEditingAccount(null);
+    setEditForm(EMPTY_EDIT_FORM);
+    setForm(EMPTY_FORM);
+    setIsModalOpen(false);
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -189,38 +222,55 @@ export function StaffPage() {
     setMessage("");
 
     try {
-      await apiRequest("/staff", "POST", {
-        username: form.username.trim(),
-        password: form.password,
-        branchId: isSuperAdmin ? form.branchId : user?.branchId
-      });
-      setMessage("Staff account created.");
-      setForm((current) => ({
-        ...EMPTY_FORM,
-        branchId: isSuperAdmin ? current.branchId : ((user?.branchId as number) ?? 0)
-      }));
-      setIsCreateOpen(false);
+      if (editingAccount) {
+        const payload: { branchId: number; password?: string } = {
+          branchId: editForm.branchId
+        };
+        if (editForm.password.trim()) {
+          payload.password = editForm.password;
+        }
+
+        await apiRequest(`/staff/${editingAccount.id}`, "PATCH", payload);
+        setMessage(`Updated account: ${editingAccount.username}`);
+      } else {
+        await apiRequest("/staff", "POST", {
+          username: form.username.trim(),
+          password: form.password,
+          branchId: isSuperAdmin ? form.branchId : user?.branchId,
+          role: isSuperAdmin ? form.role : "staff"
+        });
+        setMessage(`${formatRoleLabel(isSuperAdmin ? form.role : "staff")} account created.`);
+      }
+
+      closeModal();
       await loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to create staff account");
+      setError(
+        e instanceof Error
+          ? e.message
+          : editingAccount
+            ? "Unable to update account"
+            : "Unable to create account"
+      );
     }
   }
 
-  function handleDeleteStaff(row: StaffRow) {
-    setStaffPendingDelete(row);
+  function handleDeleteAccount(row: AccountRow) {
+    setAccountPendingDelete(row);
   }
 
-  async function handleConfirmDeleteStaff() {
-    if (!staffPendingDelete) return;
-    const row = staffPendingDelete;
+  async function handleConfirmDeleteAccount() {
+    if (!accountPendingDelete) return;
+    const row = accountPendingDelete;
     setError("");
     setMessage("");
     setIsDeletePending(true);
+
     try {
       await apiRequest(`/staff/${row.id}`, "DELETE");
       setMessage(`Deleted account: ${row.username}`);
       await loadData();
-      setStaffPendingDelete(null);
+      setAccountPendingDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to delete account");
     } finally {
@@ -228,139 +278,144 @@ export function StaffPage() {
     }
   }
 
-  function startEditStaff(row: StaffRow) {
-    setEditingUserId(row.id);
-    setEditForm({
-      branchId: row.branchId ?? 0
-    });
-  }
+  const modalTitle = editingAccount
+    ? `Edit ${formatRoleLabel(editingAccount.role)}`
+    : `Create ${formatRoleLabel(isSuperAdmin ? form.role : "staff")}`;
 
-  function cancelEditStaff() {
-    setEditingUserId(null);
-    setEditForm({ branchId: 0 });
-  }
-
-  async function handleUpdateStaff(row: StaffRow) {
-    setError("");
-    setMessage("");
-    try {
-      await apiRequest(`/staff/${row.id}`, "PATCH", {
-        branchId: editForm.branchId
-      });
-      setMessage(`Updated account: ${row.username}`);
-      cancelEditStaff();
-      await loadData();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to update account");
-    }
-  }
-
-  async function handleShowStaffCredentials(row: StaffRow) {
-    setError("");
-    setMessage("");
-    try {
-      const response = await apiRequest<{ username: string; password: string }>(`/staff/${row.id}/credentials`, "POST");
-      setCredentials({
-        username: response.username,
-        password: response.password
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to fetch staff credentials");
-    }
-  }
-
-  const createModal =
-    isCreateOpen &&
+  const modal =
+    isModalOpen &&
     createPortal(
       <section className="modal-shell">
         <div className="modal-card max-w-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold">Create Staff Account</h3>
-            <button type="button" className="btn-muted" onClick={closeCreateModal}>
+            <h3 className="text-lg font-semibold">{modalTitle}</h3>
+            <button type="button" className="btn-muted" onClick={closeModal}>
               Close
             </button>
           </div>
 
-          <form className="grid gap-3 md:grid-cols-3" onSubmit={handleSubmit}>
-            <label className="grid gap-1 text-sm font-medium text-black/80">
-              Username
-              <input
-                className="field"
-                value={form.username}
-                onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium text-black/80">
-              Password
-              <input
-                className="field"
-                type="password"
-                value={form.password}
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                minLength={8}
-                required
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium text-black/80">
-              Branch
-              <select
-                className="field"
-                value={form.branchId}
-                onChange={(event) => setForm((current) => ({ ...current, branchId: Number(event.target.value) }))}
-                disabled={!isSuperAdmin}
-                required
-              >
-                <option value={0}>Select Branch</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.code} - {branch.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="md:col-span-3">
+          <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
+            {editingAccount ? (
+              <>
+                <div className="grid gap-1 text-sm font-medium text-black/80">
+                  <span>Username</span>
+                  <div className="field flex items-center bg-slate-50 text-slate-700">{editingAccount.username}</div>
+                </div>
+                <div className="grid gap-1 text-sm font-medium text-black/80">
+                  <span>Role</span>
+                  <div className="field flex items-center bg-slate-50 text-slate-700">{formatRoleLabel(editingAccount.role)}</div>
+                </div>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Branch
+                  <select
+                    className="field"
+                    value={editForm.branchId}
+                    onChange={(event) => setEditForm((current) => ({ ...current, branchId: Number(event.target.value) }))}
+                    required
+                  >
+                    <option value={0}>Select Branch</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.code} - {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  New Password
+                  <input
+                    className="field"
+                    type="password"
+                    value={editForm.password}
+                    onChange={(event) => setEditForm((current) => ({ ...current, password: event.target.value }))}
+                    minLength={8}
+                    placeholder="Leave blank to keep current password"
+                  />
+                </label>
+                <p className="md:col-span-2 text-xs text-black/65">
+                  Super admin can move this account to another branch and optionally set a new password.
+                </p>
+              </>
+            ) : (
+              <>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Username
+                  <input
+                    className="field"
+                    value={form.username}
+                    onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Password
+                  <input
+                    className="field"
+                    type="password"
+                    value={form.password}
+                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    minLength={8}
+                    required
+                  />
+                </label>
+                {isSuperAdmin && (
+                  <label className="grid gap-1 text-sm font-medium text-black/80">
+                    Role
+                    <select
+                      className="field"
+                      value={form.role}
+                      onChange={(event) => setForm((current) => ({ ...current, role: event.target.value as ManagedRole }))}
+                    >
+                      <option value="staff">Collector</option>
+                      <option value="branch_admin">Branch Admin</option>
+                    </select>
+                  </label>
+                )}
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Branch
+                  <select
+                    className="field"
+                    value={form.branchId}
+                    onChange={(event) => setForm((current) => ({ ...current, branchId: Number(event.target.value) }))}
+                    disabled={!isSuperAdmin}
+                    required
+                  >
+                    <option value={0}>Select Branch</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.code} - {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {isBranchAdmin && (
+                  <p className="md:col-span-2 text-xs text-black/65">
+                    Branch admin can create collector accounts for their own branch only.
+                  </p>
+                )}
+              </>
+            )}
+            <div className="md:col-span-2">
               <button type="submit" className="btn-primary">
-                Add Staff
+                {editingAccount ? "Save Changes" : `Add ${formatRoleLabel(isSuperAdmin ? form.role : "staff")}`}
               </button>
             </div>
           </form>
-          {isBranchAdmin && <p className="mt-2 text-xs text-black/65">Branch admin can create staff for their own branch only.</p>}
         </div>
       </section>,
       document.body
     );
 
-  const credentialsModal =
-    credentials && (
-      <section className="modal-shell" onClick={() => setCredentials(null)}>
-        <div className="mx-auto mt-4 w-full max-w-md" onClick={(event) => event.stopPropagation()}>
-          <section className="modal-card max-w-md p-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Staff Credentials</h2>
-              <button type="button" className="btn-muted" onClick={() => setCredentials(null)}>
-                Close
-              </button>
-            </div>
-            <p className="break-words text-sm text-black/70">Username: <strong>{credentials.username}</strong></p>
-            <p className="break-words text-sm text-black/70">Password: <strong>{credentials.password}</strong></p>
-            <p className="mt-2 text-xs text-black/60">This staff password stays the same unless changed in code/database.</p>
-          </section>
-        </div>
-      </section>
-    );
-
   return (
     <main className="page-shell">
-      {createModal}
-      {credentialsModal}
+      {modal}
       <ConfirmDialog
-        open={Boolean(staffPendingDelete)}
+        open={Boolean(accountPendingDelete)}
         tone="danger"
-        title="Delete this staff account?"
+        title="Delete this account?"
         description={
-          staffPendingDelete
-            ? `${staffPendingDelete.username} will lose access immediately. This action cannot be undone.`
+          accountPendingDelete
+            ? `${accountPendingDelete.username} will lose access immediately. This action cannot be undone.`
             : ""
         }
         confirmLabel={isDeletePending ? "Deleting..." : "Delete Account"}
@@ -368,15 +423,19 @@ export function StaffPage() {
         disabled={isDeletePending}
         onCancel={() => {
           if (!isDeletePending) {
-            setStaffPendingDelete(null);
+            setAccountPendingDelete(null);
           }
         }}
-        onConfirm={() => void handleConfirmDeleteStaff()}
+        onConfirm={() => void handleConfirmDeleteAccount()}
       />
 
       <PageHeader
-        title="Staff"
-        subtitle="Provision staff accounts and manage branch assignment with role-based controls."
+        title="Accounts"
+        subtitle={
+          isSuperAdmin
+            ? "Manage collectors and branch admins, including branch assignment and password changes."
+            : "Create collector accounts for your branch."
+        }
         eyebrow="Workforce Access"
         actions={<PageMetaStamp />}
       />
@@ -384,11 +443,15 @@ export function StaffPage() {
       <section className="panel p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold text-slate-800">Staff Accounts</h2>
-            <p className="text-xs text-slate-600">Manage staff users and branch assignments.</p>
+            <h2 className="text-sm font-semibold text-slate-800">{isSuperAdmin ? "User Accounts" : "Collector Accounts"}</h2>
+            <p className="text-xs text-slate-600">
+              {isSuperAdmin
+                ? "Super admin can add branch admins, edit collector passwords, and manage branch assignment."
+                : "Create and review collectors assigned to your branch."}
+            </p>
           </div>
           <button type="button" className="btn-primary" onClick={openCreateModal}>
-            Add Staff
+            {isSuperAdmin ? "Add Account" : "Add Collector"}
           </button>
         </div>
 
@@ -406,72 +469,37 @@ export function StaffPage() {
         {error && <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
         <div className="mobile-record-list mt-3 md:hidden">
-          {paginatedStaff.map((row) => (
+          {paginatedAccounts.map((row) => (
             <article key={row.id} className="mobile-record-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="break-words text-sm font-semibold text-slate-900">{row.username}</p>
-                  <p className="mt-1 text-xs text-slate-500">{row.role}</p>
+                  <p className="mt-1 text-xs text-slate-500">{formatRoleLabel(row.role)}</p>
                 </div>
               </div>
 
               <div className="mobile-record-grid">
-                <StaffField label="Branch" value={row.branchName ?? "-"} />
-                {isSuperAdmin && editingUserId === row.id && row.role === "staff" ? (
-                  <label className="mobile-record-field">
-                    <p className="mobile-record-label">Branch Assignment</p>
-                    <select
-                      className="field mt-1"
-                      value={editForm.branchId}
-                      onChange={(event) => setEditForm((current) => ({ ...current, branchId: Number(event.target.value) }))}
-                    >
-                      <option value={0}>Select Branch</option>
-                      {branches.map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.code} - {branch.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <StaffField label="Status" value={row.role === "staff" ? "Active staff account" : "Protected account"} />
-                )}
+                <AccountField label="Role" value={formatRoleLabel(row.role)} />
+                <AccountField label="Branch" value={row.branchName ?? "-"} />
               </div>
 
-              <div className="mobile-action-row">
-                <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => void handleShowStaffCredentials(row)} disabled={row.role !== "staff"}>
-                  Show Login
-                </button>
-                {isSuperAdmin && (
-                  <>
-                    {editingUserId === row.id && row.role === "staff" ? (
-                      <>
-                        <button type="button" className="btn-primary btn-page w-full sm:w-auto" onClick={() => void handleUpdateStaff(row)}>
-                          Save
-                        </button>
-                        <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={cancelEditStaff}>
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn-muted btn-page w-full sm:w-auto"
-                        onClick={() => startEditStaff(row)}
-                        disabled={row.role !== "staff"}
-                      >
-                        Edit
-                      </button>
-                    )}
-                    <button type="button" className="btn-danger btn-page w-full sm:w-auto" onClick={() => void handleDeleteStaff(row)}>
-                      Delete
-                    </button>
-                  </>
-                )}
-              </div>
+              {isSuperAdmin && (
+                <div className="mobile-action-row">
+                  <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => openEditModal(row)}>
+                    Edit
+                  </button>
+                  <button type="button" className="btn-danger btn-page w-full sm:w-auto" onClick={() => handleDeleteAccount(row)}>
+                    Delete
+                  </button>
+                </div>
+              )}
             </article>
           ))}
-          {filteredStaff.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No staff accounts yet.</p>}
+          {filteredAccounts.length === 0 && (
+            <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">
+              {isSuperAdmin ? "No accounts yet." : "No collector accounts yet."}
+            </p>
+          )}
         </div>
 
         <div className="table-shell mt-3 hidden md:block">
@@ -481,64 +509,24 @@ export function StaffPage() {
                 <th>Username</th>
                 <th>Role</th>
                 <th>Branch</th>
-                {(isSuperAdmin || isBranchAdmin) && <th>Action</th>}
+                {isSuperAdmin && <th>Action</th>}
               </tr>
             </thead>
             <tbody>
-              {paginatedStaff.map((row) => (
+              {paginatedAccounts.map((row) => (
                 <tr key={row.id}>
                   <td>{row.username}</td>
-                  <td>{row.role}</td>
-                  <td>
-                    {isSuperAdmin && editingUserId === row.id && row.role === "staff" ? (
-                      <select
-                        className="field"
-                        value={editForm.branchId}
-                        onChange={(event) => setEditForm((current) => ({ ...current, branchId: Number(event.target.value) }))}
-                      >
-                        <option value={0}>Select Branch</option>
-                        {branches.map((branch) => (
-                          <option key={branch.id} value={branch.id}>
-                            {branch.code} - {branch.name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      row.branchName ?? "-"
-                    )}
-                  </td>
-                  {(isSuperAdmin || isBranchAdmin) && (
+                  <td>{formatRoleLabel(row.role)}</td>
+                  <td>{row.branchName ?? "-"}</td>
+                  {isSuperAdmin && (
                     <td>
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" className="btn-muted btn-table" onClick={() => void handleShowStaffCredentials(row)} disabled={row.role !== "staff"}>
-                          Show Login
+                        <button type="button" className="btn-muted btn-table" onClick={() => openEditModal(row)}>
+                          Edit
                         </button>
-                        {isSuperAdmin && (
-                          <>
-                            {editingUserId === row.id && row.role === "staff" ? (
-                              <>
-                                <button type="button" className="btn-primary btn-table" onClick={() => void handleUpdateStaff(row)}>
-                                  Save
-                                </button>
-                                <button type="button" className="btn-muted btn-table" onClick={cancelEditStaff}>
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn-muted btn-table"
-                                onClick={() => startEditStaff(row)}
-                                disabled={row.role !== "staff"}
-                              >
-                                Edit
-                              </button>
-                            )}
-                            <button type="button" className="btn-danger btn-table" onClick={() => void handleDeleteStaff(row)}>
-                              Delete
-                            </button>
-                          </>
-                        )}
+                        <button type="button" className="btn-danger btn-table" onClick={() => handleDeleteAccount(row)}>
+                          Delete
+                        </button>
                       </div>
                     </td>
                   )}
@@ -546,12 +534,14 @@ export function StaffPage() {
               ))}
             </tbody>
           </table>
-          {filteredStaff.length === 0 && <p className="p-3 text-sm text-slate-600">No staff accounts yet.</p>}
+          {filteredAccounts.length === 0 && (
+            <p className="p-3 text-sm text-slate-600">{isSuperAdmin ? "No accounts yet." : "No collector accounts yet."}</p>
+          )}
         </div>
         <PaginationControls
           currentPage={page}
           totalPages={totalPages}
-          totalItems={filteredStaff.length}
+          totalItems={filteredAccounts.length}
           pageSize={rowsPerPage}
           onPageChange={setPage}
         />

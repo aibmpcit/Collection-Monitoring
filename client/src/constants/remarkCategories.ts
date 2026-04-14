@@ -5,7 +5,8 @@ export const REMARK_CATEGORIES = [
   { value: "fully_paid", label: "Fully Paid" },
   { value: "rescheduled_payment", label: "Rescheduled Payment" },
   { value: "sent_legal_notice", label: "Sent Legal Notice" },
-  { value: "promised_to_pay", label: "Promised to Pay" }
+  { value: "promised_to_pay", label: "Promised to Pay" },
+  { value: "others", label: "Others" }
 ] as const;
 
 export type RemarkCategory = (typeof REMARK_CATEGORIES)[number]["value"];

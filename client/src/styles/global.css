@@ -104,6 +104,12 @@
 
   .collector-mobile-bottom-nav {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .collector-mobile-bottom-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .page-shell {

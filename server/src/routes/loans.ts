@@ -15,18 +15,109 @@ import {
 
 const router = Router();
 
+function normalizeImportedWholeNumber(value: unknown): number {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+
+  const raw = String(value).trim().replace(/,/g, "");
+  if (!raw) return 0;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : Number.NaN;
+}
+
+function buildIsoDate(year: number, month: number, day: number): string {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return "";
+  }
+
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() + 1 !== month ||
+    candidate.getUTCDate() !== day
+  ) {
+    return "";
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeImportedDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 0) {
+      const utcDays = Math.floor(serial - 25569);
+      const utcValue = utcDays * 86400 * 1000;
+      const parsed = new Date(utcValue);
+      if (!Number.isNaN(parsed.getTime())) {
+        return buildIsoDate(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+      }
+    }
+  }
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const first = Number(isoMatch[2]);
+    const second = Number(isoMatch[3]);
+    const month = first > 12 && second <= 12 ? second : first;
+    const day = first > 12 && second <= 12 ? first : second;
+    return buildIsoDate(year, month, day);
+  }
+
+  const slashMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (slashMatch) {
+    const first = Number(slashMatch[1]);
+    const second = Number(slashMatch[2]);
+    const year = Number(slashMatch[3]);
+    const month = first > 12 && second <= 12 ? second : first;
+    const day = first > 12 && second <= 12 ? first : second;
+    return buildIsoDate(year, month, day);
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return buildIsoDate(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+  }
+
+  return "";
+}
+
+const normalizedDateSchema = z.preprocess(
+  (value) => normalizeImportedDate(value),
+  z.string().min(1, "Invalid date")
+);
+
+const normalizedWholeNumberSchema = z.preprocess(
+  (value) => normalizeImportedWholeNumber(value),
+  z.number().int().nonnegative()
+);
+
 const loanSchema = z.object({
   borrowerId: z.coerce.number().int().positive(),
   loanAccountNo: z.string().trim().optional().default(""),
   loanType: z.string().trim().min(1),
-  dateRelease: z.string().trim().min(1),
-  maturityDate: z.string().trim().min(1),
+  dateRelease: normalizedDateSchema,
+  maturityDate: normalizedDateSchema,
   loanAmount: z.coerce.number().nonnegative(),
   principalDue: z.coerce.number().nonnegative(),
   penaltyDue: z.coerce.number().nonnegative(),
   interest: z.coerce.number().nonnegative(),
   otherCharges: z.coerce.number().nonnegative().default(0),
-  parAge: z.coerce.number().int().nonnegative().default(0),
+  parAge: normalizedWholeNumberSchema.default(0),
   status: z.enum(["active", "closed", "overdue"]).default("active"),
   notes: z.string().optional().default("")
 });
@@ -36,14 +127,14 @@ const loanImportInsertSchema = z.object({
   loanAccountNo: z.string().trim().min(1),
   memberName: z.string().trim().min(2),
   loanType: z.string().trim().min(1),
-  dateRelease: z.string().trim().min(1),
-  maturityDate: z.string().trim().min(1),
+  dateRelease: normalizedDateSchema,
+  maturityDate: normalizedDateSchema,
   loanAmount: z.coerce.number().nonnegative(),
   principalDue: z.coerce.number().nonnegative(),
   penaltyDue: z.coerce.number().nonnegative(),
   interest: z.coerce.number().nonnegative(),
   otherCharges: z.coerce.number().nonnegative().default(0),
-  parAge: z.coerce.number().int().nonnegative().default(0),
+  parAge: normalizedWholeNumberSchema.default(0),
   status: z.enum(["active", "closed", "overdue"]).default("active"),
   contactInfo: z.string().trim().default(""),
   address: z.string().trim().min(1).default("NA"),
@@ -226,9 +317,10 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     }
 
     const result = await query(
-      `SELECT
+       `SELECT
          l.id,
          l.borrower_id,
+         b.branch_id,
          l.loan_account_no,
          l.loan_type,
          l.date_release,
@@ -258,6 +350,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     return res.json(
       result.rows.map((row) => ({
         ...mapLoanRow(row),
+        branchId: Number(row.branch_id ?? 0),
         cifKey: String(row.cif_key ?? ""),
         memberName: String(row.member_name ?? ""),
         contactInfo: String(row.contact_info ?? ""),

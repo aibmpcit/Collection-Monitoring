@@ -43,6 +43,8 @@ interface DueSoonLoan extends DashboardLoan {
   outstanding: number;
 }
 
+const DASHBOARD_TABLE_PAGE_SIZE = 8;
+
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
   currency: "PHP",
@@ -120,6 +122,29 @@ function dueTone(daysUntilDue: number): string {
   return "status-success";
 }
 
+function overdueLabel(daysOverdue: number): string {
+  if (daysOverdue >= 365) {
+    const years = Math.floor(daysOverdue / 365);
+    const remainingDays = daysOverdue % 365;
+    if (remainingDays >= 30) {
+      const months = Math.floor(remainingDays / 30);
+      return `${years} yr ${months} mo overdue`;
+    }
+    return `${years} yr overdue`;
+  }
+
+  if (daysOverdue >= 30) {
+    const months = Math.floor(daysOverdue / 30);
+    const remainingDays = daysOverdue % 30;
+    if (remainingDays > 0) {
+      return `${months} mo ${remainingDays} d overdue`;
+    }
+    return `${months} mo overdue`;
+  }
+
+  return `${daysOverdue} day(s) overdue`;
+}
+
 function KpiCard({
   label,
   value,
@@ -153,6 +178,54 @@ function KpiCard({
   );
 }
 
+function PaginationControls({
+  currentPage,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange
+}: {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalItems === 0) return null;
+
+  const startItem = (currentPage - 1) * pageSize + 1;
+  const endItem = Math.min(totalItems, currentPage * pageSize);
+
+  return (
+    <div className="pagination-bar">
+      <p className="text-xs text-slate-600">
+        Showing {startItem}-{endItem} of {totalItems}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="btn-muted btn-page"
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <p className="text-xs font-semibold text-slate-700">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          type="button"
+          className="btn-muted btn-page"
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const canViewAnalytics = user?.role === "super_admin" || user?.role === "branch_admin";
@@ -164,6 +237,8 @@ export function DashboardPage() {
   const [loans, setLoans] = useState<DashboardLoan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dueSoonPage, setDueSoonPage] = useState(1);
+  const [overduePage, setOverduePage] = useState(1);
 
   useEffect(() => {
     let active = true;
@@ -213,16 +288,15 @@ export function DashboardPage() {
         (totals, loan) => {
           if (loan.status === "active") totals.active += 1;
           if (loan.status === "overdue") totals.overdue += 1;
-          if (loan.status === "closed") totals.closed += 1;
-          totals.total += 1;
+          if (loan.status !== "closed") totals.total += 1;
           return totals;
         },
-        { active: 0, overdue: 0, closed: 0, total: 0 }
+        { active: 0, overdue: 0, total: 0 }
       ),
     [loans]
   );
 
-  const dueSoon = useMemo<DueSoonLoan[]>(
+  const dueSoonRows = useMemo<DueSoonLoan[]>(
     () =>
       loans
         .filter((loan) => loan.status !== "closed")
@@ -234,21 +308,22 @@ export function DashboardPage() {
             outstanding: loanOutstanding(loan)
           };
         })
-        .filter((loan) => loan.daysUntilDue !== Number.MAX_SAFE_INTEGER)
-        .sort((a, b) => a.daysUntilDue - b.daysUntilDue)
-        .slice(0, 6),
+        .filter((loan) => loan.daysUntilDue !== Number.MAX_SAFE_INTEGER && loan.daysUntilDue >= 0)
+        .sort((a, b) => a.daysUntilDue - b.daysUntilDue),
     [loans]
   );
 
-  const topOverdue = useMemo(
+  const overdueTableRows = useMemo(
     () =>
       [...overdueRows]
-        .sort((a, b) => b.totalOutstanding - a.totalOutstanding)
-        .slice(0, 6),
+        .sort((a, b) => a.daysOverdue - b.daysOverdue || b.totalOutstanding - a.totalOutstanding),
     [overdueRows]
   );
 
-  const recentCollections = useMemo(() => payments.slice(0, 7), [payments]);
+  const recentCollections = useMemo(() => {
+    const openLoanIds = new Set(loans.filter((loan) => loan.status !== "closed").map((loan) => loan.id));
+    return payments.filter((payment) => openLoanIds.has(payment.loanId)).slice(0, 7);
+  }, [loans, payments]);
 
   const openLoans = analytics?.activeLoans ?? statusCounts.active + statusCounts.overdue;
   const overdueRate =
@@ -258,12 +333,32 @@ export function DashboardPage() {
     metrics && metrics.totalPortfolio > 0 ? (metrics.totalOverdue / metrics.totalPortfolio) * 100 : 0;
   const averageOverdue =
     metrics && overdueRows.length > 0 ? metrics.totalOverdue / overdueRows.length : 0;
-  const highestOverdue = topOverdue[0]?.totalOutstanding ?? 0;
+  const highestOverdue = overdueTableRows.reduce((max, row) => Math.max(max, row.totalOutstanding), 0);
+
+  const totalDueSoonPages = Math.max(1, Math.ceil(dueSoonRows.length / DASHBOARD_TABLE_PAGE_SIZE));
+  const totalOverduePages = Math.max(1, Math.ceil(overdueTableRows.length / DASHBOARD_TABLE_PAGE_SIZE));
+
+  useEffect(() => {
+    setDueSoonPage((current) => Math.min(current, totalDueSoonPages));
+  }, [totalDueSoonPages]);
+
+  useEffect(() => {
+    setOverduePage((current) => Math.min(current, totalOverduePages));
+  }, [totalOverduePages]);
+
+  const paginatedDueSoonRows = useMemo(() => {
+    const start = (dueSoonPage - 1) * DASHBOARD_TABLE_PAGE_SIZE;
+    return dueSoonRows.slice(start, start + DASHBOARD_TABLE_PAGE_SIZE);
+  }, [dueSoonPage, dueSoonRows]);
+
+  const paginatedOverdueRows = useMemo(() => {
+    const start = (overduePage - 1) * DASHBOARD_TABLE_PAGE_SIZE;
+    return overdueTableRows.slice(start, start + DASHBOARD_TABLE_PAGE_SIZE);
+  }, [overduePage, overdueTableRows]);
 
   const statusRows = [
     { label: "Active", value: statusCounts.active, bar: "bg-emerald-500" },
-    { label: "Overdue", value: statusCounts.overdue, bar: "bg-red-500" },
-    { label: "Closed", value: statusCounts.closed, bar: "bg-slate-500" }
+    { label: "Overdue", value: statusCounts.overdue, bar: "bg-red-500" }
   ];
 
   return (
@@ -277,7 +372,7 @@ export function DashboardPage() {
 
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="metric-grid">
+      <section className="metric-grid md:grid-cols-3">
         <KpiCard
           label="Total Portfolio"
           value={metrics ? formatCurrency(metrics.totalPortfolio) : loading ? "Loading..." : "-"}
@@ -369,77 +464,6 @@ export function DashboardPage() {
           className="panel p-4"
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-            <h2 className="text-lg font-semibold text-slate-900">High-Risk Accounts</h2>
-            <Link className="glass-pill hover:border-c2/30 hover:text-c2" to="/reports/overdue">
-              View report
-            </Link>
-          </div>
-
-          <div className="mt-3 grid gap-2">
-            {topOverdue.map((row) => (
-              <div key={row.loanId} className="surface-soft flex flex-col items-start justify-between gap-3 p-3 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{row.name}</p>
-                  <p className="text-xs text-slate-600">
-                    {row.daysOverdue} day(s) overdue | Due {formatDate(row.dueDate)}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold text-red-700 sm:text-right">{formatCurrency(row.totalOutstanding)}</p>
-              </div>
-            ))}
-
-            {!loading && topOverdue.length === 0 && (
-              <p className="rounded-lg border border-slate-200 bg-white/60 p-3 text-sm text-slate-600">
-                No overdue accounts found.
-              </p>
-            )}
-          </div>
-        </motion.article>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-2">
-        <motion.article
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, delay: 0.1 }}
-          className="panel p-4"
-        >
-          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-            <h2 className="text-lg font-semibold text-slate-900">Due-Soon Watchlist</h2>
-            <span className="glass-pill">Next 6 nearest due dates</span>
-          </div>
-
-          <div className="mt-3 grid gap-2">
-            {dueSoon.map((loan) => (
-              <div key={loan.id} className="surface-soft flex flex-col items-start justify-between gap-3 p-3 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{loan.memberName}</p>
-                  <p className="text-xs text-slate-600">
-                    {loan.loanAccountNo} | Due {formatDate(loan.maturityDate)}
-                  </p>
-                </div>
-                <div className="text-left sm:text-right">
-                  <p className="text-sm font-semibold text-slate-900">{formatCurrency(loan.outstanding)}</p>
-                  <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
-                </div>
-              </div>
-            ))}
-
-            {!loading && dueSoon.length === 0 && (
-              <p className="rounded-lg border border-slate-200 bg-white/60 p-3 text-sm text-slate-600">
-                No active due dates to show.
-              </p>
-            )}
-          </div>
-        </motion.article>
-
-        <motion.article
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, delay: 0.13 }}
-          className="panel p-4"
-        >
-          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Recent Collections</h2>
             <span className="glass-pill">Latest 7 payments</span>
           </div>
@@ -466,6 +490,176 @@ export function DashboardPage() {
               </p>
             )}
           </div>
+        </motion.article>
+      </section>
+
+      <section className="grid gap-4">
+        <motion.article
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, delay: 0.1 }}
+          className="panel p-4"
+        >
+          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
+            <h2 className="text-lg font-semibold text-slate-900">Upcoming Due Watchlist</h2>
+            <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+          </div>
+
+          <div className="mobile-record-list mt-3 md:hidden">
+            {paginatedDueSoonRows.map((loan) => (
+              <article key={loan.id} className="mobile-record-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                    <p className="mt-1 text-xs text-slate-500">{loan.loanAccountNo}</p>
+                  </div>
+                  <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
+                </div>
+
+                <div className="mobile-record-grid">
+                  <div className="mobile-record-field">
+                    <p className="mobile-record-label">Due Date</p>
+                    <p className="mobile-record-value">{formatDate(loan.maturityDate)}</p>
+                  </div>
+                  <div className="mobile-record-field">
+                    <p className="mobile-record-label">Outstanding</p>
+                    <p className="mobile-record-value">{formatCurrency(loan.outstanding)}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!loading && dueSoonRows.length === 0 && (
+              <p className="rounded-lg border border-slate-200 bg-white/60 p-3 text-sm text-slate-600">
+                No upcoming due dates to show.
+              </p>
+            )}
+          </div>
+
+          <div className="table-shell mt-3 hidden md:block">
+            <table className="table-clean">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Loan Account</th>
+                  <th>Due Date</th>
+                  <th>Status</th>
+                  <th>Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedDueSoonRows.map((loan) => (
+                  <tr key={loan.id}>
+                    <td>{loan.memberName}</td>
+                    <td>{loan.loanAccountNo}</td>
+                    <td>{formatDate(loan.maturityDate)}</td>
+                    <td>
+                      <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
+                    </td>
+                    <td>{formatCurrency(loan.outstanding)}</td>
+                  </tr>
+                ))}
+                {dueSoonRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-4 text-sm text-slate-600">
+                      No upcoming due dates to show.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <PaginationControls
+            currentPage={dueSoonPage}
+            totalPages={totalDueSoonPages}
+            totalItems={dueSoonRows.length}
+            pageSize={DASHBOARD_TABLE_PAGE_SIZE}
+            onPageChange={setDueSoonPage}
+          />
+        </motion.article>
+
+        <motion.article
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, delay: 0.13 }}
+          className="panel p-4"
+        >
+          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
+            <h2 className="text-lg font-semibold text-slate-900">Overdue Accounts Table</h2>
+            <Link className="glass-pill hover:border-c2/30 hover:text-c2" to="/reports/overdue">
+              View full report
+            </Link>
+          </div>
+
+          <div className="mobile-record-list mt-3 md:hidden">
+            {paginatedOverdueRows.map((row) => (
+              <article key={row.loanId} className="mobile-record-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-slate-900">{row.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">{row.loanAccountNo}</p>
+                  </div>
+                  <span className="status-danger">{overdueLabel(row.daysOverdue)}</span>
+                </div>
+
+                <div className="mobile-record-grid">
+                  <div className="mobile-record-field">
+                    <p className="mobile-record-label">Due Date</p>
+                    <p className="mobile-record-value">{formatDate(row.dueDate)}</p>
+                  </div>
+                  <div className="mobile-record-field">
+                    <p className="mobile-record-label">Outstanding</p>
+                    <p className="mobile-record-value">{formatCurrency(row.totalOutstanding)}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!loading && overdueTableRows.length === 0 && (
+              <p className="rounded-lg border border-slate-200 bg-white/60 p-3 text-sm text-slate-600">
+                No overdue accounts found.
+              </p>
+            )}
+          </div>
+
+          <div className="table-shell mt-3 hidden md:block">
+            <table className="table-clean">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Loan Account</th>
+                  <th>Due Date</th>
+                  <th>Past Due</th>
+                  <th>Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedOverdueRows.map((row) => (
+                  <tr key={row.loanId}>
+                    <td>{row.name}</td>
+                    <td>{row.loanAccountNo}</td>
+                    <td>{formatDate(row.dueDate)}</td>
+                    <td>
+                      <span className="status-danger">{overdueLabel(row.daysOverdue)}</span>
+                    </td>
+                    <td>{formatCurrency(row.totalOutstanding)}</td>
+                  </tr>
+                ))}
+                {overdueTableRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-4 text-sm text-slate-600">
+                      No overdue accounts found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <PaginationControls
+            currentPage={overduePage}
+            totalPages={totalOverduePages}
+            totalItems={overdueTableRows.length}
+            pageSize={DASHBOARD_TABLE_PAGE_SIZE}
+            onPageChange={setOverduePage}
+          />
         </motion.article>
       </section>
     </main>

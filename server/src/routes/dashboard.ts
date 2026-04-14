@@ -34,7 +34,9 @@ router.get("/metrics", authenticate, async (req: AuthedRequest, res, next) => {
        FROM collections c
        INNER JOIN loans l ON l.id = c.loan_id
        INNER JOIN borrowers b ON b.id = l.borrower_id
-       WHERE DATE(c.collected_at) = CURRENT_DATE ${branchFilter}`,
+       WHERE DATE(c.collected_at) = CURRENT_DATE
+         AND l.status != 'closed'
+         ${branchFilter}`,
       params
     );
 

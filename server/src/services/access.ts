@@ -10,7 +10,8 @@ export const REMARK_CATEGORIES = new Set([
   "fully_paid",
   "rescheduled_payment",
   "sent_legal_notice",
-  "promised_to_pay"
+  "promised_to_pay",
+  "others"
 ]);
 
 export function toNumber(value: unknown): number {

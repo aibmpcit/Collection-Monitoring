@@ -3,32 +3,37 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
 import {
-  assertBranchAccess,
   getRequestUser,
   hashPassword,
   isSuperAdmin,
-  staffPassword,
-  userBranchId,
-  verifyPassword
+  userBranchId
 } from "../services/access.js";
 
 const router = Router();
 
+const managedRoleSchema = z.enum(["staff", "branch_admin"]);
+
 const createStaffSchema = z.object({
   username: z.string().trim().min(1),
   password: z.string().min(8),
-  branchId: z.coerce.number().int().positive()
+  branchId: z.coerce.number().int().positive(),
+  role: managedRoleSchema.optional()
 });
 
 const updateStaffSchema = z.object({
-  branchId: z.coerce.number().int().positive()
+  branchId: z.coerce.number().int().positive().optional(),
+  password: z.string().min(8).optional()
+}).refine((data) => data.branchId !== undefined || data.password !== undefined, {
+  message: "At least one change is required"
 });
 
 router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const params: unknown[] = [];
-    const where = isSuperAdmin(user) ? "WHERE u.role = 'staff'" : "WHERE u.role = 'staff' AND u.branch_id = $1";
+    const where = isSuperAdmin(user)
+      ? "WHERE u.role IN ('staff', 'branch_admin')"
+      : "WHERE u.role = 'staff' AND u.branch_id = $1";
     if (!isSuperAdmin(user)) {
       params.push(userBranchId(user));
     }
@@ -36,7 +41,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
     const result = await query<{
       id: number;
       username: string;
-      role: "staff";
+      role: "staff" | "branch_admin";
       branch_id: number | null;
       branch_name: string | null;
     }>(
@@ -49,7 +54,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
        FROM users u
        LEFT JOIN branches b ON b.id = u.branch_id
        ${where}
-       ORDER BY u.username ASC`,
+      ORDER BY u.username ASC`,
       params
     );
 
@@ -72,9 +77,10 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
     const user = getRequestUser(req);
     const parsed = createStaffSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Username and password (min 8 chars) are required" });
+      return res.status(400).json({ message: "Username, password (min 8 chars), and branch are required" });
     }
 
+    const role = isSuperAdmin(user) ? (parsed.data.role ?? "staff") : "staff";
     const branchId = isSuperAdmin(user) ? parsed.data.branchId : userBranchId(user);
     if (branchId <= 0) {
       return res.status(400).json({ message: "Branch is required" });
@@ -87,14 +93,14 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
 
     const passwordHash = await hashPassword(parsed.data.password);
     const created = await query<{ id: number }>(
-      "INSERT INTO users (username, password_hash, role, branch_id) VALUES ($1, $2, 'staff', $3) RETURNING id",
-      [parsed.data.username.trim(), passwordHash, branchId]
+      "INSERT INTO users (username, password_hash, role, branch_id) VALUES ($1, $2, $3, $4) RETURNING id",
+      [parsed.data.username.trim(), passwordHash, role, branchId]
     );
 
     return res.status(201).json({
       id: created.rows[0].id,
       username: parsed.data.username.trim(),
-      role: "staff",
+      role,
       branchId
     });
   } catch (error) {
@@ -142,69 +148,39 @@ router.patch("/:userId", authenticate, authorize(["super_admin"]), async (req, r
 
     const parsed = updateStaffSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Valid branch is required" });
-    }
-
-    const branch = await query<{ id: number }>("SELECT id FROM branches WHERE id = $1 LIMIT 1", [parsed.data.branchId]);
-    if (branch.rowCount === 0) {
-      return res.status(404).json({ message: "Branch not found" });
+      return res.status(400).json({ message: "Provide a valid branch or password (min 8 chars)" });
     }
 
     const target = await query<{ id: number; role: string }>("SELECT id, role FROM users WHERE id = $1 LIMIT 1", [targetUserId]);
     if (target.rowCount === 0) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (target.rows[0].role !== "staff") {
-      return res.status(400).json({ message: "Only staff accounts can be edited here" });
+    if (!["staff", "branch_admin"].includes(target.rows[0].role)) {
+      return res.status(400).json({ message: "Only staff or branch admin accounts can be edited here" });
     }
 
-    await query("UPDATE users SET branch_id = $1 WHERE id = $2", [parsed.data.branchId, targetUserId]);
+    const updates: string[] = [];
+    const params: unknown[] = [];
+
+    if (parsed.data.branchId !== undefined) {
+      const branch = await query<{ id: number }>("SELECT id FROM branches WHERE id = $1 LIMIT 1", [parsed.data.branchId]);
+      if (branch.rowCount === 0) {
+        return res.status(404).json({ message: "Branch not found" });
+      }
+
+      params.push(parsed.data.branchId);
+      updates.push(`branch_id = $${params.length}`);
+    }
+
+    if (parsed.data.password) {
+      const passwordHash = await hashPassword(parsed.data.password);
+      params.push(passwordHash);
+      updates.push(`password_hash = $${params.length}`);
+    }
+
+    params.push(targetUserId);
+    await query(`UPDATE users SET ${updates.join(", ")} WHERE id = $${params.length}`, params);
     return res.json({ message: "Account updated" });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post("/:userId/credentials", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
-  try {
-    const user = getRequestUser(req);
-    const targetUserId = Number(req.params.userId);
-    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
-      return res.status(400).json({ message: "Invalid user id" });
-    }
-
-    const targetResult = await query<{
-      id: number;
-      username: string;
-      role: string;
-      password_hash: string;
-      branch_id: number | null;
-    }>(
-      "SELECT id, username, role, password_hash, branch_id FROM users WHERE id = $1 LIMIT 1",
-      [targetUserId]
-    );
-    const target = targetResult.rows[0];
-    if (!target) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    if (target.role !== "staff") {
-      return res.status(400).json({ message: "Only staff account credentials can be shown here" });
-    }
-
-    assertBranchAccess(user, Number(target.branch_id ?? 0));
-
-    const plainPassword = staffPassword(target.username, target.id);
-    const matches = await verifyPassword(plainPassword, target.password_hash);
-    if (!matches) {
-      const passwordHash = await hashPassword(plainPassword);
-      await query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, target.id]);
-    }
-
-    return res.json({
-      id: target.id,
-      username: target.username,
-      password: plainPassword
-    });
   } catch (error) {
     return next(error);
   }
