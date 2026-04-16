@@ -38,6 +38,17 @@ export async function apiRequest<T>(path: string, method: HttpMethod = "GET", bo
     throw error;
   }
 
+  if (response.status === 401 && path !== "/auth/login") {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.replace("/login");
+    }
+
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+
   if (!response.ok) {
     const responseText = await response.text();
 

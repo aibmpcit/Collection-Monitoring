@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
@@ -390,9 +390,15 @@ function ShellLayout() {
   );
 }
 
+function RootRedirect() {
+  const { user } = useAuth();
+  return <Navigate to={user ? "/dashboard" : "/login"} replace />;
+}
+
 export default function App() {
   return (
     <Routes>
+      <Route path="/" element={<RootRedirect />} />
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="*"

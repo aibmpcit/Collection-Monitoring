@@ -32,13 +32,18 @@ function normalizeUserRole<T extends { role?: string }>(user: T): T & { role: Ro
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
+    const token = localStorage.getItem("token");
     const raw = localStorage.getItem("user");
-    if (!raw) return null;
+    if (!raw || !token) return null;
     const parsed = JSON.parse(raw) as User;
     return normalizeUserRole(parsed);
   });
 
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"));
+  const [token, setToken] = useState<string | null>(() => {
+    const storedToken = localStorage.getItem("token");
+    const storedUser = localStorage.getItem("user");
+    return storedToken && storedUser ? storedToken : null;
+  });
 
   async function login(username: string, password: string) {
     const response = await apiRequest<{ token: string; user: Omit<User, "role"> & { role: string } }>("/auth/login", "POST", {
