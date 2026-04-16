@@ -1,7 +1,7 @@
 import { MoreVertical, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageMetaStamp } from "../components/PageMetaStamp";
@@ -261,6 +261,7 @@ function LoanRecordField({ label, value }: { label: string; value: ReactNode }) 
 export function LoansPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isCollector = user?.role === "staff";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin";
@@ -288,7 +289,9 @@ export function LoansPage() {
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
   const [loanQuery, setLoanQuery] = useState("");
-  const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments">("loans");
+  const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments">(
+    !isCollector && searchParams.get("tab") === "payments" ? "payments" : "loans"
+  );
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentQuery, setPaymentQuery] = useState("");
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
@@ -451,6 +454,16 @@ export function LoansPage() {
   useEffect(() => {
     setOpenMenuLoan(null);
   }, [activeRecordsTab, loanPage, loanQuery]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    if (!isCollector && requestedTab === "payments") {
+      setActiveRecordsTab("payments");
+      return;
+    }
+
+    setActiveRecordsTab("loans");
+  }, [isCollector, searchParams]);
 
   useEffect(() => {
     if (user?.role === "super_admin" && importBranchId === 0 && branches.length > 0) {

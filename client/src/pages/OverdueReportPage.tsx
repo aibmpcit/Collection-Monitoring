@@ -1,6 +1,6 @@
 import { AlertOctagon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { apiRequest } from "../services/api";
@@ -164,11 +164,14 @@ function PaginationControls({
 
 export function OverdueReportPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [rows, setRows] = useState<OverdueAccount[]>([]);
   const [loans, setLoans] = useState<DashboardLoan[]>([]);
   const [error, setError] = useState("");
   const [dueSoonPage, setDueSoonPage] = useState(1);
   const [overduePage, setOverduePage] = useState(1);
+  const upcomingSectionRef = useRef<HTMLElement | null>(null);
+  const overdueSectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -262,6 +265,18 @@ export function OverdueReportPage() {
     return overdueRows.slice(start, start + TABLE_PAGE_SIZE);
   }, [overduePage, overdueRows]);
 
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section === "upcoming") {
+      upcomingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (section === "overdue") {
+      overdueSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [searchParams]);
+
   function openLoanDetails(targetLoanId: number) {
     navigate(`/loan-details/${targetLoanId}?from=due-monitoring`);
   }
@@ -292,7 +307,7 @@ export function OverdueReportPage() {
         </article>
       </section>
 
-      <section className="panel p-4">
+      <section ref={upcomingSectionRef} className="panel p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Upcoming Due Accounts</h2>
@@ -386,7 +401,7 @@ export function OverdueReportPage() {
         />
       </section>
 
-      <section className="panel p-4">
+      <section ref={overdueSectionRef} className="panel p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Past-Due Accounts</h2>
