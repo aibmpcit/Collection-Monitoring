@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useSearchParams, useParams } from "react-router-dom";
 import { DuesCard } from "../components/DuesCard";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
@@ -43,6 +43,7 @@ function getLocalDateTimeInputValue(): string {
 
 export function LoanDetailsPage() {
   const { loanId = "0" } = useParams();
+  const [searchParams] = useSearchParams();
   const numericLoanId = Number(loanId);
   const [loan, setLoan] = useState<LoanDetails | null>(null);
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
@@ -61,6 +62,11 @@ export function LoanDetailsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
+  const origin = searchParams.get("from");
+  const backLink =
+    origin === "due-monitoring"
+      ? { to: "/reports/overdue", label: "Back to Due Monitoring" }
+      : { to: "/loans", label: "Back to Collections" };
 
   async function loadRemarks(targetLoanId: number) {
     setRemarksLoading(true);
@@ -196,8 +202,8 @@ export function LoanDetailsPage() {
         eyebrow="Collections"
         actions={
           <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <Link to="/loans" className="btn-muted w-full sm:w-auto">
-              Back to Collections
+            <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
+              {backLink.label}
             </Link>
             <PageMetaStamp />
           </div>

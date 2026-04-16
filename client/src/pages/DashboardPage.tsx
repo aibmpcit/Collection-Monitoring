@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Activity, AlertTriangle, BarChart3, TrendingUp, Users, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { Link } from "react-router-dom";
@@ -30,6 +31,7 @@ interface DashboardLoan {
   id: number;
   loanAccountNo: string;
   memberName: string;
+  loanType: string;
   maturityDate: string;
   principalDue: number;
   penaltyDue: number;
@@ -42,6 +44,22 @@ interface DueSoonLoan extends DashboardLoan {
   daysUntilDue: number;
   outstanding: number;
 }
+
+interface OpenLoanRow extends DashboardLoan {
+  outstanding: number;
+}
+
+type DashboardDetailKey =
+  | "totalPortfolio"
+  | "totalOverdue"
+  | "collectionsToday"
+  | "openLoans"
+  | "overdueRate"
+  | "collectionEfficiency"
+  | "portfolioStatusMix"
+  | "recentCollections"
+  | "upcomingDue"
+  | "overdueAccounts";
 
 const DASHBOARD_TABLE_PAGE_SIZE = 8;
 
@@ -75,6 +93,19 @@ function formatDate(value: string, includeTime = false): string {
   }
 
   return includeTime ? parsed.toLocaleString() : parsed.toLocaleDateString();
+}
+
+function isSameLocalDay(value: string, reference = new Date()): boolean {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return false;
+  }
+
+  return (
+    parsed.getFullYear() === reference.getFullYear() &&
+    parsed.getMonth() === reference.getMonth() &&
+    parsed.getDate() === reference.getDate()
+  );
 }
 
 function loanOutstanding(loan: DashboardLoan): number {
@@ -149,12 +180,14 @@ function KpiCard({
   label,
   value,
   hint,
-  icon
+  icon,
+  onViewMore
 }: {
   label: string;
   value: string;
   hint?: string;
   icon: JSX.Element;
+  onViewMore?: () => void;
 }) {
   return (
     <motion.article
@@ -174,7 +207,53 @@ function KpiCard({
         </span>
       </div>
       {hint && <p className="relative mt-2 text-xs leading-snug text-slate-600">{hint}</p>}
+      {onViewMore && (
+        <button type="button" className="relative mt-3 text-xs font-semibold text-c2 transition hover:text-c2/80" onClick={onViewMore}>
+          View More
+        </button>
+      )}
     </motion.article>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="surface-soft p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function DashboardDetailModal({
+  title,
+  subtitle,
+  onClose,
+  children
+}: {
+  title: string;
+  subtitle: string;
+  onClose: () => void;
+  children: JSX.Element;
+}) {
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <section className="modal-shell" onClick={onClose}>
+      <div className="modal-card max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+            <p className="text-xs text-slate-600">{subtitle}</p>
+          </div>
+          <button type="button" className="btn-muted" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        {children}
+      </div>
+    </section>,
+    document.body
   );
 }
 
@@ -239,6 +318,7 @@ export function DashboardPage() {
   const [error, setError] = useState("");
   const [dueSoonPage, setDueSoonPage] = useState(1);
   const [overduePage, setOverduePage] = useState(1);
+  const [activeDetail, setActiveDetail] = useState<DashboardDetailKey | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -313,6 +393,18 @@ export function DashboardPage() {
     [loans]
   );
 
+  const openLoanRows = useMemo<OpenLoanRow[]>(
+    () =>
+      loans
+        .filter((loan) => loan.status !== "closed")
+        .map((loan) => ({
+          ...loan,
+          outstanding: loanOutstanding(loan)
+        }))
+        .sort((a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.loanAccountNo.localeCompare(b.loanAccountNo, undefined, { sensitivity: "base" })),
+    [loans]
+  );
+
   const overdueTableRows = useMemo(
     () =>
       [...overdueRows]
@@ -324,6 +416,27 @@ export function DashboardPage() {
     const openLoanIds = new Set(loans.filter((loan) => loan.status !== "closed").map((loan) => loan.id));
     return payments.filter((payment) => openLoanIds.has(payment.loanId)).slice(0, 7);
   }, [loans, payments]);
+
+  const latestCollections = useMemo(
+    () =>
+      [...payments]
+        .sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime())
+        .slice(0, 20),
+    [payments]
+  );
+
+  const todayCollections = useMemo(
+    () =>
+      [...payments]
+        .filter((payment) => isSameLocalDay(payment.collectedAt))
+        .sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime()),
+    [payments]
+  );
+
+  const dueTodayRows = useMemo(
+    () => dueSoonRows.filter((loan) => loan.daysUntilDue === 0),
+    [dueSoonRows]
+  );
 
   const openLoans = analytics?.activeLoans ?? statusCounts.active + statusCounts.overdue;
   const overdueRate =
@@ -361,8 +474,341 @@ export function DashboardPage() {
     { label: "Overdue", value: statusCounts.overdue, bar: "bg-red-500" }
   ];
 
+  const detailModal = (() => {
+    if (!activeDetail) return null;
+
+    if (activeDetail === "totalPortfolio") {
+      return (
+        <DashboardDetailModal
+          title="Total Portfolio"
+          subtitle="Outstanding balance across all non-closed loans."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Portfolio Total" value={metrics ? formatCurrency(metrics.totalPortfolio) : "-"} />
+              <DetailStat label="Open Loans" value={openLoanRows.length.toLocaleString()} />
+              <DetailStat label="Average Balance" value={openLoanRows.length > 0 ? formatCurrency((metrics?.totalPortfolio ?? 0) / openLoanRows.length) : "-"} />
+            </div>
+            <div className="grid gap-2">
+              {openLoanRows.map((loan) => (
+                <div key={loan.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                    <p className="text-xs text-slate-600">{loan.loanAccountNo} | {loan.loanType}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-slate-900">{formatCurrency(loan.outstanding)}</p>
+                    <span className={loan.status === "overdue" ? "status-danger" : "status-success"}>{loan.status}</span>
+                  </div>
+                </div>
+              ))}
+              {openLoanRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No open loans found.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "totalOverdue") {
+      return (
+        <DashboardDetailModal
+          title="Total Overdue"
+          subtitle="Full overdue exposure across all past-due accounts."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Overdue Total" value={metrics ? formatCurrency(metrics.totalOverdue) : "-"} />
+              <DetailStat label="Past-Due Accounts" value={overdueTableRows.length.toLocaleString()} />
+              <DetailStat label="Average Exposure" value={formatCurrency(averageOverdue)} />
+            </div>
+            <div className="grid gap-2">
+              {overdueTableRows.map((row) => (
+                <div key={row.loanId} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{row.name}</p>
+                    <p className="text-xs text-slate-600">{row.loanAccountNo} | Due {formatDate(row.dueDate)}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-slate-900">{formatCurrency(row.totalOutstanding)}</p>
+                    <span className="status-danger">{overdueLabel(row.daysOverdue)}</span>
+                  </div>
+                </div>
+              ))}
+              {overdueTableRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No overdue accounts found.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "collectionsToday") {
+      return (
+        <DashboardDetailModal
+          title="Collections Today"
+          subtitle="Payments recorded for today."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Collected Today" value={metrics ? formatCurrency(metrics.collectionsToday) : "-"} />
+              <DetailStat label="Payment Count" value={todayCollections.length.toLocaleString()} />
+              <DetailStat label="Latest Post" value={todayCollections[0] ? formatDate(todayCollections[0].collectedAt, true) : "-"} />
+            </div>
+            <div className="grid gap-2">
+              {todayCollections.map((payment) => (
+                <div key={payment.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{payment.memberName}</p>
+                    <p className="text-xs text-slate-600">{payment.paymentId} | {payment.loanAccountNo}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-emerald-700">{formatCurrency(payment.amount)}</p>
+                    <p className="text-xs text-slate-600">{formatDate(payment.collectedAt, true)}</p>
+                  </div>
+                </div>
+              ))}
+              {todayCollections.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No collections posted today.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "openLoans") {
+      return (
+        <DashboardDetailModal
+          title="Open Loans"
+          subtitle="Active and overdue accounts currently in the portfolio."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Open Loans" value={openLoans.toLocaleString()} />
+              <DetailStat label="Active" value={statusCounts.active.toLocaleString()} />
+              <DetailStat label="Overdue" value={statusCounts.overdue.toLocaleString()} />
+            </div>
+            <div className="grid gap-2">
+              {openLoanRows.map((loan) => (
+                <div key={loan.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                    <p className="text-xs text-slate-600">{loan.loanAccountNo} | Due {formatDate(loan.maturityDate)}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-slate-900">{formatCurrency(loan.outstanding)}</p>
+                    <span className={loan.status === "overdue" ? "status-danger" : "status-success"}>{loan.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "overdueRate") {
+      return (
+        <DashboardDetailModal
+          title="Overdue Rate"
+          subtitle="Share of overdue loans against all open loans."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Overdue Rate" value={formatPercent(overdueRate)} />
+              <DetailStat label="Open Loans" value={openLoans.toLocaleString()} />
+              <DetailStat label="Overdue Loans" value={statusCounts.overdue.toLocaleString()} />
+            </div>
+            <div className="grid gap-3">
+              {statusRows.map((row) => {
+                const percentage = statusCounts.total > 0 ? (row.value / statusCounts.total) * 100 : 0;
+                return (
+                  <div key={row.label} className="surface-soft p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800">{row.label}</p>
+                      <p className="text-sm font-semibold text-slate-700">{row.value.toLocaleString()} ({formatPercent(percentage)})</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-200/80">
+                      <div className={`h-2 rounded-full ${row.bar}`} style={{ width: `${Math.min(100, percentage)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "collectionEfficiency") {
+      return (
+        <DashboardDetailModal
+          title="Collection Efficiency"
+          subtitle="Collected amount versus accounts due today."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Efficiency" value={analytics ? formatPercent(analytics.collectionEfficiency) : "N/A"} />
+              <DetailStat label="Collections Today" value={metrics ? formatCurrency(metrics.collectionsToday) : "-"} />
+              <DetailStat label="Due Today" value={dueTodayRows.length.toLocaleString()} />
+            </div>
+            <div className="grid gap-2">
+              {dueTodayRows.map((loan) => (
+                <div key={loan.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                    <p className="text-xs text-slate-600">{loan.loanAccountNo} | Due today</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-slate-900">{formatCurrency(loan.outstanding)}</p>
+                    <span className="status-warning">Due today</span>
+                  </div>
+                </div>
+              ))}
+              {dueTodayRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans are due today.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "portfolioStatusMix") {
+      return (
+        <DashboardDetailModal
+          title="Portfolio Status Mix"
+          subtitle="Status distribution for active and overdue accounts."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DetailStat label="Average Overdue Exposure" value={formatCurrency(averageOverdue)} />
+              <DetailStat label="Largest Overdue Account" value={formatCurrency(highestOverdue)} />
+            </div>
+            <div className="grid gap-3">
+              {statusRows.map((row) => {
+                const percentage = statusCounts.total > 0 ? (row.value / statusCounts.total) * 100 : 0;
+                return (
+                  <div key={row.label} className="surface-soft p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800">{row.label}</p>
+                      <p className="text-sm font-semibold text-slate-700">{row.value.toLocaleString()} ({formatPercent(percentage)})</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-200/80">
+                      <div className={`h-2 rounded-full ${row.bar}`} style={{ width: `${Math.min(100, percentage)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "recentCollections") {
+      return (
+        <DashboardDetailModal
+          title="Recent Collections"
+          subtitle="Latest posted payments across the workspace."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Latest Payments" value={latestCollections.length.toLocaleString()} />
+              <DetailStat label="Collections Today" value={metrics ? formatCurrency(metrics.collectionsToday) : "-"} />
+              <DetailStat label="Today Count" value={todayCollections.length.toLocaleString()} />
+            </div>
+            <div className="grid gap-2">
+              {latestCollections.map((payment) => (
+                <div key={payment.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{payment.memberName}</p>
+                    <p className="text-xs text-slate-600">{payment.paymentId} | {payment.loanAccountNo}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-emerald-700">{formatCurrency(payment.amount)}</p>
+                    <p className="text-xs text-slate-600">{formatDate(payment.collectedAt, true)}</p>
+                  </div>
+                </div>
+              ))}
+              {latestCollections.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No payments posted yet.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    if (activeDetail === "upcomingDue") {
+      return (
+        <DashboardDetailModal
+          title="Upcoming Due Watchlist"
+          subtitle="Soonest due dates across open loans."
+          onClose={() => setActiveDetail(null)}
+        >
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <DetailStat label="Upcoming Accounts" value={dueSoonRows.length.toLocaleString()} />
+              <DetailStat label="Due Today" value={dueTodayRows.length.toLocaleString()} />
+              <DetailStat label="Nearest Due" value={dueSoonRows[0] ? dueLabel(dueSoonRows[0].daysUntilDue) : "-"} />
+            </div>
+            <div className="grid gap-2">
+              {dueSoonRows.map((loan) => (
+                <div key={loan.id} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                    <p className="text-xs text-slate-600">{loan.loanAccountNo} | Due {formatDate(loan.maturityDate)}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-semibold text-slate-900">{formatCurrency(loan.outstanding)}</p>
+                    <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
+                  </div>
+                </div>
+              ))}
+              {dueSoonRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No upcoming due dates to show.</p>}
+            </div>
+          </div>
+        </DashboardDetailModal>
+      );
+    }
+
+    return (
+      <DashboardDetailModal
+        title="Overdue Accounts"
+        subtitle="Past-due accounts currently needing collection attention."
+        onClose={() => setActiveDetail(null)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <DetailStat label="Past-Due Accounts" value={overdueTableRows.length.toLocaleString()} />
+            <DetailStat label="Total Overdue" value={metrics ? formatCurrency(metrics.totalOverdue) : "-"} />
+            <DetailStat label="Largest Balance" value={formatCurrency(highestOverdue)} />
+          </div>
+          <div className="grid gap-2">
+            {overdueTableRows.map((row) => (
+              <div key={row.loanId} className="surface-soft flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{row.name}</p>
+                  <p className="text-xs text-slate-600">{row.loanAccountNo} | Due {formatDate(row.dueDate)}</p>
+                </div>
+                <div className="text-left sm:text-right">
+                  <p className="text-sm font-semibold text-slate-900">{formatCurrency(row.totalOutstanding)}</p>
+                  <span className="status-danger">{overdueLabel(row.daysOverdue)}</span>
+                </div>
+              </div>
+            ))}
+            {overdueTableRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No overdue accounts found.</p>}
+          </div>
+        </div>
+      </DashboardDetailModal>
+    );
+  })();
+
   return (
     <main className="page-shell">
+      {detailModal}
       <PageHeader
         title="Borrower & Loan Dashboard"
         subtitle="Track balances, risk concentration, and collection movements from a single snapshot."
@@ -378,36 +824,42 @@ export function DashboardPage() {
           value={metrics ? formatCurrency(metrics.totalPortfolio) : loading ? "Loading..." : "-"}
           hint="Outstanding balance across non-closed loans"
           icon={<WalletCards size={18} />}
+          onViewMore={() => setActiveDetail("totalPortfolio")}
         />
         <KpiCard
           label="Total Overdue"
           value={metrics ? formatCurrency(metrics.totalOverdue) : loading ? "Loading..." : "-"}
           hint={metrics ? `${formatPercent(overdueShare)} of portfolio` : "Delinquent exposure"}
           icon={<AlertTriangle size={18} />}
+          onViewMore={() => setActiveDetail("totalOverdue")}
         />
         <KpiCard
           label="Collections Today"
           value={metrics ? formatCurrency(metrics.collectionsToday) : loading ? "Loading..." : "-"}
           hint="Amounts collected in current day"
           icon={<TrendingUp size={18} />}
+          onViewMore={() => setActiveDetail("collectionsToday")}
         />
         <KpiCard
           label="Open Loans"
           value={loading ? "Loading..." : openLoans.toLocaleString()}
           hint="Active + overdue accounts"
           icon={<Users size={18} />}
+          onViewMore={() => setActiveDetail("openLoans")}
         />
         <KpiCard
           label="Overdue Rate"
           value={loading ? "Loading..." : formatPercent(overdueRate)}
           hint="Overdue accounts vs open accounts"
           icon={<BarChart3 size={18} />}
+          onViewMore={() => setActiveDetail("overdueRate")}
         />
         <KpiCard
           label="Collection Efficiency"
           value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "N/A"}
           hint={analytics ? "Collected today vs due today" : "Visible for admin roles"}
           icon={<Activity size={18} />}
+          onViewMore={() => setActiveDetail("collectionEfficiency")}
         />
       </section>
 
@@ -420,7 +872,12 @@ export function DashboardPage() {
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Portfolio Status Mix</h2>
-            <span className="glass-pill">{statusCounts.total} total account(s)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="glass-pill hover:border-c2/30 hover:text-c2" onClick={() => setActiveDetail("portfolioStatusMix")}>
+                View More
+              </button>
+              <span className="glass-pill">{statusCounts.total} total account(s)</span>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3">
@@ -465,7 +922,12 @@ export function DashboardPage() {
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Recent Collections</h2>
-            <span className="glass-pill">Latest 7 payments</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="glass-pill hover:border-c2/30 hover:text-c2" onClick={() => setActiveDetail("recentCollections")}>
+                View More
+              </button>
+              <span className="glass-pill">Latest 7 payments</span>
+            </div>
           </div>
 
           <div className="mt-3 grid gap-2">
@@ -502,7 +964,12 @@ export function DashboardPage() {
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Upcoming Due Watchlist</h2>
-            <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="glass-pill hover:border-c2/30 hover:text-c2" onClick={() => setActiveDetail("upcomingDue")}>
+                View More
+              </button>
+              <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+            </div>
           </div>
 
           <div className="mobile-record-list mt-3 md:hidden">
@@ -585,9 +1052,14 @@ export function DashboardPage() {
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Overdue Accounts Table</h2>
-            <Link className="glass-pill hover:border-c2/30 hover:text-c2" to="/reports/overdue">
-              View full report
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="glass-pill hover:border-c2/30 hover:text-c2" onClick={() => setActiveDetail("overdueAccounts")}>
+                View More
+              </button>
+              <Link className="glass-pill hover:border-c2/30 hover:text-c2" to="/reports/overdue">
+                View full report
+              </Link>
+            </div>
           </div>
 
           <div className="mobile-record-list mt-3 md:hidden">

@@ -216,7 +216,7 @@ export function BorrowersPage() {
   }
 
   function formatBulkDeleteReason(reason: string): string {
-    if (reason === "has_loan_history") return "has loan history";
+    if (reason === "has_loan_history") return "has loan history, including closed loans hidden from the main loan list";
     if (reason === "forbidden") return "outside your branch";
     if (reason === "not_found") return "not found";
     return "delete failed";
@@ -850,7 +850,7 @@ export function BorrowersPage() {
         title="Delete selected members?"
         description={
           borrowersPendingBulkDelete.length > 0
-            ? `${borrowersPendingBulkDelete.length} selected member record(s) will be removed permanently. Members with loan history will be skipped.`
+            ? `${borrowersPendingBulkDelete.length} selected member record(s) will be removed permanently. Members with any loan history, including closed loans hidden from the main loan list, will be skipped.`
             : ""
         }
         confirmLabel={isBulkDeletePending ? "Deleting..." : "Delete Selected Members"}

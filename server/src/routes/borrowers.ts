@@ -441,7 +441,7 @@ router.delete("/:borrowerId", authenticate, authorize(["super_admin", "branch_ad
 
     const loanCount = await query<{ total: string }>("SELECT COUNT(*)::text AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
     if (Number(loanCount.rows[0]?.total ?? 0) > 0) {
-      return res.status(409).json({ message: "Cannot delete borrower with loan history" });
+      return res.status(409).json({ message: "Cannot delete borrower with loan history, including closed loans hidden from the main loan list" });
     }
 
     await query("DELETE FROM borrowers WHERE id = $1", [borrowerId]);

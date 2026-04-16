@@ -66,7 +66,7 @@ const NAV_ITEMS: NavDefinition[] = [
   },
   {
     to: "/reports/overdue",
-    label: "Overdue",
+    label: "Due Monitoring",
     icon: <FileWarning size={18} />,
     visible: (role) => role === "super_admin" || role === "branch_admin"
   }
@@ -155,7 +155,11 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
               isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.28)]" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            <span className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${isActive ? "bg-white/18" : "bg-slate-100 text-slate-700"}`}>
+            <span
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
+                isActive ? "bg-white text-teal-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]" : "bg-slate-100 text-slate-700"
+              }`}
+            >
               {item.icon}
             </span>
             <span className="truncate">{item.label}</span>
@@ -194,15 +198,25 @@ function SimpleMobileSidebar({
             to={item.to}
             onClick={onNavigate}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
+              `group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
                 isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.2)]" : "text-slate-700 hover:bg-slate-100"
               }`
             }
           >
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-inherit">
-              {item.icon}
-            </span>
-            <span>{item.label}</span>
+            {({ isActive }) => (
+              <>
+                <span
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition ${
+                    isActive
+                      ? "bg-white text-teal-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]"
+                      : "bg-slate-100 text-inherit group-hover:bg-white"
+                  }`}
+                >
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+              </>
+            )}
           </NavLink>
         ))}
       </nav>

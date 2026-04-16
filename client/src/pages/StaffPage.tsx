@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { Eye, EyeOff, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -110,6 +110,51 @@ function AccountField({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PasswordInput({
+  value,
+  onChange,
+  placeholder,
+  required = false,
+  minLength,
+  showToggle,
+  visible,
+  onToggle
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  minLength?: number;
+  showToggle: boolean;
+  visible: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="relative">
+      <input
+        className={`field ${showToggle ? "pr-11" : ""}`}
+        type={visible ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        minLength={minLength}
+        placeholder={placeholder}
+        required={required}
+      />
+      {showToggle && (
+        <button
+          type="button"
+          className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-r-xl text-slate-500 transition hover:text-slate-700"
+          onClick={onToggle}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+        >
+          {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function StaffPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
@@ -126,6 +171,8 @@ export function StaffPage() {
   const [isDeletePending, setIsDeletePending] = useState(false);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
   const [rowsPerPage, setRowsPerPage] = useState(() =>
     typeof window === "undefined" ? 13 : computeRowsPerPage(window.innerHeight)
   );
@@ -159,12 +206,17 @@ export function StaffPage() {
 
   const filteredAccounts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return accounts;
-    return accounts.filter((row) =>
-      [row.username, row.role, formatRoleLabel(row.role), row.branchName ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
+    const matches = q
+      ? accounts.filter((row) =>
+          [row.username, row.role, formatRoleLabel(row.role), row.branchName ?? ""]
+            .join(" ")
+            .toLowerCase()
+            .includes(q)
+        )
+      : accounts;
+
+    return [...matches].sort(
+      (a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: "base" }) || formatRoleLabel(a.role).localeCompare(formatRoleLabel(b.role), undefined, { sensitivity: "base" })
     );
   }, [accounts, query]);
 
@@ -188,6 +240,8 @@ export function StaffPage() {
     setMessage("");
     setEditingAccount(null);
     setEditForm(EMPTY_EDIT_FORM);
+    setShowCreatePassword(false);
+    setShowEditPassword(false);
     setForm({
       ...EMPTY_FORM,
       branchId: isSuperAdmin
@@ -202,6 +256,8 @@ export function StaffPage() {
     setError("");
     setMessage("");
     setEditingAccount(account);
+    setShowCreatePassword(false);
+    setShowEditPassword(false);
     setEditForm({
       branchId: account.branchId ?? branches[0]?.id ?? 0,
       password: ""
@@ -213,6 +269,8 @@ export function StaffPage() {
     setEditingAccount(null);
     setEditForm(EMPTY_EDIT_FORM);
     setForm(EMPTY_FORM);
+    setShowCreatePassword(false);
+    setShowEditPassword(false);
     setIsModalOpen(false);
   }
 
@@ -323,13 +381,14 @@ export function StaffPage() {
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   New Password
-                  <input
-                    className="field"
-                    type="password"
+                  <PasswordInput
                     value={editForm.password}
-                    onChange={(event) => setEditForm((current) => ({ ...current, password: event.target.value }))}
+                    onChange={(value) => setEditForm((current) => ({ ...current, password: value }))}
                     minLength={8}
                     placeholder="Leave blank to keep current password"
+                    showToggle={isSuperAdmin}
+                    visible={showEditPassword}
+                    onToggle={() => setShowEditPassword((current) => !current)}
                   />
                 </label>
                 <p className="md:col-span-2 text-xs text-black/65">
@@ -349,13 +408,14 @@ export function StaffPage() {
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Password
-                  <input
-                    className="field"
-                    type="password"
+                  <PasswordInput
                     value={form.password}
-                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    onChange={(value) => setForm((current) => ({ ...current, password: value }))}
                     minLength={8}
                     required
+                    showToggle={isSuperAdmin}
+                    visible={showCreatePassword}
+                    onToggle={() => setShowCreatePassword((current) => !current)}
                   />
                 </label>
                 {isSuperAdmin && (

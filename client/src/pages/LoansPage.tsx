@@ -317,6 +317,24 @@ export function LoansPage() {
   const [importBranchId, setImportBranchId] = useState(0);
   const [membersNeedRefresh, setMembersNeedRefresh] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState(0);
+  const [loanFormBranchId, setLoanFormBranchId] = useState(0);
+
+  const availableLoanMembers = useMemo(() => {
+    const matches =
+      user?.role === "super_admin"
+        ? loanFormBranchId <= 0
+          ? []
+          : members.filter((member) => Number(member.branchId ?? 0) === loanFormBranchId)
+        : (() => {
+            const branchId = Number(user?.branchId ?? loanFormBranchId ?? 0);
+            if (branchId <= 0) return members;
+            return members.filter((member) => Number(member.branchId ?? 0) === branchId);
+          })();
+
+    return [...matches].sort(
+      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.cifKey.localeCompare(b.cifKey, undefined, { sensitivity: "base" })
+    );
+  }, [loanFormBranchId, members, user?.branchId, user?.role]);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === form.borrowerId) ?? null,
@@ -325,7 +343,7 @@ export function LoansPage() {
 
   const filteredLoans = useMemo(() => {
     const q = loanQuery.trim().toLowerCase();
-    return loans.filter((loan) => {
+    const matches = loans.filter((loan) => {
       if (loan.status === "closed") return false;
       const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId;
       if (!matchesBranch) return false;
@@ -345,11 +363,15 @@ export function LoansPage() {
         .toLowerCase()
         .includes(q);
     });
+
+    return [...matches].sort(
+      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.loanAccountNo.localeCompare(b.loanAccountNo, undefined, { sensitivity: "base" })
+    );
   }, [loanQuery, loans, selectedBranchId, user?.role]);
 
   const filteredPaymentRecords = useMemo(() => {
     const q = paymentQuery.trim().toLowerCase();
-    return paymentRecords.filter((row) => {
+    const matches = paymentRecords.filter((row) => {
       const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(row.branchId ?? 0) === selectedBranchId;
       if (!matchesBranch) return false;
       if (!q) return true;
@@ -368,6 +390,10 @@ export function LoansPage() {
         .toLowerCase()
         .includes(q);
     });
+
+    return [...matches].sort(
+      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.paymentId.localeCompare(b.paymentId, undefined, { sensitivity: "base" })
+    );
   }, [paymentQuery, paymentRecords, selectedBranchId, user?.role]);
 
   const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / rowsPerPage));
@@ -432,6 +458,30 @@ export function LoansPage() {
     }
   }, [user?.role, branches, importBranchId]);
 
+  useEffect(() => {
+    if (!isFormOpen) return;
+
+    if (user?.role === "super_admin") {
+      if (loanFormBranchId === 0 && branches.length > 0) {
+        setLoanFormBranchId(branches[0].id);
+      }
+      return;
+    }
+
+    const branchId = Number(user?.branchId ?? 0);
+    if (branchId > 0 && loanFormBranchId !== branchId) {
+      setLoanFormBranchId(branchId);
+    }
+  }, [branches, isFormOpen, loanFormBranchId, user?.branchId, user?.role]);
+
+  useEffect(() => {
+    if (form.borrowerId === 0) return;
+    const memberStillAvailable = availableLoanMembers.some((member) => member.id === form.borrowerId);
+    if (!memberStillAvailable) {
+      setForm((current) => ({ ...current, borrowerId: 0 }));
+    }
+  }, [availableLoanMembers, form.borrowerId]);
+
   const paginatedLoans = useMemo(() => {
     const start = (loanPage - 1) * rowsPerPage;
     return filteredLoans.slice(start, start + rowsPerPage);
@@ -458,6 +508,10 @@ export function LoansPage() {
     () => (openMenuLoan ? loans.find((loan) => loan.id === openMenuLoan.loanId) ?? null : null),
     [loans, openMenuLoan]
   );
+
+  function openLoanDetails(targetLoanId: number) {
+    navigate(`/loan-details/${targetLoanId}?from=collections`);
+  }
 
   function toggleLoanMenu(button: HTMLButtonElement, loanId: number) {
     const rect = button.getBoundingClientRect();
@@ -638,6 +692,7 @@ export function LoansPage() {
     }
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setLoanFormBranchId(user?.role === "super_admin" ? (branches[0]?.id ?? 0) : Number(user?.branchId ?? 0));
     setIsFormOpen(true);
   }
 
@@ -683,12 +738,14 @@ export function LoansPage() {
       status: loan.status,
       notes: loan.notes ?? ""
     });
+    setLoanFormBranchId(user?.role === "super_admin" ? Number(loan.branchId ?? branches[0]?.id ?? 0) : Number(user?.branchId ?? loan.branchId ?? 0));
     setIsFormOpen(true);
   }
 
   function closeFormModal() {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setLoanFormBranchId(0);
     setIsFormOpen(false);
   }
 
@@ -991,15 +1048,38 @@ export function LoansPage() {
 
               <form className="grid items-start gap-3 lg:grid-cols-2 lg:gap-x-4" onSubmit={handleSubmit}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Branch
+                  <select
+                    className="field min-w-0"
+                    value={loanFormBranchId}
+                    onChange={(event) => {
+                      const nextBranchId = Number(event.target.value);
+                      setLoanFormBranchId(nextBranchId);
+                      setForm((current) => ({ ...current, borrowerId: 0 }));
+                    }}
+                    disabled={user?.role !== "super_admin"}
+                    required
+                  >
+                    <option value={0}>{user?.role === "super_admin" ? "Select Branch" : "Assigned Branch"}</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.code} - {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="grid gap-1 text-sm font-medium text-black/80">
                   Member
                   <select
                     className="field min-w-0"
                     value={form.borrowerId}
                     onChange={(event) => setForm((current) => ({ ...current, borrowerId: Number(event.target.value) }))}
                     required
+                    disabled={loanFormBranchId <= 0}
                   >
                     <option value={0}>Select Member</option>
-                    {members.map((member) => (
+                    {availableLoanMembers.map((member) => (
                       <option key={member.id} value={member.id}>
                         {member.cifKey} - {member.memberName}
                       </option>
@@ -1061,6 +1141,12 @@ export function LoansPage() {
                     <option value="closed">closed</option>
                   </select>
                 </label>
+
+                {loanFormBranchId > 0 && availableLoanMembers.length === 0 && (
+                  <p className="md:col-span-2 text-xs text-black/70">
+                    No members found for the selected branch.
+                  </p>
+                )}
 
                 {selectedMember && (
                   <p className="md:col-span-2 text-xs text-black/70">
@@ -1124,7 +1210,7 @@ export function LoansPage() {
                   className="btn-primary btn-page w-full sm:w-auto"
                   onClick={() => {
                     closeMobileLoanPreview();
-                    navigate(`/loan-details/${mobileLoanPreview.id}`);
+                    openLoanDetails(mobileLoanPreview.id);
                   }}
                 >
                   Open Loan
@@ -1473,7 +1559,7 @@ export function LoansPage() {
               className="action-menu-item"
               onClick={() => {
                 setOpenMenuLoan(null);
-                navigate(`/loan-details/${activeMenuLoan.id}`);
+                openLoanDetails(activeMenuLoan.id);
               }}
             >
               View Details
@@ -1707,7 +1793,7 @@ export function LoansPage() {
                       <button
                         type="button"
                         className="btn-primary btn-page w-full sm:w-auto"
-                        onClick={() => navigate(`/loan-details/${loan.id}`)}
+                        onClick={() => openLoanDetails(loan.id)}
                       >
                         Open Loan
                       </button>
@@ -1769,11 +1855,11 @@ export function LoansPage() {
                       key={loan.id}
                       className="cursor-pointer hover:bg-slate-50"
                       tabIndex={0}
-                      onClick={() => navigate(`/loan-details/${loan.id}`)}
+                      onClick={() => openLoanDetails(loan.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          navigate(`/loan-details/${loan.id}`);
+                          openLoanDetails(loan.id);
                         }
                       }}
                     >

@@ -109,9 +109,14 @@ export function BorrowerList({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return borrowers;
-    return borrowers.filter((b) =>
-      [b.cifKey, b.memberName, b.contactInfo, b.address].join(" ").toLowerCase().includes(q)
+    const matches = q
+      ? borrowers.filter((b) =>
+          [b.cifKey, b.memberName, b.contactInfo, b.address].join(" ").toLowerCase().includes(q)
+        )
+      : borrowers;
+
+    return [...matches].sort(
+      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.cifKey.localeCompare(b.cifKey, undefined, { sensitivity: "base" })
     );
   }, [borrowers, query]);
 

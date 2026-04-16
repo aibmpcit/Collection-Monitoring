@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +9,7 @@ export function LoginPage() {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit(event: React.FormEvent) {
@@ -79,13 +80,24 @@ export function LoginPage() {
 
           <label className="mt-3 grid gap-1 text-sm font-semibold text-slate-700">
             Password
-            <input
-              className="field"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              required
-            />
+            <div className="relative">
+              <input
+                className="field pr-11"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                type={showPassword ? "text" : "password"}
+                required
+              />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-r-xl text-slate-500 transition hover:text-slate-700"
+                onClick={() => setShowPassword((current) => !current)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </label>
 
           <button type="submit" className="btn-primary mt-5 w-full gap-2">
