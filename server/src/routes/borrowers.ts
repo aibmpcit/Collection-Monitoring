@@ -285,46 +285,16 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
     const inserted = uniqueRows.filter((row) => !existingCifKeys.has(row.cifKey.toLowerCase())).length;
     const updated = uniqueRows.length - inserted;
 
-    await query(
+    await Promise.all(uniqueRows.map((row) => query(
       `INSERT INTO borrowers (cif_key, branch_id, member_name, contact_info, address, name, phone, email)
-       SELECT
-         item.cif_key,
-         item.branch_id,
-         item.member_name,
-         item.contact_info,
-         item.address,
-         item.member_name,
-         item.contact_info,
-         item.email
-       FROM json_to_recordset($1::json) AS item(
-         cif_key text,
-         branch_id int,
-         member_name text,
-         contact_info text,
-         address text,
-         email text
-       )
-       ON CONFLICT (cif_key) DO UPDATE
-       SET branch_id = EXCLUDED.branch_id,
-           member_name = EXCLUDED.member_name,
-           contact_info = EXCLUDED.contact_info,
-           address = EXCLUDED.address,
-           name = EXCLUDED.name,
-           phone = EXCLUDED.phone,
-           email = EXCLUDED.email`,
-      [
-        JSON.stringify(
-          uniqueRows.map((row) => ({
-            cif_key: row.cifKey,
-            branch_id: row.branchId,
-            member_name: row.memberName,
-            contact_info: row.contactInfo,
-            address: row.address,
-            email: row.email
-          }))
-        )
-      ]
-    );
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON DUPLICATE KEY UPDATE
+         branch_id = VALUES(branch_id), member_name = VALUES(member_name),
+         contact_info = VALUES(contact_info), address = VALUES(address),
+         name = VALUES(name), phone = VALUES(phone), email = VALUES(email)`,
+      [row.cifKey, row.branchId, row.memberName, row.contactInfo, row.address,
+        row.memberName, row.contactInfo, row.email]
+    )));
 
     return res.json({ inserted, updated });
   } catch (error) {
@@ -359,7 +329,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
         continue;
       }
 
-      const loanCount = await query<{ total: string }>("SELECT COUNT(*)::text AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
+      const loanCount = await query<{ total: string }>("SELECT COUNT(*) AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
       if (Number(loanCount.rows[0]?.total ?? 0) > 0) {
         skipped.push({ id: borrowerId, reason: "has_loan_history" });
         continue;
@@ -439,7 +409,7 @@ router.delete("/:borrowerId", authenticate, authorize(["super_admin", "branch_ad
     }
     assertBranchAccess(user, branchId);
 
-    const loanCount = await query<{ total: string }>("SELECT COUNT(*)::text AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
+    const loanCount = await query<{ total: string }>("SELECT COUNT(*) AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
     if (Number(loanCount.rows[0]?.total ?? 0) > 0) {
       return res.status(409).json({ message: "Cannot delete borrower with loan history, including closed loans hidden from the main loan list" });
     }
@@ -483,8 +453,9 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
        FROM borrower_remarks br
        LEFT JOIN users u ON u.id = br.created_by
        WHERE br.borrower_id = $1
+       ${user.role === "staff" ? "AND br.created_by = $2" : ""}
        ORDER BY br.created_at DESC, br.id DESC`,
-      [borrowerId]
+      user.role === "staff" ? [borrowerId, user.id] : [borrowerId]
     );
 
     return res.json(

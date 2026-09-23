@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useSearchParams, useParams } from "react-router-dom";
 import { DuesCard } from "../components/DuesCard";
 import { PageMetaStamp } from "../components/PageMetaStamp";
@@ -14,6 +15,8 @@ interface LoanDetails extends Loan {
   contactInfo: string;
   address: string;
 }
+
+const HISTORY_PAGE_SIZE = 5;
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -46,8 +49,15 @@ export function LoanDetailsPage() {
   const [searchParams] = useSearchParams();
   const numericLoanId = Number(loanId);
   const [loan, setLoan] = useState<LoanDetails | null>(null);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [payments, setPayments] = useState<LoanPayment[]>([]);
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [remarkPage, setRemarkPage] = useState(1);
+  const paymentPages = Math.max(1, Math.ceil(payments.length / HISTORY_PAGE_SIZE));
+  const remarkPages = Math.max(1, Math.ceil(remarks.length / HISTORY_PAGE_SIZE));
+  const currentPaymentPage = Math.min(paymentPage, paymentPages);
+  const currentRemarkPage = Math.min(remarkPage, remarkPages);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -62,6 +72,23 @@ export function LoanDetailsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [remarkModalOpen, setRemarkModalOpen] = useState(false);
+  const remarkDialogRef = useRef<HTMLDialogElement>(null);
+  const paymentDialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!paymentModalOpen && !remarkModalOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = paymentModalOpen ? paymentDialogRef.current : remarkDialogRef.current;
+    dialog?.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [paymentModalOpen, remarkModalOpen]);
   const origin = searchParams.get("from");
   const backLink =
     origin === "due-monitoring"
@@ -99,6 +126,9 @@ export function LoanDetailsPage() {
     }
 
     async function fetchLoanWorkspace() {
+      setDetailsExpanded(false);
+      setPaymentPage(1);
+      setRemarkPage(1);
       setLoading(true);
       setError("");
       setMessage("");
@@ -127,7 +157,7 @@ export function LoanDetailsPage() {
 
   async function handleAddRemark(event: React.FormEvent) {
     event.preventDefault();
-    if (!loan) return;
+    if (!loan || remarksSubmitting) return;
 
     const remark = remarkInput.trim();
     if (!remark) {
@@ -141,8 +171,14 @@ export function LoanDetailsPage() {
     try {
       await apiRequest(`/loans/${loan.id}/remarks`, "POST", { remark, remarkCategory });
       setRemarkInput("");
-      await loadRemarks(loan.id);
+      setRemarkModalOpen(false);
       setMessage("Remark added.");
+      try {
+        await loadRemarks(loan.id);
+        setRemarkPage(1);
+      } catch {
+        setError("Remark was added, but the remarks list could not be refreshed. Reload the page to see it.");
+      }
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to add remark.");
     } finally {
@@ -152,7 +188,7 @@ export function LoanDetailsPage() {
 
   async function handleAddPayment(event: React.FormEvent) {
     event.preventDefault();
-    if (!loan) return;
+    if (!loan || paymentsSubmitting) return;
 
     const amount = Number(paymentAmount);
     const orNo = paymentOrNo.trim();
@@ -177,8 +213,14 @@ export function LoanDetailsPage() {
       setPaymentAmount("");
       setPaymentOrNo("");
       setPaymentDateTime(getLocalDateTimeInputValue());
-      await loadPayments(loan.id);
+      setPaymentModalOpen(false);
       setMessage("Payment recorded.");
+      try {
+        await loadPayments(loan.id);
+        setPaymentPage(1);
+      } catch {
+        setError("Payment was recorded, but the payment list could not be refreshed. Reload the page to see it.");
+      }
     } catch (e) {
       setPaymentError(e instanceof Error ? e.message : "Unable to record payment.");
     } finally {
@@ -196,64 +238,14 @@ export function LoanDetailsPage() {
 
   return (
     <main className="page-shell">
-      <PageHeader
-        title="Loan Details"
-        subtitle={loan ? `${loan.loanAccountNo} | ${loan.memberName}` : "Loan account view"}
-        eyebrow="Collections"
-        actions={
-          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
-              {backLink.label}
-            </Link>
-            <PageMetaStamp />
+      {paymentModalOpen && createPortal(
+        <dialog ref={paymentDialogRef} aria-labelledby="payment-modal-title"
+          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
+          onCancel={event => { event.preventDefault(); if (!paymentsSubmitting) setPaymentModalOpen(false); }}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 id="payment-modal-title" className="text-lg font-semibold">Add Payment</h2>
+            <button type="button" className="btn-muted" disabled={paymentsSubmitting} onClick={() => setPaymentModalOpen(false)}>Close</button>
           </div>
-        }
-      />
-
-      {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-      {loan && (
-        <>
-          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="panel p-4 text-sm">
-            <div className="mb-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-slate-900">{loan.memberName}</h2>
-                <p className="text-xs text-slate-600">
-                  {loan.cifKey} | {loan.loanType}
-                </p>
-              </div>
-              <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
-                {loan.status}
-              </span>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Detail label="Loan Account No" value={loan.loanAccountNo} />
-              <Detail label="CIF Key" value={loan.cifKey} />
-              <Detail label="Contact Info" value={loan.contactInfo || "-"} />
-              <Detail label="Address" value={loan.address || "-"} />
-              <Detail label="Date Release" value={formatDate(loan.dateRelease)} />
-              <Detail label="Maturity Date" value={formatDate(loan.maturityDate)} />
-              <Detail label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
-              <Detail label="Other Charges" value={formatCurrency(loan.otherCharges)} />
-              <Detail label="PAR Age" value={String(loan.parAge)} />
-              <Detail label="Due Date" value={formatDate(loan.dueDate)} />
-              <Detail label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
-            </div>
-          </motion.section>
-
-          <DuesCard principal={loan.principalDue} interest={loan.interest} penalty={loan.penaltyDue} />
-
-          <section className="grid gap-4 xl:grid-cols-2">
-            <section className="panel p-4">
-              <div className="mb-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-slate-900">Add Payments</h2>
-                  <p className="text-xs text-slate-600">Payments recorded here are for tracking only. Loan balances do not change automatically.</p>
-                </div>
-                <span className="glass-pill">{payments.length} payment(s)</span>
-              </div>
-
               <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleAddPayment}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Amount
@@ -293,41 +285,18 @@ export function LoanDetailsPage() {
                 </div>
               </form>
 
-              {paymentError && <p className="mt-3 text-sm text-red-700">{paymentError}</p>}
-              {paymentsLoading && <p className="mt-3 text-sm text-slate-600">Loading payments...</p>}
+              {paymentError && <p role="alert" className="mt-3 text-sm text-red-700">{paymentError}</p>}
 
-              <div className="surface-soft mt-3 max-h-[28rem] overflow-y-auto">
-                {payments.length === 0 && !paymentsLoading ? (
-                  <p className="p-3 text-sm text-slate-600">No payments yet.</p>
-                ) : (
-                  <ul className="divide-y divide-black/10">
-                    {payments.map((item) => (
-                      <li key={item.id} className="p-3">
-                        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-start">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900">{formatCurrency(item.amount)}</p>
-                            <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
-                            <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
-                          </div>
-                          <span className="text-xs text-black/60">{item.paymentId}</span>
-                        </div>
-                        <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
-
-            <section className="panel p-4">
-              <div className="mb-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
-                  <p className="text-xs text-slate-600">Track collection updates and follow-up notes on this loan.</p>
-                </div>
-                <span className="glass-pill">{remarks.length} remark(s)</span>
-              </div>
-
+        </dialog>, document.body
+      )}
+      {remarkModalOpen && createPortal(
+        <dialog ref={remarkDialogRef} aria-labelledby="remark-modal-title"
+          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
+          onCancel={event => { event.preventDefault(); if (!remarksSubmitting) setRemarkModalOpen(false); }}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 id="remark-modal-title" className="text-lg font-semibold">Add Remark</h2>
+            <button type="button" className="btn-muted" disabled={remarksSubmitting} onClick={() => setRemarkModalOpen(false)}>Close</button>
+          </div>
               <form className="grid gap-3" onSubmit={handleAddRemark}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Category
@@ -357,12 +326,131 @@ export function LoanDetailsPage() {
                 </label>
                 <div className="flex justify-stretch sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
-                    {remarksSubmitting ? "Saving..." : "Add Remark"}
+                    {remarksSubmitting ? "Saving..." : "Save Remark"}
                   </button>
                 </div>
               </form>
 
-              {remarkError && <p className="mt-3 text-sm text-red-700">{remarkError}</p>}
+              {remarkError && <p role="alert" className="mt-3 text-sm text-red-700">{remarkError}</p>}
+
+        </dialog>, document.body
+      )}
+      <PageHeader
+        title="Loan Details"
+        eyebrow="Collections"
+        actions={
+          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
+              {backLink.label}
+            </Link>
+            <PageMetaStamp />
+          </div>
+        }
+      />
+
+      {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
+      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      {loan && (
+        <>
+          <DuesCard principal={loan.principalDue} interest={loan.interest} penalty={loan.penaltyDue} />
+
+          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="panel cursor-pointer p-4 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+            role="button" tabIndex={0}
+            aria-label={`${detailsExpanded ? "Collapse" : "Expand"} loan information for ${loan.memberName}`}
+            aria-expanded={detailsExpanded} aria-controls="loan-information-details"
+            onClick={() => setDetailsExpanded(expanded => !expanded)}
+            onKeyDown={event => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setDetailsExpanded(expanded => !expanded);
+              }
+            }}>
+            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-slate-900">{loan.memberName}</h2>
+                <p className="text-xs text-slate-600">
+                  {loan.cifKey} | {loan.loanType}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
+                  {loan.status}
+                </span>
+              </div>
+            </div>
+            <div id="loan-information-details" hidden={!detailsExpanded}>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Detail label="Loan Account No" value={loan.loanAccountNo} />
+              <Detail label="CIF Key" value={loan.cifKey} />
+              <Detail label="Contact Info" value={loan.contactInfo || "-"} />
+              <Detail label="Address" value={loan.address || "-"} />
+              <Detail label="Date Release" value={formatDate(loan.dateRelease)} />
+              <Detail label="Maturity Date" value={formatDate(loan.maturityDate)} />
+              <Detail label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
+              <Detail label="Other Charges" value={formatCurrency(loan.otherCharges)} />
+              <Detail label="PAR Age" value={String(loan.parAge)} />
+              <Detail label="Due Date" value={formatDate(loan.dueDate)} />
+              <Detail label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
+            </div>
+            </div>
+          </motion.section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <section className="panel p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <button type="button" className="btn-primary" onClick={() => {
+                    setPaymentError("");
+                    setPaymentDateTime(getLocalDateTimeInputValue());
+                    setPaymentModalOpen(true);
+                  }}>Add Payment</button>
+                </div>
+              </div>
+
+              {paymentsLoading && <p className="mt-3 text-sm text-slate-600">Loading payments...</p>}
+
+              <div className="surface-soft mt-3 max-h-[28rem] overflow-y-auto">
+                {payments.length === 0 && !paymentsLoading ? (
+                  <p className="p-3 text-sm text-slate-600">No payments yet.</p>
+                ) : (
+                  <ul className="divide-y divide-black/10">
+                    {payments.slice((currentPaymentPage - 1) * HISTORY_PAGE_SIZE, currentPaymentPage * HISTORY_PAGE_SIZE).map((item) => (
+                      <li key={item.id} className="p-3">
+                        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-start">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{formatCurrency(item.amount)}</p>
+                            <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
+                            <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
+                          </div>
+                          <span className="text-xs text-black/60">{item.paymentId}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <HistoryPagination label="Payments" page={currentPaymentPage} pages={paymentPages} onChange={setPaymentPage} disabled={paymentsLoading} />
+            </section>
+
+            <section className="panel p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <button type="button" className="btn-primary" onClick={() => {
+                    setRemarkError("");
+                    setRemarkModalOpen(true);
+                  }}>Add Remark</button>
+                </div>
+              </div>
+
               {remarksLoading && <p className="mt-3 text-sm text-slate-600">Loading remarks...</p>}
 
               <div className="surface-soft mt-3 max-h-[28rem] overflow-y-auto">
@@ -370,7 +458,7 @@ export function LoanDetailsPage() {
                   <p className="p-3 text-sm text-slate-600">No remarks yet.</p>
                 ) : (
                   <ul className="divide-y divide-black/10">
-                    {remarks.map((item) => (
+                    {remarks.slice((currentRemarkPage - 1) * HISTORY_PAGE_SIZE, currentRemarkPage * HISTORY_PAGE_SIZE).map((item) => (
                       <li key={item.id} className="p-3">
                         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                           {getRemarkCategoryLabel(item.remarkCategory)}
@@ -384,6 +472,7 @@ export function LoanDetailsPage() {
                   </ul>
                 )}
               </div>
+              <HistoryPagination label="Remarks" page={currentRemarkPage} pages={remarkPages} onChange={setRemarkPage} disabled={remarksLoading} />
             </section>
           </section>
         </>
@@ -399,4 +488,14 @@ function Detail({ label, value }: { label: string; value: string }) {
       <p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p>
     </article>
   );
+}
+
+function HistoryPagination({ label, page, pages, onChange, disabled }: {
+  label: string; page: number; pages: number; onChange: (page: number) => void; disabled: boolean;
+}) {
+  return <nav aria-label={label + " pagination"} className="mt-4 flex items-center justify-between gap-2">
+    <button type="button" className="btn-muted" disabled={disabled || page <= 1} onClick={() => onChange(page - 1)}>Previous</button>
+    <span className="text-sm text-slate-600" aria-live="polite">Page {page} of {pages}</span>
+    <button type="button" className="btn-muted" disabled={disabled || page >= pages} onClick={() => onChange(page + 1)}>Next</button>
+  </nav>;
 }

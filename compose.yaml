@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8080}:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      SERVE_CLIENT: "true"
+      DATABASE_URL: "mysql://collection_app:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env.docker}@db:3306/collection_monitoring"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env.docker}"
+      API_BODY_LIMIT: 25mb
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: collection_monitoring
+      MYSQL_USER: collection_app
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env.docker}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env.docker}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema.mysql.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u collection_app collection_monitoring -e 'SELECT 1 FROM users LIMIT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

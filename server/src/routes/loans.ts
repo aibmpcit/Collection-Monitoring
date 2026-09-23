@@ -597,7 +597,14 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
             ]
           );
 
-          borrower = result.rows[0] ?? null;
+          borrower = result.rowCount > 0 ? {
+            id: borrower.id,
+            branch_id: nextBranchId,
+            cif_key: params.cifKey,
+            member_name: params.memberName,
+            contact_info: params.contactInfo,
+            address: params.address
+          } : null;
           if (borrower) {
             cacheBorrower(borrower);
             syncCachedLoansForBorrower(borrower);
@@ -621,7 +628,14 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
           ]
         );
 
-        borrower = insertedBorrower.rows[0] ?? null;
+        borrower = insertedBorrower.rows[0] ? {
+          id: insertedBorrower.rows[0].id,
+          branch_id: params.branchId,
+          cif_key: params.cifKey,
+          member_name: params.memberName,
+          contact_info: params.contactInfo,
+          address: params.address
+        } : null;
         if (borrower) {
           cacheBorrower(borrower);
           syncCachedLoansForBorrower(borrower);
@@ -1112,8 +1126,9 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
        FROM collections c
        LEFT JOIN users u ON u.id = c.created_by
        WHERE c.loan_id = $1
+       ${user.role === "staff" ? "AND c.created_by = $2" : ""}
        ORDER BY c.collected_at DESC, c.id DESC`,
-      [loanId]
+      user.role === "staff" ? [loanId, user.id] : [loanId]
     );
 
     return res.json(
@@ -1162,9 +1177,11 @@ router.post("/:loanId/payments", authenticate, authorize(["super_admin", "branch
       collectedAt = parsedDate.toISOString();
     }
 
+    // MySQL DATETIME expects a timezone-free SQL value; retain the ISO timestamp's UTC time.
+    const collectedAtSql = collectedAt.slice(0, 19).replace("T", " ");
     const created = await query<{ id: number }>(
       "INSERT INTO collections (loan_id, amount, or_no, collected_at, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-      [loanId, amount, orNo || null, collectedAt, user.id]
+      [loanId, amount, orNo || null, collectedAtSql, user.id]
     );
 
     return res.status(201).json({
@@ -1232,8 +1249,9 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
        FROM loan_remarks lr
        LEFT JOIN users u ON u.id = lr.created_by
        WHERE lr.loan_id = $1
+       ${user.role === "staff" ? "AND lr.created_by = $2" : ""}
        ORDER BY lr.created_at DESC, lr.id DESC`,
-      [loanId]
+      user.role === "staff" ? [loanId, user.id] : [loanId]
     );
 
     return res.json(

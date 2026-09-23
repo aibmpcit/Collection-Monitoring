@@ -41,19 +41,16 @@ export function AnalyticsPage() {
         icon: <AlertTriangle size={18} />,
         label: "Overdue Rate",
         value: analytics ? `${analytics.overdueRate.toFixed(2)}%` : "-",
-        hint: "Accounts overdue against total active portfolio."
       },
       {
         icon: <TrendingUp size={18} />,
         label: "Collection Efficiency",
         value: analytics ? `${analytics.collectionEfficiency.toFixed(2)}%` : "-",
-        hint: "Collected amount versus due amount for current cycle."
       },
       {
         icon: <Activity size={18} />,
         label: "Active Loans",
         value: analytics ? analytics.activeLoans.toLocaleString() : "-",
-        hint: "Open active contracts currently being monitored."
       }
     ],
     [analytics]
@@ -63,7 +60,6 @@ export function AnalyticsPage() {
     <main className="page-shell">
       <PageHeader
         title="Analytics"
-        subtitle="Monitor portfolio health with core risk and performance indicators."
         eyebrow="Performance Signals"
         actions={<PageMetaStamp />}
       />
@@ -87,7 +83,6 @@ export function AnalyticsPage() {
               <p className="text-sm font-semibold text-slate-700">{card.label}</p>
             </div>
             <h2 className="relative mt-3 text-3xl font-bold text-slate-900">{card.value}</h2>
-            <p className="relative mt-2 text-xs text-slate-600">{card.hint}</p>
           </motion.article>
         ))}
       </section>

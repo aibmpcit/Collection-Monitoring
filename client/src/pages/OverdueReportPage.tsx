@@ -285,7 +285,6 @@ export function OverdueReportPage() {
     <main className="page-shell">
       <PageHeader
         title="Due Monitoring Report"
-        subtitle="Review upcoming and overdue accounts in one place so follow-up can be prioritized before and after due dates."
         eyebrow="Collections Risk Desk"
         actions={<PageMetaStamp />}
       />
@@ -311,7 +310,6 @@ export function OverdueReportPage() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Upcoming Due Accounts</h2>
-            <p className="text-xs text-slate-600">Soonest due dates appear first so the team can act before accounts become overdue.</p>
           </div>
           <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
         </div>
@@ -405,7 +403,6 @@ export function OverdueReportPage() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Past-Due Accounts</h2>
-            <p className="text-xs text-slate-600">Oldest due dates appear first so the collection team can work the most delayed accounts first.</p>
           </div>
           <span className="glass-pill">{overdueRows.length} past-due account(s)</span>
         </div>

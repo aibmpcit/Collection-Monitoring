@@ -14,6 +14,30 @@ client/tsconfig.tsbuildinfo
 !.env.example
 
 npm-debug.log*
+server-run*.log
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+supabase/.temp/
+supabase/.branches/
+
+# Local assistant and editor settings
+.agents/
+.aider-desk/
+skills-lock.json
+.vscode/
+.idea/
+
+# Test output and operating system files
+coverage/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
+# Local database exports and credentials (keep database/schema.mysql.sql)
+backups/
+*.dump
+*.sql.gz
+*.pem
+*.key

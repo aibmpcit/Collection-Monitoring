@@ -1,6 +1,7 @@
 import { Eye, EyeOff, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
@@ -156,6 +157,7 @@ function PasswordInput({
 }
 
 export function StaffPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
   const isBranchAdmin = user?.role === "branch_admin";
@@ -491,11 +493,6 @@ export function StaffPage() {
 
       <PageHeader
         title="Accounts"
-        subtitle={
-          isSuperAdmin
-            ? "Manage collectors and branch admins, including branch assignment and password changes."
-            : "Create collector accounts for your branch."
-        }
         eyebrow="Workforce Access"
         actions={<PageMetaStamp />}
       />
@@ -504,11 +501,6 @@ export function StaffPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">{isSuperAdmin ? "User Accounts" : "Collector Accounts"}</h2>
-            <p className="text-xs text-slate-600">
-              {isSuperAdmin
-                ? "Super admin can add branch admins, edit collector passwords, and manage branch assignment."
-                : "Create and review collectors assigned to your branch."}
-            </p>
           </div>
           <button type="button" className="btn-primary" onClick={openCreateModal}>
             {isSuperAdmin ? "Add Account" : "Add Collector"}
@@ -533,7 +525,7 @@ export function StaffPage() {
             <article key={row.id} className="mobile-record-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-semibold text-slate-900">{row.username}</p>
+                  <Link to={`/collector-history?collectorId=${row.id}`} className="break-words text-sm font-semibold text-brand-700 underline">{row.username}</Link>
                   <p className="mt-1 text-xs text-slate-500">{formatRoleLabel(row.role)}</p>
                 </div>
               </div>
@@ -574,13 +566,23 @@ export function StaffPage() {
             </thead>
             <tbody>
               {paginatedAccounts.map((row) => (
-                <tr key={row.id}>
+                <tr key={row.id} tabIndex={0}
+                  className="cursor-pointer hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+                  aria-label={`View collection history for ${row.username}`}
+                  onClick={() => navigate(`/collector-history?collectorId=${row.id}`)}
+                  onKeyDown={event => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/collector-history?collectorId=${row.id}`);
+                    }
+                  }}>
                   <td>{row.username}</td>
                   <td>{formatRoleLabel(row.role)}</td>
                   <td>{row.branchName ?? "-"}</td>
                   {isSuperAdmin && (
-                    <td>
-                      <div className="flex flex-wrap gap-2">
+                    <td onClick={event => event.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-2">
                         <button type="button" className="btn-muted btn-table" onClick={() => openEditModal(row)}>
                           Edit
                         </button>

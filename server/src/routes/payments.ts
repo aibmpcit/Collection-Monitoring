@@ -22,9 +22,13 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const params: unknown[] = [];
-    const where = isSuperAdmin(user) ? "" : "WHERE b.branch_id = $1";
+    let where = isSuperAdmin(user) ? "" : "WHERE b.branch_id = $1";
     if (!isSuperAdmin(user)) {
       params.push(userBranchId(user));
+    }
+    if (user.role === "staff") {
+      params.push(user.id);
+      where += " AND c.created_by = $2";
     }
 
     const result = await query<{

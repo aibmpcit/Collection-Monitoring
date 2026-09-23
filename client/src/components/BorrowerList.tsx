@@ -202,7 +202,6 @@ export function BorrowerList({
   const hasRemarksAction = canViewRemarks && typeof onRemarks === "function";
   const canOpenActionMenu = hasHistoryAction || hasRemarksAction || canEditDelete;
   const actionItemCount = (hasHistoryAction ? 1 : 0) + (hasRemarksAction ? 1 : 0) + (canEditDelete ? 2 : 0);
-  const isReadOnlyView = !canImport && !canAdd && !canOpenActionMenu && !canBulkDelete;
 
   function toggleMenu(button: HTMLButtonElement, borrowerId: number) {
     const rect = button.getBoundingClientRect();
@@ -253,7 +252,6 @@ export function BorrowerList({
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Member Records</h2>
-            <p className="text-xs text-slate-600">{isReadOnlyView ? "View branch member profiles." : "Manage branch member profiles."}</p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {onImport && canImport && (
@@ -324,7 +322,7 @@ export function BorrowerList({
                     aria-label={`Select ${borrower.memberName}`}
                     checked={selectedIdSet.has(borrower.id)}
                     onChange={(event) => toggleBorrowerSelection(borrower.id, event.target.checked)}
-                    className="mt-1 h-4 w-4 shrink-0 accent-teal-600"
+                    className="mt-1 h-4 w-4 shrink-0 accent-brand-600"
                   />
                 )}
               </div>
@@ -374,7 +372,7 @@ export function BorrowerList({
                       checked={allCurrentPageSelected}
                       onChange={(event) => toggleCurrentPageSelection(event.target.checked)}
                       disabled={!hasPageRows}
-                      className="h-4 w-4 accent-teal-600"
+                      className="h-4 w-4 accent-brand-600"
                     />
                   </th>
                 )}
@@ -395,7 +393,7 @@ export function BorrowerList({
                         aria-label={`Select ${borrower.memberName}`}
                         checked={selectedIdSet.has(borrower.id)}
                         onChange={(event) => toggleBorrowerSelection(borrower.id, event.target.checked)}
-                        className="h-4 w-4 accent-teal-600"
+                        className="h-4 w-4 accent-brand-600"
                       />
                     </td>
                   )}

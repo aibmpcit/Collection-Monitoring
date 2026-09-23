@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 
 function resolveEnvPath() {
   const candidates = [
+    path.resolve(process.cwd(), ".env.local"),
+    path.resolve(process.cwd(), "../.env.local"),
     path.resolve(process.cwd(), ".env"),
     path.resolve(process.cwd(), "../.env")
   ];

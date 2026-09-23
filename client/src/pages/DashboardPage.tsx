@@ -149,13 +149,11 @@ function overdueLabel(daysOverdue: number): string {
 function KpiCard({
   label,
   value,
-  hint,
   icon,
   onViewMore
 }: {
   label: string;
   value: string;
-  hint?: string;
   icon: JSX.Element;
   onViewMore?: () => void;
 }) {
@@ -176,7 +174,6 @@ function KpiCard({
           {icon}
         </span>
       </div>
-      {hint && <p className="relative mt-2 text-xs leading-snug text-slate-600">{hint}</p>}
       {onViewMore && (
         <button type="button" className="relative mt-3 text-xs font-semibold text-c2 transition hover:text-c2/80" onClick={onViewMore}>
           View More
@@ -338,8 +335,6 @@ export function DashboardPage() {
   const overdueRate =
     analytics?.overdueRate ??
     (openLoans > 0 ? (statusCounts.overdue / openLoans) * 100 : 0);
-  const overdueShare =
-    metrics && metrics.totalPortfolio > 0 ? (metrics.totalOverdue / metrics.totalPortfolio) * 100 : 0;
   const averageOverdue =
     metrics && overdueRows.length > 0 ? metrics.totalOverdue / overdueRows.length : 0;
   const highestOverdue = overdueTableRows.reduce((max, row) => Math.max(max, row.totalOutstanding), 0);
@@ -408,7 +403,6 @@ export function DashboardPage() {
     <main className="page-shell">
       <PageHeader
         title="Borrower & Loan Dashboard"
-        subtitle="Track balances, risk concentration, and collection movements from a single snapshot."
         eyebrow="Portfolio Intelligence"
         actions={<PageMetaStamp />}
       />
@@ -419,42 +413,36 @@ export function DashboardPage() {
         <KpiCard
           label="Total Portfolio"
           value={metrics ? formatCurrency(metrics.totalPortfolio) : loading ? "Loading..." : "-"}
-          hint="Outstanding balance across non-closed loans"
           icon={<WalletCards size={18} />}
           onViewMore={() => handleViewMore("portfolio")}
         />
         <KpiCard
           label="Total Overdue"
           value={metrics ? formatCurrency(metrics.totalOverdue) : loading ? "Loading..." : "-"}
-          hint={metrics ? `${formatPercent(overdueShare)} of portfolio` : "Delinquent exposure"}
           icon={<AlertTriangle size={18} />}
           onViewMore={() => handleViewMore("overdue")}
         />
         <KpiCard
           label="Collections Today"
           value={metrics ? formatCurrency(metrics.collectionsToday) : loading ? "Loading..." : "-"}
-          hint="Amounts collected in current day"
           icon={<TrendingUp size={18} />}
           onViewMore={() => handleViewMore("collections")}
         />
         <KpiCard
           label="Open Loans"
           value={loading ? "Loading..." : openLoans.toLocaleString()}
-          hint="Active + overdue accounts"
           icon={<Users size={18} />}
           onViewMore={() => handleViewMore("open-loans")}
         />
         <KpiCard
           label="Overdue Rate"
           value={loading ? "Loading..." : formatPercent(overdueRate)}
-          hint="Overdue accounts vs open accounts"
           icon={<BarChart3 size={18} />}
           onViewMore={() => handleViewMore("overdue-rate")}
         />
         <KpiCard
           label="Collection Efficiency"
           value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "N/A"}
-          hint={analytics ? "Collected today vs due today" : "Visible for admin roles"}
           icon={<Activity size={18} />}
           onViewMore={() => handleViewMore("efficiency")}
         />

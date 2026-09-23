@@ -3,6 +3,7 @@ import {
   BarChart3,
   Building2,
   FileWarning,
+  History,
   LogOut,
   Menu,
   Users,
@@ -14,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { SystemLogo } from "./components/SystemLogo";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
@@ -25,6 +27,7 @@ import { LoansPage } from "./pages/LoansPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverdueReportPage } from "./pages/OverdueReportPage";
 import { StaffPage } from "./pages/StaffPage";
+import { CollectorHistoryPage } from "./pages/CollectorHistoryPage";
 
 interface NavDefinition {
   to: string;
@@ -50,6 +53,12 @@ const NAV_ITEMS: NavDefinition[] = [
     to: "/loans",
     label: "Collections",
     icon: <WalletCards size={18} />,
+    visible: () => true
+  },
+  {
+    to: "/collector-history",
+    label: "Collector History",
+    icon: <History size={18} />,
     visible: () => true
   },
   {
@@ -110,9 +119,13 @@ function WorkspaceSidebar({
   return (
     <div className="sidebar-shell flex h-full min-h-[320px] flex-col p-4 lg:p-5">
       <Link to="/dashboard" className="side-brand" onClick={onNavigate}>
+        <div className="flex items-center gap-2">
+        <SystemLogo className="h-9 w-9" />
+        <div className="min-w-0">
         <p className="sidebar-text text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Operations</p>
-        <p className="sidebar-text mt-1 text-[1.08rem] font-bold tracking-tight text-white">Collection Monitoring</p>
-        <p className="sidebar-text mt-1 text-xs text-white/80">Unified branch collections workspace</p>
+        <p className="sidebar-text mt-1 whitespace-nowrap text-[15px] font-bold tracking-tight text-white">Collection Monitoring</p>
+        </div>
+        </div>
       </Link>
 
       <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:grid lg:gap-2 lg:overflow-visible lg:pb-0">
@@ -152,12 +165,12 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
             key={item.to}
             to={item.to}
             className={`flex min-w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
-              isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.28)]" : "text-slate-600 hover:bg-slate-100"
+              isActive ? "bg-brand-600 text-white shadow-[0_10px_24px_rgba(0,61,150,0.28)]" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             <span
               className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
-                isActive ? "bg-white text-teal-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]" : "bg-slate-100 text-slate-700"
+                isActive ? "bg-white text-brand-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]" : "bg-slate-100 text-slate-700"
               }`}
             >
               {item.icon}
@@ -199,7 +212,7 @@ function SimpleMobileSidebar({
             onClick={onNavigate}
             className={({ isActive }) =>
               `group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
-                isActive ? "bg-teal-600 text-white shadow-[0_10px_24px_rgba(13,148,136,0.2)]" : "text-slate-700 hover:bg-slate-100"
+                isActive ? "bg-brand-600 text-white shadow-[0_10px_24px_rgba(0,61,150,0.2)]" : "text-slate-700 hover:bg-slate-100"
               }`
             }
           >
@@ -208,7 +221,7 @@ function SimpleMobileSidebar({
                 <span
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition ${
                     isActive
-                      ? "bg-white text-teal-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]"
+                      ? "bg-white text-brand-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]"
                       : "bg-slate-100 text-inherit group-hover:bg-white"
                   }`}
                 >
@@ -327,7 +340,8 @@ function ShellLayout() {
         <section className="content-panel pb-24 lg:pb-6">
           {isCollectorMobileNav ? (
             <div className="mobile-shell-bar mobile-shell-bar-sticky lg:hidden">
-              <div className="min-w-0">
+              <SystemLogo className="h-10 w-10" />
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "User"}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-500">{mobileWorkspaceLabel}</p>
               </div>
@@ -345,7 +359,7 @@ function ShellLayout() {
                 <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "Admin"}</p>
                 <p className="text-xs uppercase tracking-wide text-slate-500">{mobileWorkspaceLabel}</p>
               </div>
-              <span className="h-9 w-9" />
+              <SystemLogo className="h-9 w-9" />
             </div>
           )}
 
@@ -354,6 +368,7 @@ function ShellLayout() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/borrowers" element={<BorrowersPage />} />
               <Route path="/loans" element={<LoansPage />} />
+              <Route path="/collector-history" element={<CollectorHistoryPage />} />
               <Route
                 path="/staff"
                 element={

@@ -866,7 +866,6 @@ export function BorrowersPage() {
 
       <PageHeader
         title="Members"
-        subtitle={canManageMembers ? "Create, import, and maintain member records with branch-level access controls." : "View member records linked to your branch."}
         eyebrow="Member Registry"
         actions={<PageMetaStamp />}
       />

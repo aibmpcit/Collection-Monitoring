@@ -17,14 +17,14 @@ router.get("/overview", authenticate, authorize(["super_admin", "branch_admin"])
 
     const [activeResult, overdueResult, todayCollectedResult, todayDueResult] = await Promise.all([
       query<{ value: string | number }>(
-        `SELECT COUNT(*)::text AS value
+        `SELECT COUNT(*) AS value
          FROM loans l
          INNER JOIN borrowers b ON b.id = l.borrower_id
          WHERE l.status != 'closed' ${branchFilter}`,
         params
       ),
       query<{ value: string | number }>(
-        `SELECT COUNT(*)::text AS value
+        `SELECT COUNT(*) AS value
          FROM loans l
          INNER JOIN borrowers b ON b.id = l.borrower_id
          WHERE l.status = 'overdue' ${branchFilter}`,

@@ -8,12 +8,12 @@
   :root {
     --ink-900: 8 24 36;
     --ink-700: 51 65 85;
-    --accent-500: 31 152 153;
-    --accent-600: 24 121 130;
-    --danger-500: 223 93 53;
-    --surface: 255 255 255 / 0.8;
-    --surface-strong: 255 255 255 / 0.95;
-    --surface-border: 15 23 42 / 0.12;
+    --accent-500: 0 61 150;
+    --accent-600: 0 53 128;
+    --danger-500: 184 65 0;
+    --surface: 255 255 255;
+    --surface-strong: 255 255 255;
+    --surface-border: 0 61 150 / 0.14;
   }
 
   html,
@@ -24,43 +24,27 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(31, 152, 153, 0.5) transparent;
+    scrollbar-color: rgba(0, 61, 150, 0.5) transparent;
   }
 
   *:focus-visible {
-    outline: 2px solid rgba(31, 152, 153, 0.55);
+    outline: 2px solid rgba(0, 61, 150, 0.55);
     outline-offset: 2px;
   }
 
   ::selection {
-    background-color: rgba(31, 152, 153, 0.26);
+    background-color: rgba(0, 61, 150, 0.26);
   }
 
   body {
     @apply m-0 antialiased;
     color: rgb(var(--ink-900));
     font-family: "Manrope", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    background:
-      radial-gradient(circle at 8% -4%, rgba(133, 213, 193, 0.6), transparent 42%),
-      radial-gradient(circle at 92% 4%, rgba(238, 145, 72, 0.28), transparent 34%),
-      radial-gradient(circle at 50% 100%, rgba(59, 130, 246, 0.08), transparent 40%),
-      linear-gradient(165deg, #f6f7ef 0%, #edf4ef 50%, #edf3f9 100%);
-    background-attachment: fixed;
+    background: #FFFFFF;
     overflow-x: hidden;
   }
 
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.15;
-    background-image:
-      linear-gradient(to right, rgba(15, 23, 42, 0.16) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(15, 23, 42, 0.16) 1px, transparent 1px);
-    background-size: 28px 28px;
-    mask-image: radial-gradient(circle at center, black 25%, transparent 90%);
-  }
+
 
   h1,
   h2,
@@ -80,7 +64,7 @@
 
   .side-panel {
     @apply rounded-[28px] border border-white/20 text-white shadow-2xl shadow-slate-900/20;
-    background: linear-gradient(155deg, #051423 0%, #0b3a4d 45%, #1f8385 100%);
+    background: linear-gradient(155deg, #003D96 0%, #003580 60%, #001E4D 100%);
   }
 
   .side-brand {
@@ -89,7 +73,7 @@
 
   .content-panel {
     @apply min-w-0 rounded-[28px] border border-white/70 p-4 shadow-soft backdrop-blur-sm sm:p-5 lg:p-6;
-    background: linear-gradient(170deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.55));
+    background: #FFFFFF;
   }
 
   .mobile-shell-bar {
@@ -130,17 +114,17 @@
 
   .page-header {
     @apply relative overflow-hidden rounded-3xl border p-5 shadow-sm backdrop-blur-md;
-    border-color: rgba(255, 255, 255, 0.8);
+    border-color: rgba(0, 61, 150, 0.12);
     background:
-      radial-gradient(circle at 90% 15%, rgba(31, 152, 153, 0.14), transparent 30%),
-      radial-gradient(circle at 0% 0%, rgba(243, 168, 102, 0.18), transparent 35%),
+      radial-gradient(circle at 90% 15%, rgba(0, 61, 150, 0.14), transparent 30%),
+      radial-gradient(circle at 0% 0%, rgba(255, 92, 0, 0.18), transparent 35%),
       rgba(255, 255, 255, 0.74);
   }
 
   .page-eyebrow {
     @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em];
-    border-color: rgba(31, 152, 153, 0.28);
-    color: rgba(8, 24, 36, 0.74);
+    border-color: rgba(0, 61, 150, 0.28);
+    color: #003D96;
     background: rgba(255, 255, 255, 0.7);
   }
 
@@ -179,7 +163,7 @@
 
   .panel:hover {
     transform: translateY(-2px);
-    border-color: rgba(31, 152, 153, 0.35);
+    border-color: rgba(0, 61, 150, 0.35);
     box-shadow: 0 20px 42px rgba(12, 33, 45, 0.16);
   }
 
@@ -221,7 +205,7 @@
   .btn-primary {
     @apply btn text-white active:scale-[0.99];
     background: linear-gradient(132deg, rgb(var(--accent-500)) 0%, rgb(var(--accent-600)) 85%);
-    box-shadow: 0 10px 24px rgba(31, 152, 153, 0.35);
+    box-shadow: 0 10px 24px rgba(0, 61, 150, 0.35);
   }
 
   .btn-primary:hover {
@@ -229,13 +213,20 @@
   }
 
   .btn-muted {
-    @apply btn border-slate-300 bg-white/85 text-slate-700 hover:bg-white active:scale-[0.99];
+    @apply btn bg-white active:scale-[0.99];
+    border-color: rgba(255, 92, 0, 0.35);
+    color: #B84100;
+  }
+
+  .btn-muted:hover {
+    background-color: #FFF2E8;
+    border-color: #FF5C00;
   }
 
   .btn-danger {
     @apply btn text-white active:scale-[0.99];
-    background: linear-gradient(132deg, rgb(var(--danger-500)) 0%, rgb(188 71 33) 85%);
-    box-shadow: 0 8px 22px rgba(223, 93, 53, 0.32);
+    background: linear-gradient(132deg, rgb(var(--danger-500)) 0%, rgb(153 54 0) 85%);
+    box-shadow: 0 8px 22px rgba(184, 65, 0, 0.32);
   }
 
   .btn-page {
@@ -257,7 +248,7 @@
   .tab-btn-active {
     @apply border-transparent text-white;
     background: linear-gradient(132deg, rgb(var(--accent-500)) 0%, rgb(var(--accent-600)) 85%);
-    box-shadow: 0 8px 18px rgba(31, 152, 153, 0.3);
+    box-shadow: 0 8px 18px rgba(0, 61, 150, 0.3);
   }
 
   .field {
@@ -271,8 +262,8 @@
   }
 
   .field:focus {
-    border-color: rgba(31, 152, 153, 0.58);
-    box-shadow: 0 0 0 3px rgba(31, 152, 153, 0.2);
+    border-color: rgba(0, 61, 150, 0.58);
+    box-shadow: 0 0 0 3px rgba(0, 61, 150, 0.2);
   }
 
   textarea.field {
@@ -291,7 +282,7 @@
   }
 
   .table-clean thead {
-    background: linear-gradient(132deg, rgba(31, 152, 153, 0.16), rgba(140, 219, 190, 0.18));
+    background: linear-gradient(132deg, rgba(0, 61, 150, 0.16), rgba(0, 61, 150, 0.18));
   }
 
   .table-clean th {
@@ -312,7 +303,7 @@
   }
 
   .table-clean tbody tr:hover {
-    @apply bg-teal-50/60;
+    @apply bg-brand-50/60;
   }
 
   .status-pill {
@@ -422,7 +413,7 @@
   }
 
   .loan-records-scroll::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(31, 152, 153, 0.92) 0%, rgba(24, 121, 130, 0.95) 100%);
+    background: linear-gradient(180deg, rgba(0, 61, 150, 0.92) 0%, rgba(24, 121, 130, 0.95) 100%);
     border-radius: 9999px;
   }
 }

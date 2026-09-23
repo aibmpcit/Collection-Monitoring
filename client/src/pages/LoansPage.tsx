@@ -1620,7 +1620,6 @@ export function LoansPage() {
 
       <PageHeader
         title="Collections"
-        subtitle={isCollector ? "Review assigned loan records and open each account to add payments and remarks." : "Manage loan records and open each account for payments and loan remarks."}
         eyebrow="Loan Operations"
         actions={<PageMetaStamp />}
       />
@@ -1629,7 +1628,6 @@ export function LoansPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
-            <p className="text-xs text-slate-600">{isCollector ? "Open a loan to review details, add remarks, and record payments." : "Manage loan entries and recorded payments."}</p>
           </div>
           {canAddLoans && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1670,9 +1668,6 @@ export function LoansPage() {
                 ))}
               </select>
             </label>
-            <p className="text-xs text-slate-600">
-              {activeRecordsTab === "loans" ? `${filteredLoans.length} loan(s) in view` : `${filteredPaymentRecords.length} payment(s) in view`}
-            </p>
           </div>
         )}
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -1779,7 +1774,7 @@ export function LoansPage() {
                             aria-label={`Select loan ${loan.loanAccountNo}`}
                             checked={selectedLoanIdSet.has(loan.id)}
                             onChange={(event) => toggleLoanSelection(loan.id, event.target.checked)}
-                            className="h-4 w-4 accent-teal-600"
+                            className="h-4 w-4 accent-brand-600"
                           />
                         )}
                         <span className={loanStatusClass(loan.status)}>{loan.status}</span>
@@ -1839,7 +1834,7 @@ export function LoansPage() {
                           checked={allLoanPageSelected}
                           onChange={(event) => toggleLoanPageSelection(event.target.checked)}
                           disabled={!hasLoanPageRows}
-                          className="h-4 w-4 accent-teal-600"
+                          className="h-4 w-4 accent-brand-600"
                         />
                       </th>
                     )}
@@ -1884,7 +1879,7 @@ export function LoansPage() {
                             checked={selectedLoanIdSet.has(loan.id)}
                             onClick={(event) => event.stopPropagation()}
                             onChange={(event) => toggleLoanSelection(loan.id, event.target.checked)}
-                            className="h-4 w-4 accent-teal-600"
+                            className="h-4 w-4 accent-brand-600"
                           />
                         </td>
                       )}
@@ -2014,7 +2009,7 @@ export function LoansPage() {
                         aria-label={`Select payment ${row.paymentId}`}
                         checked={selectedPaymentIdSet.has(row.id)}
                         onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
-                        className="mt-1 h-4 w-4 shrink-0 accent-teal-600"
+                        className="mt-1 h-4 w-4 shrink-0 accent-brand-600"
                       />
                     )}
                   </div>
@@ -2043,7 +2038,7 @@ export function LoansPage() {
                           checked={allPaymentPageSelected}
                           onChange={(event) => togglePaymentPageSelection(event.target.checked)}
                           disabled={!hasPaymentPageRows}
-                          className="h-4 w-4 accent-teal-600"
+                          className="h-4 w-4 accent-brand-600"
                         />
                       </th>
                     )}
@@ -2067,7 +2062,7 @@ export function LoansPage() {
                             aria-label={`Select payment ${row.paymentId}`}
                             checked={selectedPaymentIdSet.has(row.id)}
                             onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
-                            className="h-4 w-4 accent-teal-600"
+                            className="h-4 w-4 accent-brand-600"
                           />
                         </td>
                       )}

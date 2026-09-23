@@ -284,7 +284,6 @@ export function BranchesPage() {
 
       <PageHeader
         title="Branches"
-        subtitle="Manage branch records, then assign one or more branch admins from the Accounts page."
         eyebrow="Network Control"
         actions={<PageMetaStamp />}
       />
@@ -312,7 +311,6 @@ export function BranchesPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Branch Records</h2>
-            <p className="text-xs text-slate-600">Manage branch details and track how many branch admins are assigned.</p>
           </div>
           <button type="button" className="btn-primary" onClick={openCreateModal}>
             Add Branch

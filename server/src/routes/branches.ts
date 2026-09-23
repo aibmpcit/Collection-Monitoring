@@ -25,7 +25,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
          b.code,
          b.name,
          b.address,
-         COUNT(u.id)::int AS branch_admin_count
+         COUNT(u.id) AS branch_admin_count
        FROM branches b
        LEFT JOIN users u
          ON u.branch_id = b.id
@@ -60,7 +60,12 @@ router.post("/", authenticate, authorize(["super_admin"]), async (req, res, next
       [parsed.data.code.trim().toUpperCase(), parsed.data.name.trim(), parsed.data.address.trim()]
     );
 
-    const branch = result.rows[0];
+    const branch = {
+      id: result.rows[0].id,
+      code: parsed.data.code.trim().toUpperCase(),
+      name: parsed.data.name.trim(),
+      address: parsed.data.address.trim()
+    };
     return res.status(201).json({
       id: branch.id,
       code: branch.code,
@@ -85,7 +90,7 @@ router.patch("/:branchId", authenticate, authorize(["super_admin"]), async (req,
       return res.status(400).json({ message: "Branch code and name are required" });
     }
 
-    const result = await query<{ id: number; code: string; name: string; address: string | null }>(
+    const result = await query(
       `UPDATE branches
        SET code = $1, name = $2, address = $3
        WHERE id = $4
@@ -98,10 +103,15 @@ router.patch("/:branchId", authenticate, authorize(["super_admin"]), async (req,
       ]
     );
 
-    const branch = result.rows[0];
-    if (!branch) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ message: "Branch not found" });
     }
+    const branch = {
+      id: branchId,
+      code: parsed.data.code.trim().toUpperCase(),
+      name: parsed.data.name.trim(),
+      address: parsed.data.address.trim()
+    };
 
     return res.json({
       id: branch.id,

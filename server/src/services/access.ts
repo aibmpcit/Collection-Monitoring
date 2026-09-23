@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import type { PoolClient } from "pg";
+import type { QueryClient } from "../config/db.js";
 import type { AuthedRequest } from "../middleware/auth.js";
 import type { JwtUser, Role } from "../types/models.js";
 
@@ -83,7 +83,7 @@ export function getRequestUser(req: AuthedRequest): JwtUser {
   return req.user;
 }
 
-export async function uniqueBranchAdminUsername(client: PoolClient, branchCode: string, branchId: number): Promise<string> {
+export async function uniqueBranchAdminUsername(client: QueryClient, branchCode: string, branchId: number): Promise<string> {
   let base = branchCode.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   if (!base) base = `branch${branchId}`;
   let candidate = `${base}_admin`;
@@ -99,7 +99,7 @@ export async function uniqueBranchAdminUsername(client: PoolClient, branchCode: 
   }
 }
 
-export async function nextLoanAccountNo(client: PoolClient): Promise<string> {
+export async function nextLoanAccountNo(client: QueryClient): Promise<string> {
   const latest = await client.query<{ loan_account_no: string }>(
     "SELECT loan_account_no FROM loans WHERE loan_account_no LIKE 'LAN-%' ORDER BY id DESC LIMIT 1"
   );
