@@ -1,4 +1,4 @@
-# Enable Isolated Deployments in Dokploy and route the domain to app:4000.
+# Route the domain to app:4000; networking is explicitly configured below.
 services:
   app:
     build: .
@@ -16,6 +16,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     init: true
+    networks:
+      - dokploy-network
+      - backend
 
   db:
     build:
@@ -35,6 +38,13 @@ services:
       retries: 20
       start_period: 30s
     restart: unless-stopped
+    networks:
+      - backend
 
 volumes:
   mysql_data:
+
+networks:
+  dokploy-network:
+    external: true
+  backend:

@@ -19,7 +19,9 @@ Create a Docker Compose service in your Dokploy project, connected to:
 - Repository: `aibmpcit/Collection-Monitoring`
 - Branch: `main`
 - Compose path: `compose.dokploy.yaml`
-- Enable **Isolated Deployments** so the app and database remain on a shared project network and Dokploy can route to the app.
+- Leave **Isolated Deployments** disabled with this configuration. The file explicitly connects `app` to the external `dokploy-network` for routing, and both `app` and `db` to the project-scoped `backend` network for database access.
+
+In Preview Compose, verify that `app` retains both networks and `db` retains `backend`. If only `app` joins `dokploy-network` while `db` has no explicit network, database hostname resolution can fail with `getaddrinfo EAI_AGAIN db`. Redeploy after updating the configuration; keep the existing database volume.
 
 The Dokploy Compose file exposes container port 4000 internally without publishing host port 8080. MySQL data remains in the `mysql_data` named volume. The schema is copied into the database image to avoid a bind mount into the Git checkout. Initialization happens only on an empty database volume; existing Laragon data is not automatically transferred.
 
