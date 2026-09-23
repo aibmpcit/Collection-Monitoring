@@ -150,27 +150,30 @@ function KpiCard({
   label,
   value,
   icon,
-  onViewMore
+  onViewMore,
+  mobileLayout = "standard"
 }: {
   label: string;
   value: string;
   icon: JSX.Element;
   onViewMore?: () => void;
+  mobileLayout?: "standard" | "wide" | "compact";
 }) {
+  const isCompact = mobileLayout === "compact";
   return (
     <motion.article
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="panel relative overflow-hidden p-4"
+      className={`panel relative overflow-hidden ${mobileLayout === "wide" ? "col-span-2 md:col-span-1" : ""} ${isCompact ? "p-3 md:p-4" : "p-4"}`}
     >
       <div className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-c2/15 blur-2xl" />
-      <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+      <div className={`relative grid items-start ${isCompact ? "grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:gap-3" : "grid-cols-[minmax(0,1fr)_auto] gap-3"}`}>
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{label}</p>
           <h2 className="mt-2 break-words text-[clamp(1.1rem,1.8vw,1.45rem)] font-bold leading-tight text-slate-900">{value}</h2>
         </div>
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/70 bg-white/70 text-c2">
+        <span className={`inline-flex shrink-0 items-center justify-center rounded-xl border border-white/70 bg-white/70 text-c2 ${isCompact ? "row-start-1 h-8 w-8 md:col-start-2 md:h-10 md:w-10" : "h-10 w-10"}`}>
           {icon}
         </span>
       </div>
@@ -234,6 +237,7 @@ function PaginationControls({
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isCollector = user?.role === "staff";
   const canViewAnalytics = user?.role === "super_admin" || user?.role === "branch_admin";
 
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
@@ -409,42 +413,52 @@ export function DashboardPage() {
 
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="metric-grid md:grid-cols-3">
-        <KpiCard
-          label="Total Portfolio"
-          value={metrics ? formatCurrency(metrics.totalPortfolio) : loading ? "Loading..." : "-"}
-          icon={<WalletCards size={18} />}
-          onViewMore={() => handleViewMore("portfolio")}
-        />
-        <KpiCard
-          label="Total Overdue"
-          value={metrics ? formatCurrency(metrics.totalOverdue) : loading ? "Loading..." : "-"}
-          icon={<AlertTriangle size={18} />}
-          onViewMore={() => handleViewMore("overdue")}
-        />
+      <section className="metric-grid dashboard-metric-grid grid-cols-2 md:grid-cols-3">
+        {!isCollector && <>
+          <KpiCard
+            label="Total Portfolio"
+            value={metrics ? formatCurrency(metrics.totalPortfolio) : loading ? "Loading..." : "-"}
+            icon={<WalletCards size={18} />}
+            onViewMore={() => handleViewMore("portfolio")}
+            mobileLayout="wide"
+          />
+          <KpiCard
+            label="Total Overdue"
+            value={metrics ? formatCurrency(metrics.totalOverdue) : loading ? "Loading..." : "-"}
+            icon={<AlertTriangle size={18} />}
+            onViewMore={() => handleViewMore("overdue")}
+            mobileLayout="wide"
+          />
+        </>}
         <KpiCard
           label="Collections Today"
           value={metrics ? formatCurrency(metrics.collectionsToday) : loading ? "Loading..." : "-"}
           icon={<TrendingUp size={18} />}
           onViewMore={() => handleViewMore("collections")}
+          mobileLayout="compact"
         />
         <KpiCard
           label="Open Loans"
           value={loading ? "Loading..." : openLoans.toLocaleString()}
           icon={<Users size={18} />}
           onViewMore={() => handleViewMore("open-loans")}
+          mobileLayout="compact"
         />
-        <KpiCard
-          label="Overdue Rate"
-          value={loading ? "Loading..." : formatPercent(overdueRate)}
-          icon={<BarChart3 size={18} />}
-          onViewMore={() => handleViewMore("overdue-rate")}
-        />
+        {!isCollector && (
+          <KpiCard
+            label="Overdue Rate"
+            value={loading ? "Loading..." : formatPercent(overdueRate)}
+            icon={<BarChart3 size={18} />}
+            onViewMore={() => handleViewMore("overdue-rate")}
+            mobileLayout="compact"
+          />
+        )}
         <KpiCard
           label="Collection Efficiency"
           value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "N/A"}
           icon={<Activity size={18} />}
           onViewMore={() => handleViewMore("efficiency")}
+          mobileLayout="compact"
         />
       </section>
 

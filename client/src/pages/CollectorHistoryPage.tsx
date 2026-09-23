@@ -33,8 +33,6 @@ export function CollectorHistoryPage() {
 
   useEffect(() => {
     if (user?.role === "staff") {
-      setCollectors([{ id: user.id, username: user.username, role: "staff", branchName: user.branchName ?? null }]);
-      setLoading(false);
       return;
     }
     let active = true;
@@ -45,6 +43,10 @@ export function CollectorHistoryPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [user?.id, user?.username, user?.role, user?.branchName, refresh]);
+
+  if (user?.role === "staff") {
+    return <CollectorHistoryDetails key={user.id} />;
+  }
 
   if (collectorId) {
     const collector = collectors.find(row => String(row.id) === collectorId);
@@ -88,6 +90,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [search, setSearch] = useState(params.get("search") ?? "");
   const activeTab = params.get("type") === "remarks" ? "remarks" : "payments";
   const requestParams = new URLSearchParams(params);
+  requestParams.delete("from");
+  requestParams.delete("to");
+  if (user?.role === "staff") requestParams.set("collectorId", String(user.id));
   requestParams.set("type", activeTab);
   const query = requestParams.toString();
 
@@ -114,31 +119,25 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return <main className="page-shell">
-    <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>
+    {user?.role !== "staff" && <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>}
     <PageHeader title={collectorName ? `${collectorName}'s History` : user?.role === "staff" ? "My Collection History" : "Collector History"}
       eyebrow="Collection Activity"
-      actions={<button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
-    <section className="panel p-4">
-      <div className="grid gap-3 md:grid-cols-3">
-        <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid gap-1 text-sm">
-          <label htmlFor="history-search">Search activity</label>
-          <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
-            placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
-            <button className="btn-muted" type="submit">Search</button></div>
-        </form>
-        <label className="grid gap-1 text-sm">From date<input type="date" className="field" value={params.get("from") ?? ""}
-          max={params.get("to") ?? undefined} onChange={event => change("from", event.target.value)} /></label>
-        <label className="grid gap-1 text-sm">To date<input type="date" className="field" value={params.get("to") ?? ""}
-          min={params.get("from") ?? undefined} onChange={event => change("to", event.target.value)} /></label>
-      </div>
-    </section>
+      actions={<button className="btn-muted max-md:absolute max-md:right-4 max-md:top-4" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
     {!loading && data && (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[["Total collected", money(Number(data.summary.amount))], ["Payments", data.summary.payments],
           ["Members reached", data.summary.members], ["Follow-up notes", data.summary.total - data.summary.payments]].map(([label, value]) =>
           <section className="panel p-4" key={label}><p className="text-sm text-slate-600">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></section>)}
       </div>
     )}
+    <section className="panel p-4">
+      <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid max-w-xl gap-1 text-sm">
+        <label htmlFor="history-search">Search activity</label>
+        <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
+          placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
+          <button className="btn-muted" type="submit">Search</button></div>
+      </form>
+    </section>
     <div className="flex gap-2" role="tablist" aria-label="History type">
       {(["payments", "remarks"] as const).map(tab => <button key={tab} type="button" role="tab"
         id={`history-tab-${tab}`} aria-selected={activeTab === tab} aria-controls="history-panel"

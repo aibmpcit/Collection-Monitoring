@@ -154,7 +154,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
 
   return createPortal(
     <nav
-      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] flex items-center gap-2 overflow-x-auto rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
+      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md grid-cols-4 items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
       aria-label="Mobile navigation"
     >
       {navItems.map((item) => {
@@ -164,7 +164,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
           <NavLink
             key={item.to}
             to={item.to}
-            className={`flex min-w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
+            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-semibold transition ${
               isActive ? "bg-brand-600 text-white shadow-[0_10px_24px_rgba(0,61,150,0.28)]" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -175,7 +175,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
             >
               {item.icon}
             </span>
-            <span className="truncate">{item.label}</span>
+            <span className="max-w-full truncate">{item.to === "/collector-history" ? "History" : item.label}</span>
           </NavLink>
         );
       })}
