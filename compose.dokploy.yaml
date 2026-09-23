@@ -1,0 +1,40 @@
+# Enable Isolated Deployments in Dokploy and route the domain to app:4000.
+services:
+  app:
+    build: .
+    expose:
+      - "4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      SERVE_CLIENT: "true"
+      DATABASE_URL: "mysql://collection_app:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in Dokploy Environment}@db:3306/collection_monitoring"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in Dokploy Environment}"
+      API_BODY_LIMIT: 25mb
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+
+  db:
+    build:
+      context: ./database
+      dockerfile: Dockerfile
+    environment:
+      MYSQL_DATABASE: collection_monitoring
+      MYSQL_USER: collection_app
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in Dokploy Environment}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in Dokploy Environment}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u collection_app collection_monitoring -e 'SELECT 1 FROM users LIMIT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

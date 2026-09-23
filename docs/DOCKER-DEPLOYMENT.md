@@ -4,6 +4,8 @@ This setup runs the React frontend and Express API in one application container,
 
 ## 1. Configure
 
+For Dokploy, use the [Dokploy guide](DOKPLOY.md) and `compose.dokploy.yaml` instead of the local Compose instructions below.
+
 Install Docker with Docker Compose support (Docker Desktop using Linux containers on Windows). From the project root, create `.env.docker` with:
 
 ```dotenv
