@@ -413,7 +413,7 @@ export function DashboardPage() {
 
       {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="metric-grid dashboard-metric-grid grid-cols-2 md:grid-cols-3">
+      <section className={`metric-grid dashboard-metric-grid grid-cols-2 ${isCollector ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
         {!isCollector && <>
           <KpiCard
             label="Total Portfolio"
@@ -453,13 +453,15 @@ export function DashboardPage() {
             mobileLayout="compact"
           />
         )}
-        <KpiCard
-          label="Collection Efficiency"
-          value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "--"}
-          icon={<Activity size={18} />}
-          onViewMore={() => handleViewMore("efficiency")}
-          mobileLayout="compact"
-        />
+        {!isCollector && (
+          <KpiCard
+            label="Collection Efficiency"
+            value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "--"}
+            icon={<Activity size={18} />}
+            onViewMore={() => handleViewMore("efficiency")}
+            mobileLayout="compact"
+          />
+        )}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.25fr,1fr]">
