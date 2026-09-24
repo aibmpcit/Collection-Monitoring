@@ -383,6 +383,14 @@ export function LoansPage() {
     return [...new Set(types)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [loans, selectedBranchId, user?.role]);
 
+  const latestImportedAt = useMemo(() => {
+    return loans.reduce<string>((latest, loan) => {
+      const currentTime = new Date(loan.importedAt).getTime();
+      const latestTime = latest ? new Date(latest).getTime() : Number.NEGATIVE_INFINITY;
+      return Number.isNaN(currentTime) || currentTime <= latestTime ? latest : loan.importedAt;
+    }, "");
+  }, [loans]);
+
   const filteredPaymentRecords = useMemo(() => {
     const q = paymentQuery.trim().toLowerCase();
     const matches = paymentRecords.filter((row) => {
@@ -1639,6 +1647,7 @@ export function LoansPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
+            {latestImportedAt && <p className="mt-1 text-xs text-slate-500">As of: {formatDate(latestImportedAt)}</p>}
           </div>
           {canAddLoans && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1681,17 +1690,17 @@ export function LoansPage() {
             </label>
           </div>
         )}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className={`tab-btn ${
-              activeRecordsTab === "loans" ? "tab-btn-active" : ""
-            }`}
-            onClick={() => setActiveRecordsTab("loans")}
-          >
-            Loan Records
-          </button>
-          {!isCollector && (
+        {!isCollector && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={`tab-btn ${
+                activeRecordsTab === "loans" ? "tab-btn-active" : ""
+              }`}
+              onClick={() => setActiveRecordsTab("loans")}
+            >
+              Loan Records
+            </button>
             <button
               type="button"
               className={`tab-btn ${
@@ -1701,15 +1710,15 @@ export function LoansPage() {
             >
               Payments
             </button>
-          )}
-        </div>
+          </div>
+        )}
         {importMessage && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
         {message && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
         {error && <p className="mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {activeRecordsTab === "loans" ? (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex w-full flex-col gap-2 sm:max-w-2xl sm:flex-row">
+            <div className="flex flex-wrap items-center justify-between gap-2 md:flex-nowrap">
+              <div className="flex w-full flex-col gap-2 sm:flex-row md:min-w-0 md:flex-1">
                 <div className="relative min-w-0 flex-1">
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -1720,7 +1729,7 @@ export function LoansPage() {
                   />
                 </div>
                 <select
-                  className="field w-full sm:w-52"
+                  className="field w-full sm:w-52 md:w-44 md:shrink-0"
                   value={loanTypeFilter}
                   onChange={(event) => setLoanTypeFilter(event.target.value)}
                   aria-label="Filter by loan type"
@@ -1730,7 +1739,7 @@ export function LoansPage() {
                 </select>
               </div>
               {canDeleteLoans && (
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:shrink-0 md:flex-nowrap">
                   <button
                     type="button"
                     className="btn-muted w-full sm:w-auto"
@@ -1771,7 +1780,6 @@ export function LoansPage() {
                       <p className="truncate text-sm font-semibold text-slate-900">{loan.memberName}</p>
                       <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>
                       <p className="mt-1 text-xs text-slate-500">{loan.loanType}</p>
-                      <p className="mt-1 text-xs text-slate-500">Imported: {formatDate(loan.importedAt)}</p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <span className={loanStatusClass(loan.status)}>{loan.status}</span>
@@ -1807,7 +1815,6 @@ export function LoansPage() {
                     <div className="mobile-record-grid">
                       <LoanRecordField label="CIF Key" value={loan.cifKey} />
                       <LoanRecordField label="Loan Type" value={loan.loanType} />
-                      <LoanRecordField label="Imported" value={formatDate(loan.importedAt)} />
                       <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
                       <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
                       <LoanRecordField label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
@@ -1847,7 +1854,7 @@ export function LoansPage() {
             )}
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
-              <table className="table-clean loan-records-table w-[2300px] text-xs">
+              <table className="table-clean loan-records-table w-[2200px] text-xs">
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>
                     {canDeleteLoans && (
@@ -1862,12 +1869,11 @@ export function LoansPage() {
                         />
                       </th>
                     )}
-                    <th>Action</th>
+                    {canUseLoanActions && <th>Action</th>}
                     <th>CIF Key</th>
                     <th>Loan Account No</th>
                     <th>Member Name</th>
                     <th>Loan Type</th>
-                    <th>Imported</th>
                     <th>Date Release</th>
                     <th>Maturity Date</th>
                     <th>Loan Amount</th>
@@ -1908,27 +1914,25 @@ export function LoansPage() {
                           />
                         </td>
                       )}
-                      <td>
+                      {canUseLoanActions && <td>
                         <div className="flex w-full justify-center">
-                          {canUseLoanActions && (
-                            <div data-action-menu="loan" onClick={(event) => event.stopPropagation()}>
-                              <button
-                                type="button"
-                                className="action-menu-trigger"
-                                aria-label={`Open actions for loan ${loan.loanAccountNo}`}
-                                aria-haspopup="menu"
-                                aria-expanded={openMenuLoan?.loanId === loan.id}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleLoanMenu(event.currentTarget, loan.id);
-                                }}
-                              >
-                                <MoreVertical size={14} />
-                              </button>
-                            </div>
-                          )}
+                          <div data-action-menu="loan" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="action-menu-trigger"
+                              aria-label={`Open actions for loan ${loan.loanAccountNo}`}
+                              aria-haspopup="menu"
+                              aria-expanded={openMenuLoan?.loanId === loan.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleLoanMenu(event.currentTarget, loan.id);
+                              }}
+                            >
+                              <MoreVertical size={14} />
+                            </button>
+                          </div>
                         </div>
-                      </td>
+                      </td>}
                       <td title={loan.cifKey}>
                         <span className="cell-clip">{loan.cifKey}</span>
                       </td>
@@ -1941,7 +1945,6 @@ export function LoansPage() {
                       <td title={loan.loanType}>
                         <span className="cell-clip">{loan.loanType}</span>
                       </td>
-                      <td>{formatDate(loan.importedAt)}</td>
                       <td>{new Date(loan.dateRelease).toLocaleDateString()}</td>
                       <td>{new Date(loan.maturityDate).toLocaleDateString()}</td>
                       <td>{formatCurrency(loan.loanAmount)}</td>

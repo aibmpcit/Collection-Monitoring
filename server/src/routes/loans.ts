@@ -304,7 +304,7 @@ function mapLoanRow(row: Record<string, unknown>) {
     penalty: toNumber(row.penalty_due ?? row.penalty ?? 0),
     dueDate: String(row.due_date ?? row.maturity_date ?? ""),
     status: String(row.status ?? "active"),
-    importedAt: String(row.created_at ?? "")
+    importedAt: String(row.imported_at ?? row.created_at ?? "")
   };
 }
 
@@ -337,7 +337,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          l.penalty,
          l.due_date,
          l.status,
-         l.created_at,
+         DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
          b.cif_key,
          b.member_name,
          b.contact_info,
@@ -994,7 +994,7 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
          l.penalty,
          l.due_date,
          l.status,
-         l.created_at,
+         DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
          b.branch_id,
          b.cif_key,
          b.member_name,
