@@ -68,3 +68,18 @@ export async function apiRequest<T>(path: string, method: HttpMethod = "GET", bo
 
   return response.json() as Promise<T>;
 }
+
+export async function apiDownload(path: string, fallbackName: string) {
+  const token = localStorage.getItem("token");
+  const response = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message ?? "Unable to download attachment");
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const name = encodedName ? decodeURIComponent(encodedName) : fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}

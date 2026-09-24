@@ -4,17 +4,21 @@ import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { useAuth } from "../context/AuthContext";
 import { getRemarkCategoryLabel } from "../constants/remarkCategories";
-import { apiRequest } from "../services/api";
+import { apiDownload, apiRequest } from "../services/api";
 
 interface Activity {
   id: number; kind: string; occurred_at: string; amount: number;
   or_no: string | null; remark: string | null; category: string | null;
-  loan_id: number | null; loan_account_no: string | null; member_name: string;
+  loan_id: number | null; loan_account_no: string | null; member_id: number;
+  member_name: string;
   cif_key: string | null; collector_name: string | null; branch_name: string | null;
+  attachment_name?: string | null;
+  loan_type?: string | null; maturity_date?: string | null; loan_status?: string | null;
+  contact_info?: string | null; address?: string | null;
 }
 interface History {
   items: Activity[];
-  summary: { total: number; amount: number; payments: number; members: number };
+  summary: { total: number; amount: number; payments: number; members: number; attachments?: number };
   total: number; page: number; pageSize: number;
 }
 const money = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
@@ -258,6 +262,11 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     {error && <p className="panel p-4 text-red-700" role="alert">{error} <button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Retry</button></p>}
     {loading ? <p className="panel p-4" role="status">Loading collection history...</p> : data && <>
       <section className="panel p-4">
+        {activeTab === "remarks" && <div className="mb-4 grid grid-cols-3 gap-3">
+          <div className="surface-soft p-3"><p className="text-xs text-slate-600">Remarks</p><p className="mt-1 text-xl font-bold">{data.total}</p></div>
+          <div className="surface-soft p-3"><p className="text-xs text-slate-600">Members</p><p className="mt-1 text-xl font-bold">{data.summary.members}</p></div>
+          <div className="surface-soft p-3"><p className="text-xs text-slate-600">Attachments</p><p className="mt-1 text-xl font-bold">{Number(data.summary.attachments ?? 0)}</p></div>
+        </div>}
         <p className="mb-3 text-sm text-slate-600">{data.total} {activeTab} matching your filters. Latest first.</p>
         <div className="grid gap-3">
           {data.items.map(item => <article key={`${item.kind}-${item.id}`} className="rounded-xl border border-slate-200 bg-white/70 p-4">
@@ -269,7 +278,21 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
             <p className="mt-2 text-sm">Recorded by <strong>{item.collector_name || "Deleted account / unattributed"}</strong>
               {item.loan_id && <> · <Link className="font-medium text-brand-700 underline" to={`/loan-details/${item.loan_id}`}>{item.loan_account_no || `Loan #${item.loan_id}`}</Link></>}</p>
             {item.kind === "payment" ? <p className="mt-1 text-sm text-slate-600">Payment PAY-{String(item.id).padStart(6, "0")} · Receipt: {item.or_no || "Not provided"}</p>
-              : <><p className="mt-1 text-xs text-slate-500">{item.kind === "member_remark" ? "Member note" : "Loan note"}</p><p className="mt-1 whitespace-pre-wrap break-words text-sm">{item.remark}</p></>}
+              : <>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{item.kind === "member_remark" ? "Member note" : "Loan note"}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.remark}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="surface-soft p-3"><p className="text-xs text-slate-500">Member details</p><p className="mt-1 text-sm font-semibold">{item.member_name}</p><p className="text-xs text-slate-600">CIF: {item.cif_key || "-"}</p><p className="text-xs text-slate-600">Contact: {item.contact_info || "-"}</p></div>
+                  <div className="surface-soft p-3"><p className="text-xs text-slate-500">Address and branch</p><p className="mt-1 text-sm">{item.address || "-"}</p><p className="text-xs text-slate-600">{item.branch_name || "No branch"}</p></div>
+                  {item.loan_id && <div className="surface-soft p-3"><p className="text-xs text-slate-500">Loan details</p><Link className="mt-1 block text-sm font-semibold text-brand-700 underline" to={`/loan-details/${item.loan_id}`}>{item.loan_account_no || `Loan #${item.loan_id}`}</Link><p className="text-xs text-slate-600">{item.loan_type || "Loan"} / {item.loan_status || "-"}</p><p className="text-xs text-slate-600">Maturity: {item.maturity_date ? item.maturity_date.slice(0, 10) : "-"}</p></div>}
+                </div>
+              </>}
+            {item.attachment_name && <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
+              const path = item.kind === "member_remark"
+                ? `/borrowers/${item.member_id}/remarks/${item.id}/attachment`
+                : `/loans/${item.loan_id}/remarks/${item.id}/attachment`;
+              void apiDownload(path, item.attachment_name || "attachment").catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
+            }}>Download {item.attachment_name}</button>}
           </article>)}
           {data.items.length === 0 && <p className="py-8 text-center text-slate-500">No {activeTab} found for these filters.</p>}
         </div>

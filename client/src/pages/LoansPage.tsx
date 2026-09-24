@@ -6,8 +6,10 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { useAuth } from "../context/AuthContext";
-import { apiRequest } from "../services/api";
+import { apiDownload, apiRequest } from "../services/api";
+import { fileToAttachment } from "../services/attachments";
 import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark } from "../types/models";
 
 interface LoanRow extends LoanPayload {
@@ -287,10 +289,13 @@ export function LoansPage() {
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
+  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
+  const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
   const [loanQuery, setLoanQuery] = useState("");
   const [loanTypeFilter, setLoanTypeFilter] = useState("");
+  const [parAgeFilter, setParAgeFilter] = useState("");
   const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments">(
     !isCollector && searchParams.get("tab") === "payments" ? "payments" : "loans"
   );
@@ -353,6 +358,17 @@ export function LoansPage() {
       const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId;
       if (!matchesBranch) return false;
       if (loanTypeFilter && loan.loanType !== loanTypeFilter) return false;
+      if (parAgeFilter) {
+        const parAge = Number(loan.parAge ?? 0);
+        const matchesParAge =
+          parAgeFilter === "1-30" ? parAge >= 1 && parAge <= 30 :
+          parAgeFilter === "31-60" ? parAge >= 31 && parAge <= 60 :
+          parAgeFilter === "61-90" ? parAge >= 61 && parAge <= 90 :
+          parAgeFilter === "91-180" ? parAge >= 91 && parAge <= 180 :
+          parAgeFilter === "181-365" ? parAge >= 181 && parAge <= 365 :
+          parAgeFilter === "over-365" ? parAge > 365 : true;
+        if (!matchesParAge) return false;
+      }
       if (!q) return true;
 
       return [
@@ -373,7 +389,7 @@ export function LoansPage() {
     return [...matches].sort(
       (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.loanAccountNo.localeCompare(b.loanAccountNo, undefined, { sensitivity: "base" })
     );
-  }, [loanQuery, loanTypeFilter, loans, selectedBranchId, user?.role]);
+  }, [loanQuery, loanTypeFilter, loans, parAgeFilter, selectedBranchId, user?.role]);
 
   const loanTypeOptions = useMemo(() => {
     const types = loans
@@ -433,7 +449,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setLoanPage(1);
-  }, [loanQuery, loanTypeFilter]);
+  }, [loanQuery, loanTypeFilter, parAgeFilter]);
 
   useEffect(() => {
     setPaymentPage(1);
@@ -472,7 +488,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setOpenMenuLoan(null);
-  }, [activeRecordsTab, loanPage, loanQuery, loanTypeFilter]);
+  }, [activeRecordsTab, loanPage, loanQuery, loanTypeFilter, parAgeFilter]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -798,7 +814,9 @@ export function LoansPage() {
     setRemarkLoan({ id: loan.id, loanAccountNo: loan.loanAccountNo, memberName: loan.memberName });
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+    setRemarkAttachment(null);
     setRemarks([]);
+    setSummaryRemark(null);
     setIsRemarksOpen(true);
     await loadRemarks(loan.id);
   }
@@ -808,6 +826,7 @@ export function LoansPage() {
     setRemarkLoan(null);
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+    setRemarkAttachment(null);
     setRemarks([]);
     setRemarkError("");
   }
@@ -820,8 +839,10 @@ export function LoansPage() {
 
     setRemarkError("");
     try {
-      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory });
+      const attachment = await fileToAttachment(remarkAttachment);
+      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory, attachment });
       setRemarkInput("");
+      setRemarkAttachment(null);
       await loadRemarks(remarkLoan.id);
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to add remark");
@@ -1386,6 +1407,10 @@ export function LoansPage() {
                   rows={3}
                   required
                 />
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Attachment (optional, max 5 MB)
+                  <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
+                </label>
                 <div className="flex justify-end">
                   <button type="submit" className="btn-primary">
                     Add Remark
@@ -1402,7 +1427,9 @@ export function LoansPage() {
                 ) : (
                   <ul className="divide-y divide-black/10">
                     {remarks.map((item) => (
-                      <li key={item.id} className="p-3">
+                      <li key={item.id} className="cursor-pointer p-3 transition hover:bg-white/60" role="button" tabIndex={0}
+                        onClick={() => setSummaryRemark(item)}
+                        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSummaryRemark(item); } }}>
                         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                           {getRemarkCategoryLabel(item.remarkCategory)}
                         </p>
@@ -1631,6 +1658,16 @@ export function LoansPage() {
       {loanImportModal}
       {mobileLoanPreviewModal}
       {remarksModal}
+      {remarkLoan && summaryRemark && (() => {
+        const selectedLoan = loans.find(loan => loan.id === remarkLoan.id);
+        return <RemarkSummaryModal open remark={summaryRemark.remark} category={summaryRemark.remarkCategory}
+          createdAt={summaryRemark.createdAt} createdBy={summaryRemark.createdBy}
+          member={{ name: selectedLoan?.memberName ?? remarkLoan.memberName, cifKey: selectedLoan?.cifKey, contact: selectedLoan?.contactInfo, address: selectedLoan?.address }}
+          loan={{ accountNo: remarkLoan.loanAccountNo, type: selectedLoan?.loanType, status: selectedLoan?.status, maturityDate: selectedLoan ? formatDate(selectedLoan.maturityDate) : undefined }}
+          attachmentName={summaryRemark.attachmentName}
+          onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/loans/${remarkLoan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarkError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
+          onClose={() => setSummaryRemark(null)} />;
+      })()}
       {paymentModal}
       {deleteLoanModal}
       {deleteBulkLoanModal}
@@ -1736,6 +1773,20 @@ export function LoansPage() {
                 >
                   <option value="">All loan types</option>
                   {loanTypeOptions.map((loanType) => <option key={loanType} value={loanType}>{loanType}</option>)}
+                </select>
+                <select
+                  className="field w-full sm:w-48 md:w-40 md:shrink-0"
+                  value={parAgeFilter}
+                  onChange={(event) => setParAgeFilter(event.target.value)}
+                  aria-label="Filter by PAR age"
+                >
+                  <option value="">All PAR ages</option>
+                  <option value="1-30">PAR 1-30</option>
+                  <option value="31-60">PAR 31-60</option>
+                  <option value="61-90">PAR 61-90</option>
+                  <option value="91-180">PAR 91-180</option>
+                  <option value="181-365">PAR 181-365</option>
+                  <option value="over-365">PAR over 365</option>
                 </select>
               </div>
               {canDeleteLoans && (
@@ -1853,7 +1904,33 @@ export function LoansPage() {
               </div>
             )}
 
-            <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
+            {isCollector && <div className="table-shell mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto lg:block">
+              <table className="table-clean w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-c1">
+                  <tr>
+                    <th>Name</th>
+                    <th>Contact</th>
+                    <th>Address</th>
+                    <th>Loan Type</th>
+                    <th>PAR Age</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedLoans.map(loan => <tr key={loan.id} className="cursor-pointer hover:bg-slate-50" tabIndex={0}
+                    onClick={() => openLoanDetails(loan.id)}
+                    onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openLoanDetails(loan.id); } }}>
+                    <td>{loan.memberName}</td>
+                    <td>{loan.contactInfo || "-"}</td>
+                    <td>{loan.address || "-"}</td>
+                    <td>{loan.loanType || "-"}</td>
+                    <td>{loan.parAge}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+              {filteredLoans.length === 0 && <p className="p-3 text-sm text-slate-600">No loans found.</p>}
+            </div>}
+
+            <div className={isCollector ? "hidden" : "table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block"}>
               <table className="table-clean loan-records-table w-[2200px] text-xs">
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>

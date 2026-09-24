@@ -23,15 +23,17 @@ const activitySql = `
   SELECT c.id, 'payment' AS kind, c.created_by AS collector_id, c.collected_at AS occurred_at,
     c.amount, c.or_no, NULL AS remark, NULL AS category, l.id AS loan_id,
     l.loan_account_no, b.id AS member_id, COALESCE(b.member_name, b.name) AS member_name,
-    b.cif_key, b.branch_id
+    b.cif_key, b.branch_id, l.loan_type, l.maturity_date, l.status AS loan_status, b.contact_info, b.address
   FROM collections c JOIN loans l ON l.id = c.loan_id JOIN borrowers b ON b.id = l.borrower_id
   UNION ALL
   SELECT r.id, 'loan_remark', r.created_by, r.created_at, 0, NULL, r.remark_text,
-    r.remark_category, l.id, l.loan_account_no, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id
+    r.remark_category, l.id, l.loan_account_no, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id,
+    l.loan_type, l.maturity_date, l.status, b.contact_info, b.address
   FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id
   UNION ALL
   SELECT r.id, 'member_remark', r.created_by, r.created_at, 0, NULL, r.remark_text,
-    r.remark_category, NULL, NULL, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id
+    r.remark_category, NULL, NULL, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id,
+    NULL, NULL, NULL, b.contact_info, b.address
   FROM borrower_remarks r JOIN borrowers b ON b.id = r.borrower_id`;
 
 router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
@@ -59,10 +61,14 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (filter.to) add("a.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)", filter.to);
     if (filter.search) add("LOCATE(?, CONCAT_WS(' ', a.member_name, a.cif_key, a.loan_account_no, a.or_no, a.remark, u.username, br.name)) > 0", filter.search);
     const source = `FROM (${activitySql}) a LEFT JOIN users u ON u.id = a.collector_id
-      LEFT JOIN branches br ON br.id = a.branch_id ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
-    const summary = await query<{ total: number; amount: number; payments: number; members: number }>(
+      LEFT JOIN branches br ON br.id = a.branch_id
+      LEFT JOIN remark_attachments ra ON ra.remark_id = a.id AND
+        ((a.kind = 'loan_remark' AND ra.remark_kind = 'loan') OR (a.kind = 'member_remark' AND ra.remark_kind = 'member'))
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
+    const summary = await query<{ total: number; amount: number; payments: number; members: number; attachments: number }>(
       `SELECT COUNT(*) AS total, COALESCE(SUM(a.amount), 0) AS amount,
-       COALESCE(SUM(a.kind = 'payment'), 0) AS payments, COUNT(DISTINCT a.member_id) AS members ${source}`, params);
+       COALESCE(SUM(a.kind = 'payment'), 0) AS payments, COUNT(DISTINCT a.member_id) AS members,
+       COALESCE(SUM(ra.file_name IS NOT NULL), 0) AS attachments ${source}`, params);
     const counts = summary.rows[0];
     const total = filter.type === "payments" ? Number(counts.payments)
       : filter.type === "remarks" ? Number(counts.total) - Number(counts.payments) : Number(counts.total);
@@ -71,7 +77,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     const rowSource = source + (typeCondition ? ` ${conditions.length ? "AND" : "WHERE"} ${typeCondition}` : "");
     const exportAll = filter.export === "true";
     const page = exportAll ? 1 : Math.min(filter.page, Math.max(1, Math.ceil(total / 20)));
-    const rows = await query(`SELECT a.*, u.username AS collector_name, br.name AS branch_name ${rowSource}
+    const rows = await query(`SELECT a.*, u.username AS collector_name, br.name AS branch_name, ra.file_name AS attachment_name ${rowSource}
       ORDER BY a.occurred_at DESC, a.kind, a.id DESC${exportAll ? "" : ` LIMIT 20 OFFSET ${(page - 1) * 20}`}`, params);
     return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: exportAll ? Math.max(total, 1) : 20 });
   } catch (error) { return next(error); }

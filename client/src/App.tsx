@@ -47,7 +47,7 @@ const NAV_ITEMS: NavDefinition[] = [
     to: "/borrowers",
     label: "Members",
     icon: <Users size={18} />,
-    visible: () => true
+    visible: (role) => role !== "staff"
   },
   {
     to: "/loans",
@@ -118,7 +118,11 @@ function WorkspaceSidebar({
 }) {
   return (
     <div className="sidebar-shell flex h-full min-h-[320px] flex-col p-4 lg:p-5">
-      <Link to="/dashboard" className="side-brand" onClick={onNavigate}>
+      <Link
+        to="/dashboard"
+        className={role === "staff" ? "block px-3 py-3" : "side-brand"}
+        onClick={onNavigate}
+      >
         <div className="flex items-center gap-2">
         <SystemLogo className="h-9 w-9" />
         <div className="min-w-0">
@@ -134,7 +138,11 @@ function WorkspaceSidebar({
         ))}
       </nav>
 
-      <div className="sidebar-user-card mt-4 rounded-2xl border border-white/15 bg-white/10 p-3 text-white/90 lg:mt-auto">
+      <div
+        className={`sidebar-user-card mt-4 p-3 text-white/90 lg:mt-auto ${
+          role === "staff" ? "" : "rounded-2xl border border-white/15 bg-white/10"
+        }`}
+      >
         <p className="sidebar-text text-sm font-semibold">{username}</p>
         <p className="sidebar-text text-xs uppercase tracking-wide text-white/70">{role}</p>
         <button
@@ -154,7 +162,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
 
   return createPortal(
     <nav
-      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md grid-cols-4 items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
+      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md grid-cols-3 items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
       aria-label="Mobile navigation"
     >
       {navItems.map((item) => {

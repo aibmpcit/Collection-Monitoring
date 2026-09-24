@@ -12,6 +12,7 @@ import {
   toNumber,
   userBranchId
 } from "../services/access.js";
+import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
 
 const router = Router();
 
@@ -1283,6 +1284,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
       remark_category: string;
       created_at: string;
       created_by: string | null;
+      attachment_name: string | null;
     }>(
       `SELECT
          lr.id,
@@ -1290,9 +1292,11 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
          lr.remark_text,
          lr.remark_category,
          lr.created_at,
-         COALESCE(u.username, 'System') AS created_by
+         COALESCE(u.username, 'System') AS created_by,
+         ra.file_name AS attachment_name
        FROM loan_remarks lr
        LEFT JOIN users u ON u.id = lr.created_by
+       LEFT JOIN remark_attachments ra ON ra.remark_kind = 'loan' AND ra.remark_id = lr.id
        WHERE lr.loan_id = $1
        ${user.role === "staff" ? "AND lr.created_by = $2" : ""}
        ORDER BY lr.created_at DESC, lr.id DESC`,
@@ -1306,7 +1310,8 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
         remark: row.remark_text,
         remarkCategory: row.remark_category,
         createdAt: row.created_at,
-        createdBy: row.created_by ?? "System"
+        createdBy: row.created_by ?? "System",
+        attachmentName: row.attachment_name
       }))
     );
   } catch (error) {
@@ -1320,6 +1325,7 @@ router.post("/:loanId/remarks", authenticate, authorize(["super_admin", "branch_
     const loanId = Number(req.params.loanId);
     const remark = String(req.body?.remark ?? "").trim();
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    const attachment = parseAttachment(req.body?.attachment);
 
     const context = await loanContext(loanId);
     if (!context) {
@@ -1338,13 +1344,15 @@ router.post("/:loanId/remarks", authenticate, authorize(["super_admin", "branch_
       "INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
       [loanId, remark, category, user.id]
     );
+    await saveRemarkAttachment("loan", created.rows[0].id, attachment);
 
     return res.status(201).json({
       id: created.rows[0].id,
       loanId,
       remark,
       remarkCategory: category,
-      createdBy: user.username
+      createdBy: user.username,
+      attachmentName: attachment?.name ?? null
     });
   } catch (error) {
     return next(error);
@@ -1377,13 +1385,37 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
 
     const remark = String(req.body?.remark ?? "").trim();
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    const attachment = parseAttachment(req.body?.attachment);
     if (!remark) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     await query("UPDATE loan_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
-    return res.json({ id: remarkId, loanId, remark, remarkCategory: category });
+    await saveRemarkAttachment("loan", remarkId, attachment);
+    return res.json({ id: remarkId, loanId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);
   }
+});
+
+router.get("/:loanId/remarks/:remarkId/attachment", authenticate, async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const loanId = Number(req.params.loanId);
+    const remarkId = Number(req.params.remarkId);
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT lr.created_by, b.branch_id FROM loan_remarks lr
+       INNER JOIN loans l ON l.id = lr.loan_id INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE lr.id = $1 AND lr.loan_id = $2 LIMIT 1`, [remarkId, loanId]
+    );
+    const remark = existing.rows[0];
+    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
+    const attachment = await getRemarkAttachment("loan", remarkId);
+    if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
+    return res.send(attachment.file_data);
+  } catch (error) { return next(error); }
 });
 
 export { router as loanRouter };

@@ -102,6 +102,7 @@ export interface LoanRemark {
   remarkCategory: string;
   createdAt: string;
   createdBy: string;
+  attachmentName?: string | null;
 }
 
 export interface LoanPayment {

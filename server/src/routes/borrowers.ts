@@ -9,6 +9,7 @@ import {
   normalizeRemarkCategory,
   userBranchId
 } from "../services/access.js";
+import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
 
 const router = Router();
 
@@ -442,6 +443,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
       remark_category: string;
       created_at: string;
       username: string | null;
+      attachment_name: string | null;
     }>(
       `SELECT
          br.id,
@@ -449,9 +451,11 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
          br.remark_text,
          br.remark_category,
          br.created_at,
-         u.username
+         u.username,
+         ra.file_name AS attachment_name
        FROM borrower_remarks br
        LEFT JOIN users u ON u.id = br.created_by
+       LEFT JOIN remark_attachments ra ON ra.remark_kind = 'member' AND ra.remark_id = br.id
        WHERE br.borrower_id = $1
        ${user.role === "staff" ? "AND br.created_by = $2" : ""}
        ORDER BY br.created_at DESC, br.id DESC`,
@@ -465,7 +469,8 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
         remark: row.remark_text,
         remarkCategory: row.remark_category,
         createdAt: row.created_at,
-        createdBy: row.username ?? "System"
+        createdBy: row.username ?? "System",
+        attachmentName: row.attachment_name
       }))
     );
   } catch (error) {
@@ -492,17 +497,20 @@ router.post("/:borrowerId/remarks", authenticate, authorize(["super_admin", "bra
     assertBranchAccess(user, branchId);
 
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    const attachment = parseAttachment(req.body?.attachment);
     const created = await query<{ id: number }>(
       "INSERT INTO borrower_remarks (borrower_id, remark_text, remark_category, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
       [borrowerId, remark, category, user.id]
     );
+    await saveRemarkAttachment("member", created.rows[0].id, attachment);
 
     return res.status(201).json({
       id: created.rows[0].id,
       borrowerId,
       remark,
       remarkCategory: category,
-      createdBy: user.username
+      createdBy: user.username,
+      attachmentName: attachment?.name ?? null
     });
   } catch (error) {
     return next(error);
@@ -536,11 +544,35 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     if (!remark) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    const attachment = parseAttachment(req.body?.attachment);
     await query("UPDATE borrower_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
-    return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category });
+    await saveRemarkAttachment("member", remarkId, attachment);
+    return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);
   }
+});
+
+router.get("/:borrowerId/remarks/:remarkId/attachment", authenticate, async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const borrowerId = Number(req.params.borrowerId);
+    const remarkId = Number(req.params.remarkId);
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT br.created_by, b.branch_id FROM borrower_remarks br
+       INNER JOIN borrowers b ON b.id = br.borrower_id
+       WHERE br.id = $1 AND br.borrower_id = $2 LIMIT 1`, [remarkId, borrowerId]
+    );
+    const remark = existing.rows[0];
+    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
+    const attachment = await getRemarkAttachment("member", remarkId);
+    if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
+    return res.send(attachment.file_data);
+  } catch (error) { return next(error); }
 });
 
 export { router as borrowerRouter };

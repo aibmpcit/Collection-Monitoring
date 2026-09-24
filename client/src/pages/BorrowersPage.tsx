@@ -5,9 +5,11 @@ import { BorrowerList } from "../components/BorrowerList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageHeader } from "../components/PageHeader";
+import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { useAuth } from "../context/AuthContext";
-import { apiRequest } from "../services/api";
+import { apiDownload, apiRequest } from "../services/api";
+import { fileToAttachment } from "../services/attachments";
 import type { Borrower, BorrowerPayload, Branch } from "../types/models";
 
 const EMPTY_FORM: BorrowerPayload = {
@@ -50,6 +52,7 @@ interface MemberRemarkRow {
   remarkCategory: string;
   createdAt: string;
   createdBy: string;
+  attachmentName?: string | null;
 }
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
@@ -117,7 +120,9 @@ export function BorrowersPage() {
   const [memberRemarks, setMemberRemarks] = useState<MemberRemarkRow[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
+  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [summaryRemark, setSummaryRemark] = useState<MemberRemarkRow | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarksSubmitting, setRemarksSubmitting] = useState(false);
   const [remarksError, setRemarksError] = useState("");
@@ -363,6 +368,8 @@ export function BorrowersPage() {
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setEditingRemarkId(null);
+    setSummaryRemark(null);
+    setRemarkAttachment(null);
     setMemberRemarks([]);
     setRemarksError("");
     await loadMemberRemarks(borrower.id);
@@ -373,6 +380,7 @@ export function BorrowersPage() {
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setEditingRemarkId(null);
+    setRemarkAttachment(null);
     setMemberRemarks([]);
     setRemarksError("");
     setRemarksLoading(false);
@@ -388,14 +396,16 @@ export function BorrowersPage() {
     setRemarksSubmitting(true);
     setRemarksError("");
     try {
+      const attachment = await fileToAttachment(remarkAttachment);
       await apiRequest(
         `/borrowers/${remarksBorrower.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`,
         editingRemarkId ? "PATCH" : "POST",
-        { remark, remarkCategory }
+        { remark, remarkCategory, attachment }
       );
       setRemarkInput("");
       setRemarkCategory(DEFAULT_REMARK_CATEGORY);
       setEditingRemarkId(null);
+      setRemarkAttachment(null);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
       setRemarksError(e instanceof Error ? e.message : "Unable to add member remark");
@@ -793,6 +803,10 @@ export function BorrowersPage() {
                 rows={3}
                 required
               />
+              <label className="grid gap-1 text-sm font-medium text-black/80">
+                Attachment (optional, max 5 MB)
+                <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
+              </label>
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={remarksSubmitting}>
                   {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Add Remark"}
@@ -809,7 +823,9 @@ export function BorrowersPage() {
               ) : (
                 <ul className="divide-y divide-black/10">
                   {memberRemarks.map((item) => (
-                    <li key={item.id} className="p-3">
+                    <li key={item.id} className="cursor-pointer p-3 transition hover:bg-white/60" role="button" tabIndex={0}
+                      onClick={() => setSummaryRemark(item)}
+                      onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSummaryRemark(item); } }}>
                       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                         {getRemarkCategoryLabel(item.remarkCategory)}
                       </p>
@@ -817,11 +833,13 @@ export function BorrowersPage() {
                       <p className="mt-1 text-xs text-black/60">
                         {formatDateTime(item.createdAt)} | By: {item.createdBy}
                       </p>
-                      <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
+                      <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={event => {
+                        event.stopPropagation();
                         setEditingRemarkId(item.id);
                         setRemarkInput(item.remark);
                         setRemarkCategory(item.remarkCategory as RemarkCategory);
                         setRemarksError("");
+                        setRemarkAttachment(null);
                       }}>Edit</button>
                     </li>
                   ))}
@@ -840,6 +858,12 @@ export function BorrowersPage() {
       {memberImportModal}
       {memberHistoryModal}
       {memberRemarksModal}
+      {remarksBorrower && summaryRemark && <RemarkSummaryModal open remark={summaryRemark.remark}
+        category={summaryRemark.remarkCategory} createdAt={summaryRemark.createdAt} createdBy={summaryRemark.createdBy}
+        member={{ name: remarksBorrower.memberName, cifKey: remarksBorrower.cifKey, contact: remarksBorrower.contactInfo, address: remarksBorrower.address, branch: remarksBorrower.branchName ?? undefined }}
+        attachmentName={summaryRemark.attachmentName}
+        onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/borrowers/${remarksBorrower.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarksError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
+        onClose={() => setSummaryRemark(null)} />}
       <ConfirmDialog
         open={Boolean(borrowerPendingDelete)}
         tone="danger"

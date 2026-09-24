@@ -5,8 +5,10 @@ import { Link, useSearchParams, useParams } from "react-router-dom";
 import { DuesCard } from "../components/DuesCard";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
-import { apiRequest } from "../services/api";
+import { apiDownload, apiRequest } from "../services/api";
+import { fileToAttachment } from "../services/attachments";
 import type { Loan, LoanPayment, LoanRemark } from "../types/models";
 
 interface LoanDetails extends Loan {
@@ -75,6 +77,7 @@ export function LoanDetailsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
+  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
@@ -82,6 +85,7 @@ export function LoanDetailsPage() {
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const remarkDialogRef = useRef<HTMLDialogElement>(null);
   const paymentDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -177,8 +181,10 @@ export function LoanDetailsPage() {
     setRemarkError("");
     setMessage("");
     try {
-      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory });
+      const attachment = await fileToAttachment(remarkAttachment);
+      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory, attachment });
       setRemarkInput("");
+      setRemarkAttachment(null);
       setEditingRemarkId(null);
       setRemarkModalOpen(false);
       setMessage(editingRemarkId ? "Remark updated." : "Remark added.");
@@ -248,6 +254,20 @@ export function LoanDetailsPage() {
 
   return (
     <main className="page-shell">
+      {loan && summaryRemark && <RemarkSummaryModal
+        open
+        remark={summaryRemark.remark}
+        category={summaryRemark.remarkCategory}
+        createdAt={summaryRemark.createdAt}
+        createdBy={summaryRemark.createdBy}
+        member={{ name: loan.memberName, cifKey: loan.cifKey, contact: loan.contactInfo, address: loan.address }}
+        loan={{ accountNo: loan.loanAccountNo, type: loan.loanType, status: loan.status, maturityDate: formatDate(loan.maturityDate) }}
+        attachmentName={summaryRemark.attachmentName}
+        onDownload={summaryRemark.attachmentName ? () => void apiDownload(
+          `/loans/${loan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment"
+        ).catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
+        onClose={() => setSummaryRemark(null)}
+      />}
       {paymentModalOpen && createPortal(
         <dialog ref={paymentDialogRef} aria-labelledby="payment-modal-title"
           className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
@@ -333,6 +353,10 @@ export function LoanDetailsPage() {
                     placeholder="Add a loan remark..."
                     required
                   />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Attachment (optional, max 5 MB)
+                  <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
                 </label>
                 <div className="flex justify-stretch sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
@@ -472,6 +496,7 @@ export function LoanDetailsPage() {
                     setEditingRemarkId(null);
                     setRemarkInput("");
                     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+                    setRemarkAttachment(null);
                     setRemarkModalOpen(true);
                   }}>Add Remark</button>
                 </div>
@@ -485,7 +510,9 @@ export function LoanDetailsPage() {
                 ) : (
                   <ul className="divide-y divide-black/10">
                     {remarks.slice((currentRemarkPage - 1) * HISTORY_PAGE_SIZE, currentRemarkPage * HISTORY_PAGE_SIZE).map((item) => (
-                      <li key={item.id} className="p-3">
+                      <li key={item.id} className="relative cursor-pointer p-3 pr-20 transition hover:bg-white/60" role="button" tabIndex={0}
+                        onClick={() => setSummaryRemark(item)}
+                        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSummaryRemark(item); } }}>
                         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                           {getRemarkCategoryLabel(item.remarkCategory)}
                         </p>
@@ -493,11 +520,13 @@ export function LoanDetailsPage() {
                         <p className="mt-1 text-xs text-black/60">
                           {formatDateTime(item.createdAt)} | By: {item.createdBy}
                         </p>
-                        <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
+                        <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
+                          event.stopPropagation();
                           setEditingRemarkId(item.id);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarkError("");
+                          setRemarkAttachment(null);
                           setRemarkModalOpen(true);
                         }}>Edit</button>
                       </li>

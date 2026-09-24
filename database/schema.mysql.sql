@@ -95,3 +95,15 @@ CREATE TABLE IF NOT EXISTS borrower_remarks (
   CONSTRAINT fk_borrower_remarks_borrower FOREIGN KEY (borrower_id) REFERENCES borrowers(id) ON DELETE CASCADE,
   CONSTRAINT fk_borrower_remarks_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS remark_attachments (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  remark_kind VARCHAR(16) NOT NULL,
+  remark_id INT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(120) NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_remark_attachment (remark_kind, remark_id)
+) ENGINE=InnoDB;
