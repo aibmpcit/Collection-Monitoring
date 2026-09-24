@@ -14,6 +14,7 @@ const filters = z.object({
   collectorId: z.coerce.number().int().positive().optional(),
   search: z.string().trim().max(120).optional(),
   type: z.enum(["payments", "remarks"]).optional(),
+  export: z.literal("true").optional(),
   page: z.coerce.number().int().min(1).max(100000).default(1)
 }).refine(value => !value.from || !value.to || value.from <= value.to);
 
@@ -68,10 +69,11 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     const typeCondition = filter.type === "payments" ? "a.kind = 'payment'"
       : filter.type === "remarks" ? "a.kind IN ('loan_remark', 'member_remark')" : "";
     const rowSource = source + (typeCondition ? ` ${conditions.length ? "AND" : "WHERE"} ${typeCondition}` : "");
-    const page = Math.min(filter.page, Math.max(1, Math.ceil(total / 20)));
+    const exportAll = filter.export === "true";
+    const page = exportAll ? 1 : Math.min(filter.page, Math.max(1, Math.ceil(total / 20)));
     const rows = await query(`SELECT a.*, u.username AS collector_name, br.name AS branch_name ${rowSource}
-      ORDER BY a.occurred_at DESC, a.kind, a.id DESC LIMIT 20 OFFSET ${(page - 1) * 20}`, params);
-    return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: 20 });
+      ORDER BY a.occurred_at DESC, a.kind, a.id DESC${exportAll ? "" : ` LIMIT 20 OFFSET ${(page - 1) * 20}`}`, params);
+    return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: exportAll ? Math.max(total, 1) : 20 });
   } catch (error) { return next(error); }
 });
 

@@ -19,6 +19,15 @@ interface History {
 }
 const money = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
 
+function localDateValue(date: Date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function initialExportDates() {
+  const today = new Date();
+  return { from: localDateValue(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDateValue(today) };
+}
+
 interface Collector { id: number; username: string; role: string; branchName: string | null }
 
 export function CollectorHistoryPage() {
@@ -88,6 +97,11 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState(params.get("search") ?? "");
+  const initialDates = initialExportDates();
+  const [exportFrom, setExportFrom] = useState(initialDates.from);
+  const [exportTo, setExportTo] = useState(initialDates.to);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const activeTab = params.get("type") === "remarks" ? "remarks" : "payments";
   const requestParams = new URLSearchParams(params);
   requestParams.delete("from");
@@ -116,6 +130,80 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     if (key !== "page") next.delete("page");
     setParams(next);
   }
+
+  async function exportPaymentReport() {
+    if (exporting) return;
+    if (!exportFrom || !exportTo || exportFrom > exportTo) {
+      setExportError("Select a valid export date range.");
+      return;
+    }
+    setExporting(true);
+    setExportError("");
+    try {
+      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, type: "payments", export: "true" });
+      const selectedCollectorId = user?.role === "staff" ? String(user.id) : params.get("collectorId");
+      if (selectedCollectorId) exportParams.set("collectorId", selectedCollectorId);
+      const report = await apiRequest<History>(`/collection-history?${exportParams.toString()}`);
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const collector = collectorName ?? user?.username ?? "Collector";
+      const columns = [
+        { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
+        { label: "Member", width: 42 }, { label: "CIF Key", width: 28 }, { label: "Loan Account", width: 32 },
+        { label: "Receipt", width: 28 }, { label: "Amount", width: 30 }
+      ];
+      const fit = (value: unknown, width: number) => {
+        const text = String(value ?? "");
+        if (pdf.getTextWidth(text) <= width - 4) return text;
+        let shortened = text;
+        while (shortened.length > 1 && pdf.getTextWidth(`${shortened}...`) > width - 4) shortened = shortened.slice(0, -1);
+        return `${shortened}...`;
+      };
+      const drawHeader = () => {
+        pdf.setFontSize(16);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Payment Collection Report", 10, 12);
+        pdf.setFontSize(9);
+        pdf.setFont("helvetica", "normal");
+        pdf.text(`Collector: ${collector}`, 10, 18);
+        pdf.text(`Period: ${exportFrom} to ${exportTo}`, 10, 23);
+        pdf.text(`Payments: ${report.total}    Total collected: ${money(Number(report.summary.amount))}`, 10, 28);
+        pdf.setFillColor(0, 61, 150);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont("helvetica", "bold");
+        let x = 10;
+        columns.forEach(column => { pdf.rect(x, 33, column.width, 8, "F"); pdf.text(column.label, x + 2, 38); x += column.width; });
+        pdf.setTextColor(20, 30, 45);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+      };
+      drawHeader();
+      let y = 47;
+      report.items.forEach((item, index) => {
+        if (y > 195) { pdf.addPage(); drawHeader(); y = 47; }
+        if (index % 2 === 0) { pdf.setFillColor(245, 248, 252); pdf.rect(10, y - 5, 255, 7, "F"); }
+        const values = [
+          item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""), item.collector_name ?? "Unattributed",
+          item.branch_name ?? "", item.member_name, item.cif_key ?? "", item.loan_account_no ?? "",
+          item.or_no ?? "", `PHP ${Number(item.amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        ];
+        let x = 10;
+        values.forEach((value, columnIndex) => {
+          const column = columns[columnIndex];
+          pdf.text(fit(value, column.width), columnIndex === values.length - 1 ? x + column.width - 2 : x + 2, y, columnIndex === values.length - 1 ? { align: "right" } : undefined);
+          x += column.width;
+        });
+        y += 7;
+      });
+      if (report.items.length === 0) pdf.text("No payments found for the selected date range.", 10, 49);
+      const safeName = (collectorName ?? user?.username ?? "collector").replace(/[^a-z0-9_-]+/gi, "-");
+      pdf.save(`${safeName}-payments-${exportFrom}-to-${exportTo}.pdf`);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Unable to export payment report.");
+    } finally {
+      setExporting(false);
+    }
+  }
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return <main className="page-shell">
@@ -131,12 +219,26 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       </div>
     )}
     <section className="panel p-4">
-      <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid max-w-xl gap-1 text-sm">
-        <label htmlFor="history-search">Search activity</label>
-        <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
-          placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
-          <button className="btn-muted" type="submit">Search</button></div>
-      </form>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid min-w-0 flex-1 gap-1 text-sm">
+          <label htmlFor="history-search">Search activity</label>
+          <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
+            placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
+            <button className="btn-muted" type="submit">Search</button></div>
+        </form>
+        <div className="flex flex-wrap items-end gap-3 lg:shrink-0 lg:flex-nowrap">
+          <label className="grid min-w-40 flex-1 gap-1 text-sm sm:flex-none">Export from
+            <input type="date" className="field" value={exportFrom} max={exportTo || undefined} onChange={event => setExportFrom(event.target.value)} />
+          </label>
+          <label className="grid min-w-40 flex-1 gap-1 text-sm sm:flex-none">Export to
+            <input type="date" className="field" value={exportTo} min={exportFrom || undefined} onChange={event => setExportTo(event.target.value)} />
+          </label>
+          <button type="button" className="btn-primary w-full sm:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
+            {exporting ? "Exporting..." : "Export PDF"}
+          </button>
+        </div>
+      </div>
+      {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
     <div className="flex gap-2" role="tablist" aria-label="History type">
       {(["payments", "remarks"] as const).map(tab => <button key={tab} type="button" role="tab"

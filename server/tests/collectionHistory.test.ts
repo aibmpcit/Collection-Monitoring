@@ -175,6 +175,19 @@ describe("collector history access and filters", () => {
     expect(mocks.query.mock.calls[1][0]).toContain("LIMIT 20 OFFSET 20");
     expect(mocks.query.mock.calls[1][1]).toEqual([2, 7]);
   });
+  it("exports the collector's full date range without pagination", async () => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ total: 45, amount: 150, payments: 21, members: 10 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const response = await fetch(`${base}?export=true&from=2026-09-01&to=2026-09-30`);
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(45);
+    expect(mocks.query.mock.calls[1][0]).not.toContain("LIMIT 20");
+    expect(mocks.query.mock.calls[1][0]).toContain("a.branch_id = $1 AND a.collector_id = $2");
+    expect(mocks.query.mock.calls[1][1]).toEqual([2, 7, "2026-09-01", "2026-09-30"]);
+  });
   it.each(["from=2026-02-30", "from=2026-09-22&to=2026-09-01", "page=-1", "collectorId=abc", "type=invalid"])("rejects invalid filters: %s", async query => {
     expect((await fetch(`${base}?${query}`)).status).toBe(400);
     expect(mocks.query).not.toHaveBeenCalled();

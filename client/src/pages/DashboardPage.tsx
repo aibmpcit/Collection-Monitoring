@@ -561,7 +561,7 @@ export function DashboardPage() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.22, delay: 0.1 }}
-          className="panel p-4"
+          className="panel order-2 p-4"
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Upcoming Due Watchlist</h2>
@@ -649,7 +649,7 @@ export function DashboardPage() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.22, delay: 0.13 }}
-          className="panel p-4"
+          className="panel order-1 p-4"
         >
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
             <h2 className="text-lg font-semibold text-slate-900">Overdue Accounts Table</h2>
