@@ -17,6 +17,7 @@ interface LoanRow extends LoanPayload {
   memberName: string;
   contactInfo: string;
   address: string;
+  importedAt: string;
 }
 
 interface PaymentRecordRow {
@@ -289,6 +290,7 @@ export function LoansPage() {
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
   const [loanQuery, setLoanQuery] = useState("");
+  const [loanTypeFilter, setLoanTypeFilter] = useState("");
   const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments">(
     !isCollector && searchParams.get("tab") === "payments" ? "payments" : "loans"
   );
@@ -350,6 +352,7 @@ export function LoansPage() {
       if (loan.status === "closed") return false;
       const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId;
       if (!matchesBranch) return false;
+      if (loanTypeFilter && loan.loanType !== loanTypeFilter) return false;
       if (!q) return true;
 
       return [
@@ -370,7 +373,15 @@ export function LoansPage() {
     return [...matches].sort(
       (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.loanAccountNo.localeCompare(b.loanAccountNo, undefined, { sensitivity: "base" })
     );
-  }, [loanQuery, loans, selectedBranchId, user?.role]);
+  }, [loanQuery, loanTypeFilter, loans, selectedBranchId, user?.role]);
+
+  const loanTypeOptions = useMemo(() => {
+    const types = loans
+      .filter((loan) => user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId)
+      .map((loan) => loan.loanType.trim())
+      .filter(Boolean);
+    return [...new Set(types)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [loans, selectedBranchId, user?.role]);
 
   const filteredPaymentRecords = useMemo(() => {
     const q = paymentQuery.trim().toLowerCase();
@@ -414,7 +425,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setLoanPage(1);
-  }, [loanQuery]);
+  }, [loanQuery, loanTypeFilter]);
 
   useEffect(() => {
     setPaymentPage(1);
@@ -453,7 +464,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setOpenMenuLoan(null);
-  }, [activeRecordsTab, loanPage, loanQuery]);
+  }, [activeRecordsTab, loanPage, loanQuery, loanTypeFilter]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -1698,14 +1709,25 @@ export function LoansPage() {
         {activeRecordsTab === "loans" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="relative w-full max-w-sm">
-                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  className="field pl-9"
-                  value={loanQuery}
-                  onChange={(event) => setLoanQuery(event.target.value)}
-                  placeholder="Search loan records"
-                />
+              <div className="flex w-full flex-col gap-2 sm:max-w-2xl sm:flex-row">
+                <div className="relative min-w-0 flex-1">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="field pl-9"
+                    value={loanQuery}
+                    onChange={(event) => setLoanQuery(event.target.value)}
+                    placeholder="Search loan records"
+                  />
+                </div>
+                <select
+                  className="field w-full sm:w-52"
+                  value={loanTypeFilter}
+                  onChange={(event) => setLoanTypeFilter(event.target.value)}
+                  aria-label="Filter by loan type"
+                >
+                  <option value="">All loan types</option>
+                  {loanTypeOptions.map((loanType) => <option key={loanType} value={loanType}>{loanType}</option>)}
+                </select>
               </div>
               {canDeleteLoans && (
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1749,6 +1771,7 @@ export function LoansPage() {
                       <p className="truncate text-sm font-semibold text-slate-900">{loan.memberName}</p>
                       <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>
                       <p className="mt-1 text-xs text-slate-500">{loan.loanType}</p>
+                      <p className="mt-1 text-xs text-slate-500">Imported: {formatDate(loan.importedAt)}</p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <span className={loanStatusClass(loan.status)}>{loan.status}</span>
@@ -1784,6 +1807,7 @@ export function LoansPage() {
                     <div className="mobile-record-grid">
                       <LoanRecordField label="CIF Key" value={loan.cifKey} />
                       <LoanRecordField label="Loan Type" value={loan.loanType} />
+                      <LoanRecordField label="Imported" value={formatDate(loan.importedAt)} />
                       <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
                       <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
                       <LoanRecordField label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
@@ -1823,7 +1847,7 @@ export function LoansPage() {
             )}
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
-              <table className="table-clean loan-records-table w-[2200px] text-xs">
+              <table className="table-clean loan-records-table w-[2300px] text-xs">
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>
                     {canDeleteLoans && (
@@ -1843,6 +1867,7 @@ export function LoansPage() {
                     <th>Loan Account No</th>
                     <th>Member Name</th>
                     <th>Loan Type</th>
+                    <th>Imported</th>
                     <th>Date Release</th>
                     <th>Maturity Date</th>
                     <th>Loan Amount</th>
@@ -1916,6 +1941,7 @@ export function LoansPage() {
                       <td title={loan.loanType}>
                         <span className="cell-clip">{loan.loanType}</span>
                       </td>
+                      <td>{formatDate(loan.importedAt)}</td>
                       <td>{new Date(loan.dateRelease).toLocaleDateString()}</td>
                       <td>{new Date(loan.maturityDate).toLocaleDateString()}</td>
                       <td>{formatCurrency(loan.loanAmount)}</td>

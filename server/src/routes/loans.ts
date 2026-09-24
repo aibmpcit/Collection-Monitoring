@@ -303,7 +303,8 @@ function mapLoanRow(row: Record<string, unknown>) {
     interest: toNumber(row.interest ?? 0),
     penalty: toNumber(row.penalty_due ?? row.penalty ?? 0),
     dueDate: String(row.due_date ?? row.maturity_date ?? ""),
-    status: String(row.status ?? "active")
+    status: String(row.status ?? "active"),
+    importedAt: String(row.created_at ?? "")
   };
 }
 
@@ -336,6 +337,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          l.penalty,
          l.due_date,
          l.status,
+         l.created_at,
          b.cif_key,
          b.member_name,
          b.contact_info,
@@ -782,7 +784,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               `UPDATE loans
                SET borrower_id = $1, loan_account_no = $2, loan_type = $3, date_release = $4, maturity_date = $5, loan_amount = $6,
                    principal_due = $7, penalty_due = $8, interest = $9, other_charges = $10, par_age = $11, notes = $12,
-                   principal = $13, penalty = $14, due_date = $15, status = $16
+                   principal = $13, penalty = $14, due_date = $15, status = $16, created_at = CURRENT_TIMESTAMP
                WHERE id = $17`,
               [
                 borrower.id,
@@ -992,6 +994,7 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
          l.penalty,
          l.due_date,
          l.status,
+         l.created_at,
          b.branch_id,
          b.cif_key,
          b.member_name,
