@@ -17,6 +17,6 @@ describe("collection calculations", () => {
 
   it("handles collection efficiency", () => {
     expect(calculateCollectionEfficiency(500, 1000)).toBe(50);
-    expect(calculateCollectionEfficiency(1, 0)).toBe(100);
+    expect(calculateCollectionEfficiency(0, 0)).toBeNull();
   });
 });

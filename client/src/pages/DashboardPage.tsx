@@ -10,7 +10,7 @@ import type { DashboardMetrics, OverdueAccount } from "../types/models";
 
 interface AnalyticsOverview {
   overdueRate: number;
-  collectionEfficiency: number;
+  collectionEfficiency: number | null;
   activeLoans: number;
 }
 
@@ -455,7 +455,7 @@ export function DashboardPage() {
         )}
         <KpiCard
           label="Collection Efficiency"
-          value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "N/A"}
+          value={loading ? "Loading..." : analytics ? formatPercent(analytics.collectionEfficiency) : "--"}
           icon={<Activity size={18} />}
           onViewMore={() => handleViewMore("efficiency")}
           mobileLayout="compact"

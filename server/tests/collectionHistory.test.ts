@@ -18,6 +18,7 @@ let server: Server;
 let base: string;
 beforeAll(async () => {
   const app = express();
+  app.use(express.json());
   app.use(collectionHistoryRouter);
   app.use("/loans", loanRouter);
   app.use("/borrowers", borrowerRouter);
@@ -35,6 +36,78 @@ beforeEach(() => {
 });
 
 describe("collector history access and filters", () => {
+  it.each([
+    ["/loans/9/payments/11", { amount: 125, orNo: "OR-11", collectedAt: "2026-09-23T08:00:00.000Z" }, "collections"],
+    ["/loans/9/remarks/11", { remark: "Updated follow-up", remarkCategory: "promised_to_pay" }, "loan_remarks"],
+    ["/borrowers/9/remarks/11", { remark: "Updated member note", remarkCategory: "others" }, "borrower_remarks"]
+  ])("lets collectors edit their own record at %s", async (path, body, table) => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 7, branch_id: 2 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const response = await fetch(`${base}${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    expect(response.status).toBe(200);
+    expect(mocks.query.mock.calls[1][0]).toContain(`UPDATE ${table}`);
+  });
+
+  it.each([
+    ["/loans/9/payments/11", { amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" }],
+    ["/loans/9/remarks/11", { remark: "Updated follow-up" }],
+    ["/borrowers/9/remarks/11", { remark: "Updated member note" }]
+  ])("prevents collectors from editing another collector's record at %s", async (path, body) => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 2 }] });
+    const response = await fetch(`${base}${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    expect(response.status).toBe(403);
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a branch administrator edit another collector's payment in their branch", async () => {
+    mocks.user = { id: 3, role: "branch_admin", branchId: 2 } as JwtUser;
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 2 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const response = await fetch(`${base}/loans/9/payments/11`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("prevents a branch administrator from editing another branch's payment", async () => {
+    mocks.user = { id: 3, role: "branch_admin", branchId: 2 } as JwtUser;
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 4 }] });
+    const response = await fetch(`${base}/loans/9/payments/11`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+    });
+    expect(response.status).toBe(403);
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a super administrator edit a payment in any branch", async () => {
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 4 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const response = await fetch(`${base}/loans/9/payments/11`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+    });
+    expect(response.status).toBe(200);
+  });
+
   it.each([
     ["/loans/9/payments", "c.created_by"],
     ["/loans/9/remarks", "lr.created_by"],

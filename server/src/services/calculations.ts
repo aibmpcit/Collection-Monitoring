@@ -8,6 +8,6 @@ export function calculateOverdueRate(overdueCount: number, activeCount: number) 
 }
 
 export function calculateCollectionEfficiency(collectedToday: number, dueToday: number) {
-  if (dueToday === 0) return 100;
+  if (dueToday === 0) return null;
   return (collectedToday / dueToday) * 100;
 }

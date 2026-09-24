@@ -44,6 +44,12 @@ function getLocalDateTimeInputValue(): string {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
+function toLocalDateTimeInputValue(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return getLocalDateTimeInputValue();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 export function LoanDetailsPage() {
   const { loanId = "0" } = useParams();
   const [searchParams] = useSearchParams();
@@ -74,6 +80,8 @@ export function LoanDetailsPage() {
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
+  const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
   const remarkDialogRef = useRef<HTMLDialogElement>(null);
   const paymentDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -169,10 +177,11 @@ export function LoanDetailsPage() {
     setRemarkError("");
     setMessage("");
     try {
-      await apiRequest(`/loans/${loan.id}/remarks`, "POST", { remark, remarkCategory });
+      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory });
       setRemarkInput("");
+      setEditingRemarkId(null);
       setRemarkModalOpen(false);
-      setMessage("Remark added.");
+      setMessage(editingRemarkId ? "Remark updated." : "Remark added.");
       try {
         await loadRemarks(loan.id);
         setRemarkPage(1);
@@ -205,7 +214,7 @@ export function LoanDetailsPage() {
     setPaymentError("");
     setMessage("");
     try {
-      await apiRequest(`/loans/${loan.id}/payments`, "POST", {
+      await apiRequest(`/loans/${loan.id}/payments${editingPaymentId ? `/${editingPaymentId}` : ""}`, editingPaymentId ? "PATCH" : "POST", {
         amount,
         orNo,
         collectedAt: paymentDateTime
@@ -213,8 +222,9 @@ export function LoanDetailsPage() {
       setPaymentAmount("");
       setPaymentOrNo("");
       setPaymentDateTime(getLocalDateTimeInputValue());
+      setEditingPaymentId(null);
       setPaymentModalOpen(false);
-      setMessage("Payment recorded.");
+      setMessage(editingPaymentId ? "Payment updated." : "Payment recorded.");
       try {
         await loadPayments(loan.id);
         setPaymentPage(1);
@@ -241,10 +251,10 @@ export function LoanDetailsPage() {
       {paymentModalOpen && createPortal(
         <dialog ref={paymentDialogRef} aria-labelledby="payment-modal-title"
           className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
-          onCancel={event => { event.preventDefault(); if (!paymentsSubmitting) setPaymentModalOpen(false); }}>
+          onCancel={event => { event.preventDefault(); if (!paymentsSubmitting) { setPaymentModalOpen(false); setEditingPaymentId(null); } }}>
           <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 id="payment-modal-title" className="text-lg font-semibold">Add Payment</h2>
-            <button type="button" className="btn-muted" disabled={paymentsSubmitting} onClick={() => setPaymentModalOpen(false)}>Close</button>
+            <h2 id="payment-modal-title" className="text-lg font-semibold">{editingPaymentId ? "Edit Payment" : "Add Payment"}</h2>
+            <button type="button" className="btn-muted" disabled={paymentsSubmitting} onClick={() => { setPaymentModalOpen(false); setEditingPaymentId(null); }}>Close</button>
           </div>
               <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleAddPayment}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -280,7 +290,7 @@ export function LoanDetailsPage() {
                 </label>
                 <div className="flex justify-stretch sm:col-span-2 sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={paymentsSubmitting}>
-                    {paymentsSubmitting ? "Saving..." : "Save Payment"}
+                    {paymentsSubmitting ? "Saving..." : editingPaymentId ? "Update Payment" : "Save Payment"}
                   </button>
                 </div>
               </form>
@@ -292,10 +302,10 @@ export function LoanDetailsPage() {
       {remarkModalOpen && createPortal(
         <dialog ref={remarkDialogRef} aria-labelledby="remark-modal-title"
           className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
-          onCancel={event => { event.preventDefault(); if (!remarksSubmitting) setRemarkModalOpen(false); }}>
+          onCancel={event => { event.preventDefault(); if (!remarksSubmitting) { setRemarkModalOpen(false); setEditingRemarkId(null); } }}>
           <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 id="remark-modal-title" className="text-lg font-semibold">Add Remark</h2>
-            <button type="button" className="btn-muted" disabled={remarksSubmitting} onClick={() => setRemarkModalOpen(false)}>Close</button>
+            <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Remark" : "Add Remark"}</h2>
+            <button type="button" className="btn-muted" disabled={remarksSubmitting} onClick={() => { setRemarkModalOpen(false); setEditingRemarkId(null); }}>Close</button>
           </div>
               <form className="grid gap-3" onSubmit={handleAddRemark}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -326,7 +336,7 @@ export function LoanDetailsPage() {
                 </label>
                 <div className="flex justify-stretch sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
-                    {remarksSubmitting ? "Saving..." : "Save Remark"}
+                    {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Save Remark"}
                   </button>
                 </div>
               </form>
@@ -406,6 +416,9 @@ export function LoanDetailsPage() {
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <button type="button" className="btn-primary" onClick={() => {
                     setPaymentError("");
+                    setEditingPaymentId(null);
+                    setPaymentAmount("");
+                    setPaymentOrNo("");
                     setPaymentDateTime(getLocalDateTimeInputValue());
                     setPaymentModalOpen(true);
                   }}>Add Payment</button>
@@ -427,7 +440,17 @@ export function LoanDetailsPage() {
                             <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
                             <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
                           </div>
-                          <span className="text-xs text-black/60">{item.paymentId}</span>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs text-black/60">{item.paymentId}</span>
+                            <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
+                              setEditingPaymentId(item.id);
+                              setPaymentAmount(String(item.amount));
+                              setPaymentOrNo(item.orNo || "");
+                              setPaymentDateTime(toLocalDateTimeInputValue(item.collectedAt));
+                              setPaymentError("");
+                              setPaymentModalOpen(true);
+                            }}>Edit</button>
+                          </div>
                         </div>
                         <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
                       </li>
@@ -446,6 +469,9 @@ export function LoanDetailsPage() {
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <button type="button" className="btn-primary" onClick={() => {
                     setRemarkError("");
+                    setEditingRemarkId(null);
+                    setRemarkInput("");
+                    setRemarkCategory(DEFAULT_REMARK_CATEGORY);
                     setRemarkModalOpen(true);
                   }}>Add Remark</button>
                 </div>
@@ -467,6 +493,13 @@ export function LoanDetailsPage() {
                         <p className="mt-1 text-xs text-black/60">
                           {formatDateTime(item.createdAt)} | By: {item.createdBy}
                         </p>
+                        <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
+                          setEditingRemarkId(item.id);
+                          setRemarkInput(item.remark);
+                          setRemarkCategory(item.remarkCategory as RemarkCategory);
+                          setRemarkError("");
+                          setRemarkModalOpen(true);
+                        }}>Edit</button>
                       </li>
                     ))}
                   </ul>

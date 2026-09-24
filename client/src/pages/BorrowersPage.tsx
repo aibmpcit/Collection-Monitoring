@@ -117,6 +117,7 @@ export function BorrowersPage() {
   const [memberRemarks, setMemberRemarks] = useState<MemberRemarkRow[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
+  const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarksSubmitting, setRemarksSubmitting] = useState(false);
   const [remarksError, setRemarksError] = useState("");
@@ -361,6 +362,7 @@ export function BorrowersPage() {
     setRemarksBorrower(borrower);
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+    setEditingRemarkId(null);
     setMemberRemarks([]);
     setRemarksError("");
     await loadMemberRemarks(borrower.id);
@@ -370,6 +372,7 @@ export function BorrowersPage() {
     setRemarksBorrower(null);
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+    setEditingRemarkId(null);
     setMemberRemarks([]);
     setRemarksError("");
     setRemarksLoading(false);
@@ -385,8 +388,14 @@ export function BorrowersPage() {
     setRemarksSubmitting(true);
     setRemarksError("");
     try {
-      await apiRequest(`/borrowers/${remarksBorrower.id}/remarks`, "POST", { remark, remarkCategory });
+      await apiRequest(
+        `/borrowers/${remarksBorrower.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`,
+        editingRemarkId ? "PATCH" : "POST",
+        { remark, remarkCategory }
+      );
       setRemarkInput("");
+      setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+      setEditingRemarkId(null);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
       setRemarksError(e instanceof Error ? e.message : "Unable to add member remark");
@@ -786,7 +795,7 @@ export function BorrowersPage() {
               />
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={remarksSubmitting}>
-                  {remarksSubmitting ? "Saving..." : "Add Remark"}
+                  {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Add Remark"}
                 </button>
               </div>
             </form>
@@ -808,6 +817,12 @@ export function BorrowersPage() {
                       <p className="mt-1 text-xs text-black/60">
                         {formatDateTime(item.createdAt)} | By: {item.createdBy}
                       </p>
+                      <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
+                        setEditingRemarkId(item.id);
+                        setRemarkInput(item.remark);
+                        setRemarkCategory(item.remarkCategory as RemarkCategory);
+                        setRemarksError("");
+                      }}>Edit</button>
                     </li>
                   ))}
                 </ul>

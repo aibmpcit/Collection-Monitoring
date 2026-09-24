@@ -7,7 +7,7 @@ import { apiRequest } from "../services/api";
 
 interface AnalyticsPayload {
   overdueRate: number;
-  collectionEfficiency: number;
+  collectionEfficiency: number | null;
   activeLoans: number;
 }
 
@@ -45,7 +45,7 @@ export function AnalyticsPage() {
       {
         icon: <TrendingUp size={18} />,
         label: "Collection Efficiency",
-        value: analytics ? `${analytics.collectionEfficiency.toFixed(2)}%` : "-",
+        value: analytics ? analytics.collectionEfficiency == null ? "--" : `${analytics.collectionEfficiency.toFixed(2)}%` : "-",
       },
       {
         icon: <Activity size={18} />,

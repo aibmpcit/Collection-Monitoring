@@ -1198,6 +1198,48 @@ router.post("/:loanId/payments", authenticate, authorize(["super_admin", "branch
   }
 });
 
+router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const loanId = Number(req.params.loanId);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(paymentId) || paymentId <= 0) {
+      return res.status(400).json({ message: "Invalid loan or payment id" });
+    }
+
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT c.created_by, b.branch_id
+       FROM collections c
+       INNER JOIN loans l ON l.id = c.loan_id
+       INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE c.id = $1 AND c.loan_id = $2
+       LIMIT 1`,
+      [paymentId, loanId]
+    );
+    const payment = existing.rows[0];
+    if (!payment) return res.status(404).json({ message: "Payment not found" });
+    assertBranchAccess(user, Number(payment.branch_id ?? 0));
+    if (user.role === "staff" && Number(payment.created_by) !== user.id) {
+      return res.status(403).json({ message: "You can only edit your own payments" });
+    }
+
+    const amount = Number(req.body?.amount ?? 0);
+    const orNo = String(req.body?.orNo ?? req.body?.or_no ?? "").trim();
+    const collectedAtRaw = String(req.body?.collectedAt ?? "").trim();
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Payment amount must be greater than 0" });
+    if (orNo.length > 80) return res.status(400).json({ message: "OR No is too long" });
+    const parsedDate = new Date(collectedAtRaw);
+    if (!collectedAtRaw || Number.isNaN(parsedDate.getTime())) return res.status(400).json({ message: "Invalid payment date/time" });
+    const collectedAt = parsedDate.toISOString();
+    const collectedAtSql = collectedAt.slice(0, 19).replace("T", " ");
+
+    await query("UPDATE collections SET amount = $1, or_no = $2, collected_at = $3 WHERE id = $4", [amount, orNo || null, collectedAtSql, paymentId]);
+    return res.json({ id: paymentId, paymentId: formatPaymentId(paymentId), loanId, amount, orNo, collectedAt });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.patch("/:loanId/penalty", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
@@ -1301,6 +1343,41 @@ router.post("/:loanId/remarks", authenticate, authorize(["super_admin", "branch_
       remarkCategory: category,
       createdBy: user.username
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const loanId = Number(req.params.loanId);
+    const remarkId = Number(req.params.remarkId);
+    if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
+      return res.status(400).json({ message: "Invalid loan or remark id" });
+    }
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT lr.created_by, b.branch_id
+       FROM loan_remarks lr
+       INNER JOIN loans l ON l.id = lr.loan_id
+       INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE lr.id = $1 AND lr.loan_id = $2
+       LIMIT 1`,
+      [remarkId, loanId]
+    );
+    const existingRemark = existing.rows[0];
+    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    if (user.role === "staff" && Number(existingRemark.created_by) !== user.id) {
+      return res.status(403).json({ message: "You can only edit your own remarks" });
+    }
+
+    const remark = String(req.body?.remark ?? "").trim();
+    const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    if (!remark) return res.status(400).json({ message: "Remark is required" });
+    if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
+    await query("UPDATE loan_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
+    return res.json({ id: remarkId, loanId, remark, remarkCategory: category });
   } catch (error) {
     return next(error);
   }

@@ -509,4 +509,38 @@ router.post("/:borrowerId/remarks", authenticate, authorize(["super_admin", "bra
   }
 });
 
+router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const borrowerId = Number(req.params.borrowerId);
+    const remarkId = Number(req.params.remarkId);
+    if (!Number.isInteger(borrowerId) || borrowerId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
+      return res.status(400).json({ message: "Invalid member or remark id" });
+    }
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT br.created_by, b.branch_id
+       FROM borrower_remarks br
+       INNER JOIN borrowers b ON b.id = br.borrower_id
+       WHERE br.id = $1 AND br.borrower_id = $2
+       LIMIT 1`,
+      [remarkId, borrowerId]
+    );
+    const existingRemark = existing.rows[0];
+    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    if (user.role === "staff" && Number(existingRemark.created_by) !== user.id) {
+      return res.status(403).json({ message: "You can only edit your own remarks" });
+    }
+
+    const remark = String(req.body?.remark ?? "").trim();
+    if (!remark) return res.status(400).json({ message: "Remark is required" });
+    if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
+    const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    await query("UPDATE borrower_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
+    return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 export { router as borrowerRouter };
