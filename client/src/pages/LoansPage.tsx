@@ -7,6 +7,7 @@ import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, typ
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
+import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
@@ -308,6 +309,7 @@ export function LoansPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [importMessage, setImportMessage] = useState("");
+  const [importBranchError, setImportBranchError] = useState("");
   const [loanImportFile, setLoanImportFile] = useState<File | null>(null);
   const [loanImportInputKey, setLoanImportInputKey] = useState(0);
   const [isImportPending, setIsImportPending] = useState(false);
@@ -330,8 +332,11 @@ export function LoansPage() {
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentQuery, setPaymentQuery] = useState("");
   const [remarkRecords, setRemarkRecords] = useState<RemarkRecordRow[]>([]);
+  const canDeleteRemarks = canDeletePayments;
+  const [selectedRemarkLoans, setSelectedRemarkLoans] = useState<number[]>([]);
+  const [remarkDeleteIds, setRemarkDeleteIds] = useState<number[]>([]);
+  const [remarkDeletePending, setRemarkDeletePending] = useState(false);
   const [remarkQuery, setRemarkQuery] = useState("");
-  const [selectedRemarkRecord, setSelectedRemarkRecord] = useState<RemarkRecordRow | null>(null);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentLoan, setPaymentLoan] = useState<Pick<LoanRow, "id" | "loanAccountNo" | "memberName"> | null>(null);
   const [payments, setPayments] = useState<LoanPayment[]>([]);
@@ -468,19 +473,56 @@ export function LoansPage() {
 
   const filteredRemarkRecords = useMemo(() => {
     const q = remarkQuery.trim().toLowerCase();
-    return remarkRecords.filter((row) => {
-      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(row.branch_id ?? 0) === selectedBranchId;
-      if (!matchesBranch) return false;
-      if (!q) return true;
-      return [
-        row.member_name,
-        row.loan_account_no ?? "",
-        getRemarkCategoryLabel(row.category),
-        row.remark,
-        row.collector_name ?? ""
-      ].join(" ").toLowerCase().includes(q);
-    });
+    const grouped = new Map<number, { latest: RemarkRecordRow; recent: RemarkRecordRow[]; matchesQuery: boolean }>();
+    for (const row of remarkRecords) {
+      if (row.kind !== "loan_remark" || !row.loan_id || !row.remark.trim()) continue;
+      if (user?.role === "super_admin" && selectedBranchId > 0 && Number(row.branch_id ?? 0) !== selectedBranchId) continue;
+      const matchesQuery = !q || [row.member_name, row.loan_account_no ?? "", row.loan_type ?? "", getRemarkCategoryLabel(row.category), row.remark, row.collector_name ?? ""].join(" ").toLowerCase().includes(q);
+      const group = grouped.get(row.loan_id);
+      if (!group) {
+        grouped.set(row.loan_id, { latest: row, recent: [row], matchesQuery });
+      } else {
+        group.recent = [...group.recent, row]
+          .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime() || b.id - a.id)
+          .slice(0, 2);
+        group.matchesQuery ||= matchesQuery;
+        if (new Date(row.occurred_at).getTime() > new Date(group.latest.occurred_at).getTime() ||
+            (row.occurred_at === group.latest.occurred_at && row.id > group.latest.id)) group.latest = row;
+      }
+    }
+    return [...grouped.values()]
+      .filter(group => group.matchesQuery)
+      .map(group => ({ ...group.latest, recentRemarks: group.recent }))
+      .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime() || b.id - a.id);
   }, [remarkQuery, remarkRecords, selectedBranchId, user?.role]);
+
+  useEffect(() => {
+    setSelectedRemarkLoans([]);
+  }, [selectedBranchId, remarkRecords]);
+
+  function toggleRemarkLoan(id: number, checked: boolean) {
+    setSelectedRemarkLoans(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
+  }
+
+  async function deleteSelectedRemarks() {
+    setRemarkDeletePending(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ deleted: number }>("/loans/remarks/bulk", "DELETE", { ids: remarkDeleteIds });
+      setRemarkDeleteIds([]);
+      setSelectedRemarkLoans([]);
+      setMessage(`Deleted ${result.deleted} remark(s).`);
+      await loadData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to delete remarks");
+    } finally {
+      setRemarkDeletePending(false);
+    }
+  }
+
+  function openLoanRemarks(row: RemarkRecordRow) {
+    navigate(`/loan-details/${row.loan_id}?tab=remarks&from=remarks&remarkId=${row.id}`);
+  }
 
   const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / rowsPerPage));
   const totalPaymentPages = Math.max(1, Math.ceil(filteredPaymentRecords.length / rowsPerPage));
@@ -812,15 +854,26 @@ export function LoansPage() {
     setIsFormOpen(true);
   }
 
-  function openImportModal() {
+  async function openImportModal() {
     if (!canAddLoans) return;
     setError("");
     setMessage("");
+    setImportBranchError("");
     setLoanImportFile(null);
     setLoanImportInputKey((current) => current + 1);
     void loadXlsx();
-    if (user?.role === "super_admin" && importBranchId === 0 && branches.length > 0) {
-      setImportBranchId(branches[0].id);
+    if (user?.role === "super_admin") {
+      try {
+        const latestBranches = await apiRequest<Branch[]>("/branches");
+        setBranches(latestBranches);
+        setImportBranchId((current) => latestBranches.some(branch => branch.id === current) ? current : (latestBranches[0]?.id ?? 0));
+        if (latestBranches.length === 0) {
+          setImportBranchError("No branches are available. Create a branch before importing loans.");
+        }
+      } catch (e) {
+        setImportBranchId(0);
+        setImportBranchError(e instanceof Error ? e.message : "Unable to load branches");
+      }
     }
     setIsImportOpen(true);
   }
@@ -1421,6 +1474,7 @@ export function LoansPage() {
                 <p className="text-xs text-black/70">
                   {loanImportFile ? `Selected file: ${loanImportFile.name}` : "Choose a CSV or Excel file, then click Import Loans."}
                 </p>
+                {importBranchError && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{importBranchError}</p>}
                 {isImportPending && (
                   <div className="grid gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
                     <div className="flex items-center justify-between gap-2">
@@ -1743,42 +1797,29 @@ export function LoansPage() {
           onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/loans/${remarkLoan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarkError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
           onClose={() => setSummaryRemark(null)} />;
       })()}
-      {selectedRemarkRecord && (
-        <RemarkSummaryModal
-          open
-          remark={selectedRemarkRecord.remark}
-          category={selectedRemarkRecord.category ?? DEFAULT_REMARK_CATEGORY}
-          createdAt={selectedRemarkRecord.occurred_at}
-          createdBy={selectedRemarkRecord.collector_name || "System"}
-          member={{
-            name: selectedRemarkRecord.member_name,
-            cifKey: selectedRemarkRecord.cif_key ?? undefined,
-            contact: selectedRemarkRecord.contact_info ?? undefined,
-            address: selectedRemarkRecord.address ?? undefined,
-            branch: selectedRemarkRecord.branch_name ?? undefined
-          }}
-          loan={selectedRemarkRecord.loan_account_no ? {
-            accountNo: selectedRemarkRecord.loan_account_no,
-            type: selectedRemarkRecord.loan_type ?? undefined,
-            status: selectedRemarkRecord.loan_status ?? undefined,
-            maturityDate: selectedRemarkRecord.maturity_date ? formatDate(selectedRemarkRecord.maturity_date) : undefined
-          } : undefined}
-          attachmentName={selectedRemarkRecord.attachment_name}
-          onDownload={selectedRemarkRecord.attachment_name ? () => {
-            const attachmentPath = selectedRemarkRecord.kind === "loan_remark"
-              ? `/loans/${selectedRemarkRecord.loan_id}/remarks/${selectedRemarkRecord.id}/attachment`
-              : `/borrowers/${selectedRemarkRecord.member_id}/remarks/${selectedRemarkRecord.id}/attachment`;
-            void apiDownload(attachmentPath, selectedRemarkRecord.attachment_name || "attachment")
-              .catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
-          } : undefined}
-          onClose={() => setSelectedRemarkRecord(null)}
-        />
-      )}
+      <ConfirmDialog
+        open={remarkDeleteIds.length > 0}
+        tone="danger"
+        title="Delete selected loans' remarks?"
+        description={`Delete all ${remarkDeleteIds.length} loaded remark(s) and their attachments for the selected loans, including older remarks not shown in the list? Loan records and payments will remain. This cannot be undone.`}
+        confirmLabel={remarkDeletePending ? "Deleting..." : "Delete Remarks"}
+        cancelLabel="Cancel"
+        disabled={remarkDeletePending}
+        onCancel={() => { if (!remarkDeletePending) setRemarkDeleteIds([]); }}
+        onConfirm={() => void deleteSelectedRemarks()}
+      />
       {paymentModal}
       {deleteLoanModal}
       {deleteBulkLoanModal}
       {deleteBulkPaymentModal}
       {loanActionMenu}
+      {error ? (
+        <ToastNotification message={error} tone="error" onClose={() => setError("")} />
+      ) : importMessage ? (
+        <ToastNotification message={importMessage} tone="success" onClose={() => setImportMessage("")} />
+      ) : message ? (
+        <ToastNotification message={message} tone="success" onClose={() => setMessage("")} />
+      ) : null}
 
       <PageHeader
         title="Collections"
@@ -1834,39 +1875,29 @@ export function LoansPage() {
           </div>
         )}
         {!isCollector && (
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className={`tab-btn ${
-                activeRecordsTab === "loans" ? "tab-btn-active" : ""
-              }`}
-              onClick={() => setActiveRecordsTab("loans")}
-            >
-              Loan Records
-            </button>
-            <button
-              type="button"
-              className={`tab-btn ${
-                activeRecordsTab === "remarks" ? "tab-btn-active" : ""
-              }`}
-              onClick={() => setActiveRecordsTab("remarks")}
-            >
-              Remarks
-            </button>
-            <button
-              type="button"
-              className={`tab-btn ${
-                activeRecordsTab === "payments" ? "tab-btn-active" : ""
-              }`}
-              onClick={() => setActiveRecordsTab("payments")}
-            >
-              Payments
-            </button>
+          <div className="mb-4 flex gap-2 overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Collection records">
+            {([
+              ["loans", "Loan Records"],
+              ["remarks", "Remarks"],
+              ["payments", "Payments"]
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeRecordsTab === tab}
+                className={`shrink-0 border-b-2 px-4 py-3 text-sm font-semibold transition ${
+                  activeRecordsTab === tab
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+                onClick={() => setActiveRecordsTab(tab)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         )}
-        {importMessage && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
-        {message && <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-        {error && <p className="mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {activeRecordsTab === "loans" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 md:flex-nowrap">
@@ -2236,7 +2267,15 @@ export function LoansPage() {
             </div>
             <div className="mobile-record-list mt-3">
               {paginatedPaymentRecords.map((row) => (
-                <article key={row.id} className="mobile-record-card">
+                <article key={row.id} className="mobile-record-card cursor-pointer transition hover:bg-slate-50" tabIndex={0}
+                      onClick={() => navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`)}
+                      onKeyDown={event => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`);
+                        }
+                      }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="break-words text-sm font-semibold text-slate-900">{row.memberName}</p>
@@ -2248,6 +2287,7 @@ export function LoansPage() {
                       <input
                         type="checkbox"
                         aria-label={`Select payment ${row.paymentId}`}
+                        onClick={event => event.stopPropagation()}
                         checked={selectedPaymentIdSet.has(row.id)}
                         onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
                         className="mt-1 h-4 w-4 shrink-0 accent-brand-600"
@@ -2293,12 +2333,21 @@ export function LoansPage() {
                 </thead>
                 <tbody>
                   {paginatedPaymentRecords.map((row) => (
-                    <tr key={row.id}>
+                    <tr key={row.id} className="cursor-pointer transition hover:bg-slate-50" tabIndex={0}
+                      onClick={() => navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`)}
+                      onKeyDown={event => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`);
+                        }
+                      }}>
                       {canDeletePayments && (
                         <td>
                           <input
                             type="checkbox"
                             aria-label={`Select payment ${row.paymentId}`}
+                        onClick={event => event.stopPropagation()}
                             checked={selectedPaymentIdSet.has(row.id)}
                             onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
                             className="h-4 w-4 accent-brand-600"
@@ -2328,6 +2377,7 @@ export function LoansPage() {
           </>
         ) : (
           <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="relative w-full max-w-sm">
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -2338,6 +2388,13 @@ export function LoansPage() {
               />
             </div>
 
+            {canDeleteRemarks && <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="btn-muted" disabled={!filteredRemarkRecords.length} onClick={() => setSelectedRemarkLoans(filteredRemarkRecords.map(row => Number(row.loan_id)))}>Select All Results</button>
+              <button type="button" className="btn-muted" disabled={!selectedRemarkLoans.length} onClick={() => setSelectedRemarkLoans([])}>Clear Selection</button>
+              <button type="button" className="btn-danger" disabled={!selectedRemarkLoans.length || remarkDeletePending} onClick={() => setRemarkDeleteIds(remarkRecords.filter(row => row.kind === "loan_remark" && selectedRemarkLoans.includes(Number(row.loan_id))).map(row => row.id))}>Delete Selected ({selectedRemarkLoans.length})</button>
+            </div>}
+            </div>
+
             <div className="mobile-record-list mt-3">
               {paginatedRemarkRecords.map((row) => (
                 <article
@@ -2345,42 +2402,58 @@ export function LoansPage() {
                   className="mobile-record-card cursor-pointer transition hover:bg-white"
                   role="button"
                   tabIndex={0}
-                  onClick={() => setSelectedRemarkRecord(row)}
+                  onClick={() => openLoanRemarks(row)}
                   onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setSelectedRemarkRecord(row);
+                      openLoanRemarks(row);
                     }
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}
                     <div className="min-w-0">
                       <p className="break-words text-sm font-semibold text-slate-900">{row.member_name}</p>
                       <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        {getRemarkCategoryLabel(row.category)}
+                        {row.loan_type || "-"}
                       </p>
                     </div>
-                    <span className="text-xs text-slate-500">{formatDateTime(row.occurred_at)}</span>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-800">{row.remark}</p>
+                  <ul className="mt-3 flex items-center gap-2 overflow-x-auto text-xs text-slate-800">
+                    {row.recentRemarks.map(remark => (
+                      <li key={remark.id} className="shrink-0">
+                        <button
+                          type="button"
+                          className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+                          aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
+                          onClick={event => {
+                            event.stopPropagation();
+                            openLoanRemarks(remark);
+                          }}
+                        >
+                          {getRemarkCategoryLabel(remark.category)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                   <div className="mobile-record-grid">
-                    <LoanRecordField label="Loan Account No" value={row.loan_account_no || "Member remark"} />
+                    <LoanRecordField label="Loan Account No" value={row.loan_account_no || "-"} />
                     <LoanRecordField label="Added By" value={row.collector_name || "System"} />
                   </div>
                 </article>
               ))}
-              {filteredRemarkRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No remarks found.</p>}
+              {filteredRemarkRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans with remarks found.</p>}
             </div>
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
               <table className="table-clean w-full min-w-[900px] text-xs">
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>
-                    <th>Date</th>
+                    {canDeleteRemarks && <th><input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label="Select all remarks on current page" disabled={!paginatedRemarkRecords.length} checked={paginatedRemarkRecords.length > 0 && paginatedRemarkRecords.every(row => selectedRemarkLoans.includes(Number(row.loan_id)))} onChange={event => { const ids = paginatedRemarkRecords.map(row => Number(row.loan_id)); setSelectedRemarkLoans(current => event.target.checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }} /></th>}
                     <th>Member Name</th>
                     <th>Loan Account No</th>
-                    <th>Category</th>
-                    <th>Remark</th>
+                    <th>Loan Type</th>
+                    <th>Remarks</th>
                     <th>Added By</th>
                   </tr>
                 </thead>
@@ -2390,25 +2463,44 @@ export function LoansPage() {
                       key={`${row.kind}-${row.id}`}
                       className="cursor-pointer transition hover:bg-slate-50"
                       tabIndex={0}
-                      onClick={() => setSelectedRemarkRecord(row)}
+                      onClick={() => openLoanRemarks(row)}
                       onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelectedRemarkRecord(row);
+                          openLoanRemarks(row);
                         }
                       }}
                     >
-                      <td>{formatDateTime(row.occurred_at)}</td>
+                      {canDeleteRemarks && <td>{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}</td>}
                       <td>{row.member_name}</td>
-                      <td>{row.loan_account_no || "Member remark"}</td>
-                      <td>{getRemarkCategoryLabel(row.category)}</td>
-                      <td className="max-w-md whitespace-normal break-words">{row.remark}</td>
+                      <td>{row.loan_account_no || "-"}</td>
+                      <td>{row.loan_type || "-"}</td>
+                      <td className="whitespace-nowrap">
+                        <ul className="flex items-center justify-center gap-2">
+                          {row.recentRemarks.map(remark => (
+                            <li key={remark.id} className="shrink-0">
+                        <button
+                          type="button"
+                          className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+                          aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
+                          onClick={event => {
+                            event.stopPropagation();
+                            openLoanRemarks(remark);
+                          }}
+                        >
+                          {getRemarkCategoryLabel(remark.category)}
+                        </button>
+                      </li>
+                          ))}
+                        </ul>
+                      </td>
                       <td>{row.collector_name || "System"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {filteredRemarkRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No remarks found.</p>}
+              {filteredRemarkRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No loans with remarks found.</p>}
             </div>
             <PaginationControls
               currentPage={remarkRecordsPage}

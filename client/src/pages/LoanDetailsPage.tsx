@@ -6,6 +6,7 @@ import { DuesCard } from "../components/DuesCard";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
+import { ToastNotification } from "../components/ToastNotification";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
@@ -54,13 +55,13 @@ function toLocalDateTimeInputValue(value: string): string {
 
 export function LoanDetailsPage() {
   const { loanId = "0" } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const numericLoanId = Number(loanId);
   const [loan, setLoan] = useState<LoanDetails | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [payments, setPayments] = useState<LoanPayment[]>([]);
-  const [historyTab, setHistoryTab] = useState<"payments" | "remarks">("remarks");
+  const [historyTab, setHistoryTab] = useState<"payments" | "remarks">(searchParams.get("tab") === "payments" ? "payments" : "remarks");
   const [paymentPage, setPaymentPage] = useState(1);
   const [remarkPage, setRemarkPage] = useState(1);
   const paymentPages = Math.max(1, Math.ceil(payments.length / HISTORY_PAGE_SIZE));
@@ -86,6 +87,7 @@ export function LoanDetailsPage() {
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [summaryPayment, setSummaryPayment] = useState<LoanPayment | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const remarkDialogRef = useRef<HTMLDialogElement>(null);
   const paymentDialogRef = useRef<HTMLDialogElement>(null);
@@ -102,11 +104,19 @@ export function LoanDetailsPage() {
       previousFocus?.focus();
     };
   }, [paymentModalOpen, remarkModalOpen]);
+  useEffect(() => {
+    setHistoryTab(searchParams.get("tab") === "payments" ? "payments" : "remarks");
+  }, [numericLoanId, searchParams]);
+
   const origin = searchParams.get("from");
   const backLink =
     origin === "due-monitoring"
       ? { to: "/reports/overdue", label: "Back to Due Monitoring" }
-      : { to: "/loans", label: "Back to Collections" };
+      : origin === "payments"
+        ? { to: "/loans?tab=payments", label: "Back to Payments" }
+        : origin === "remarks"
+        ? { to: "/loans?tab=remarks", label: "Back to Remarks" }
+        : { to: "/loans", label: "Back to Collections" };
 
   async function loadRemarks(targetLoanId: number) {
     setRemarksLoading(true);
@@ -167,6 +177,32 @@ export function LoanDetailsPage() {
 
     void fetchLoanWorkspace();
   }, [numericLoanId]);
+
+  useEffect(() => {
+    const requestedRemarkId = Number(searchParams.get("remarkId"));
+    if (loading || loan?.id !== numericLoanId || !Number.isInteger(requestedRemarkId) || requestedRemarkId <= 0) return;
+    const requestedRemark = remarks.find(remark => remark.id === requestedRemarkId);
+    if (requestedRemark) {
+      setHistoryTab("remarks");
+      setSummaryRemark(requestedRemark);
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("remarkId");
+    setSearchParams(nextParams, { replace: true });
+  }, [loading, loan, numericLoanId, remarks, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const requestedId = Number(searchParams.get("paymentId"));
+    if (loading || loan?.id !== numericLoanId || !Number.isInteger(requestedId) || requestedId <= 0) return;
+    const payment = payments.find(item => item.id === requestedId);
+    if (payment) {
+      setHistoryTab("payments");
+      setSummaryPayment(payment);
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("paymentId");
+    setSearchParams(nextParams, { replace: true });
+  }, [loading, loan, numericLoanId, payments, searchParams, setSearchParams]);
 
   async function handleAddRemark(event: React.FormEvent) {
     event.preventDefault();
@@ -255,6 +291,29 @@ export function LoanDetailsPage() {
 
   return (
     <main className="page-shell">
+      {loan && summaryPayment && createPortal(
+        <section className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="payment-summary-title"
+          onMouseDown={event => { if (event.target === event.currentTarget) setSummaryPayment(null); }}
+          onKeyDown={event => { if (event.key === "Escape") setSummaryPayment(null); }}>
+          <div className="modal-card max-w-3xl">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="payment-summary-title" className="text-xl font-semibold">Payment Summary</h2>
+              <button type="button" autoFocus className="btn-muted" onClick={() => setSummaryPayment(null)}>Close</button>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Detail label="Amount" value={formatCurrency(summaryPayment.amount)} />
+              <Detail label="Payment ID" value={summaryPayment.paymentId} />
+              <Detail label="OR No" value={summaryPayment.orNo || "-"} />
+              <Detail label="Collected By" value={summaryPayment.collectedBy || "System"} />
+              <Detail label="Collected At" value={formatDateTime(summaryPayment.collectedAt)} />
+              <Detail label="Member Name" value={loan.memberName} />
+              <Detail label="CIF Key" value={loan.cifKey} />
+              <Detail label="Loan Account No" value={loan.loanAccountNo} />
+              <Detail label="Loan Type" value={loan.loanType} />
+            </div>
+          </div>
+        </section>, document.body
+      )}
       {loan && summaryRemark && <RemarkSummaryModal
         open
         remark={summaryRemark.remark}
@@ -383,8 +442,8 @@ export function LoanDetailsPage() {
         }
       />
 
-      {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error ? <ToastNotification message={error} tone="error" onClose={() => setError("")} />
+        : message ? <ToastNotification message={message} tone="success" onClose={() => setMessage("")} /> : null}
 
       {loan && (
         <>

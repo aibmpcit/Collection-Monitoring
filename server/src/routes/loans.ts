@@ -991,6 +991,31 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
   }
 });
 
+router.delete("/remarks/bulk", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Valid remark ids are required" });
+    const user = getRequestUser(req);
+    const deleted = await withTransaction(async client => {
+      let count = 0;
+      for (const id of new Set(parsed.data.ids)) {
+        const existing = await client.query<{ branch_id: number }>(
+          "SELECT b.branch_id FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id WHERE r.id = $1 FOR UPDATE", [id]
+        );
+        if (!existing.rows[0]) continue;
+        assertBranchAccess(user, Number(existing.rows[0].branch_id));
+        await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [id]);
+        await client.query("DELETE FROM loan_remarks WHERE id = $1", [id]);
+        count += 1;
+      }
+      return count;
+    });
+    return res.json({ deleted });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
