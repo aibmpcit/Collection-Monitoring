@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { apiRequest } from "../services/api";
 import type { OverdueAccount } from "../types/models";
 
@@ -289,7 +290,7 @@ export function OverdueReportPage() {
         actions={<PageMetaStamp />}
       />
 
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
 
       <section className="metric-grid md:grid-cols-3">
         <article className="panel p-4">

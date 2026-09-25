@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
 import type { Branch, Role } from "../types/models";
@@ -517,8 +518,8 @@ export function StaffPage() {
           />
         </div>
 
-        {message && <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-        {error && <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error ? <ToastNotification message={error} tone="error" onClose={() => setError("")} />
+          : message ? <ToastNotification message={message} tone="success" onClose={() => setMessage("")} /> : null}
 
         <div className="mobile-record-list mt-3 md:hidden">
           {paginatedAccounts.map((row) => (

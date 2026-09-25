@@ -51,19 +51,18 @@ export async function apiRequest<T>(path: string, method: HttpMethod = "GET", bo
 
   if (!response.ok) {
     const responseText = await response.text();
-
+    let parsedMessage = "";
     try {
       const errorBody = JSON.parse(responseText) as { message?: string };
-      throw new Error(errorBody.message ?? `Request failed (${response.status})`);
+      parsedMessage = errorBody.message ?? "";
     } catch {
-      const compactText = responseText.replace(/\s+/g, " ").trim();
-      const fallbackMessage =
-        compactText && !compactText.startsWith("<")
-          ? compactText.slice(0, 180)
-          : `Request failed (${response.status})`;
-
-      throw new Error(fallbackMessage);
+      // Use the plain response fallback below.
     }
+    const compactText = responseText.replace(/\s+/g, " ").trim();
+    const fallbackMessage = compactText && !compactText.startsWith("<")
+      ? compactText.slice(0, 180)
+      : `Request failed (${response.status})`;
+    throw new Error(parsedMessage || fallbackMessage);
   }
 
   return response.json() as Promise<T>;

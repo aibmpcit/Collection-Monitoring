@@ -120,7 +120,7 @@ function WorkspaceSidebar({
     <div className="sidebar-shell flex h-full min-h-[320px] flex-col p-4 lg:p-5">
       <Link
         to="/dashboard"
-        className={role === "staff" ? "block px-3 py-3" : "side-brand"}
+        className="block px-3 py-3"
         onClick={onNavigate}
       >
         <div className="flex items-center gap-2">
@@ -139,9 +139,7 @@ function WorkspaceSidebar({
       </nav>
 
       <div
-        className={`sidebar-user-card mt-4 p-3 text-white/90 lg:mt-auto ${
-          role === "staff" ? "" : "rounded-2xl border border-white/15 bg-white/10"
-        }`}
+        className="sidebar-user-card mt-4 p-3 text-white/90 lg:mt-auto"
       >
         <p className="sidebar-text text-sm font-semibold">{username}</p>
         <p className="sidebar-text text-xs uppercase tracking-wide text-white/70">{role}</p>

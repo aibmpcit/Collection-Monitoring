@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { apiRequest } from "../services/api";
 import type { Branch } from "../types/models";
 
@@ -119,13 +120,12 @@ export function BranchesPage() {
 
   const filteredBranches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return branches;
-    return branches.filter((branch) =>
+    return branches.filter((branch) => !q ||
       [branch.code, branch.name, branch.address, String(branch.branchAdminCount ?? 0)]
         .join(" ")
         .toLowerCase()
         .includes(q)
-    );
+    ).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: "base" }));
   }, [branches, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredBranches.length / rowsPerPage));
@@ -327,8 +327,8 @@ export function BranchesPage() {
           />
         </div>
 
-        {message && <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-        {error && <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error ? <ToastNotification message={error} tone="error" onClose={() => setError("")} />
+          : message ? <ToastNotification message={message} tone="success" onClose={() => setMessage("")} /> : null}
 
         <div className="mobile-record-list mt-3 md:hidden">
           {paginatedBranches.map((branch) => (

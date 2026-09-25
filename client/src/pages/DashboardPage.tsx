@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, BarChart3, TrendingUp, Users, WalletCards } fr
 import { useEffect, useMemo, useState } from "react";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
@@ -411,7 +412,7 @@ export function DashboardPage() {
         actions={<PageMetaStamp />}
       />
 
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
 
       <section className={`metric-grid dashboard-metric-grid grid-cols-2 ${isCollector ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
         {!isCollector && <>

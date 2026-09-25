@@ -1,5 +1,7 @@
 # Deploy with Dokploy
 
+For an Application service with a separate MySQL service, follow [Application deployment](DOKPLOY-APPLICATION.md). The instructions below are for Docker Compose.
+
 ## 1. Fix the domain DNS
 
 In the DNS manager for `bmpc.cloud`, create an A record named `collection` pointing to the public IPv4 address of the server running this deployment's Dokploy proxy. Do not enter a URL or port as the record value.

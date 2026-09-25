@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { getRemarkCategoryLabel } from "../constants/remarkCategories";
 import { apiDownload, apiRequest } from "../services/api";
@@ -259,7 +260,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         }}>{tab === "payments" ? "Payments" : "Remarks"}</button>)}
     </div>
     <div id="history-panel" role="tabpanel" aria-labelledby={`history-tab-${activeTab}`} aria-busy={loading} className="grid gap-4">
-    {error && <p className="panel p-4 text-red-700" role="alert">{error} <button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Retry</button></p>}
+    {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
     {loading ? <p className="panel p-4" role="status">Loading collection history...</p> : data && <>
       <section className="panel p-4">
         {activeTab === "remarks" && <div className="mb-4 grid grid-cols-3 gap-3">

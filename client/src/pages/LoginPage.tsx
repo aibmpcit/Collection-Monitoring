@@ -4,6 +4,7 @@ import { SystemLogo } from "../components/SystemLogo";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { ToastNotification } from "../components/ToastNotification";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -75,7 +76,7 @@ export function LoginPage() {
             <ArrowRight size={16} />
           </button>
 
-          {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+          {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
         </motion.form>
       </div>
     </main>

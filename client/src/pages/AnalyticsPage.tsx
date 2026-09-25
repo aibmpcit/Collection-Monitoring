@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { ToastNotification } from "../components/ToastNotification";
 import { apiRequest } from "../services/api";
 
 interface AnalyticsPayload {
@@ -64,7 +65,7 @@ export function AnalyticsPage() {
         actions={<PageMetaStamp />}
       />
 
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
 
       <section className="metric-grid">
         {cards.map((card, index) => (

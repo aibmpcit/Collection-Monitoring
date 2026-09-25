@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
+import { ToastNotification } from "../components/ToastNotification";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
@@ -909,9 +910,9 @@ export function BorrowersPage() {
         actions={<PageMetaStamp />}
       />
 
-      {importMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{importMessage}</p>}
-      {message && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
-      {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error ? <ToastNotification message={error} tone="error" onClose={() => setError("")} />
+        : importMessage ? <ToastNotification message={importMessage} tone="success" onClose={() => setImportMessage("")} />
+        : message ? <ToastNotification message={message} tone="success" onClose={() => setMessage("")} /> : null}
       {user?.role === "super_admin" && (
         <section className="panel p-4">
           <div className="flex flex-wrap items-end gap-3">
