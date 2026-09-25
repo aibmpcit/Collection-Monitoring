@@ -1,6 +1,7 @@
 import { closeDatabase, query, withTransaction } from "../config/db.js";
 
 const RESET_MIGRATION = "20260925_reset_collection_data_for_revised_loan_schema";
+const PAR_STATUS_MIGRATION = "20260925_derive_overdue_status_from_par_age";
 
 async function columnExists(tableName: string, columnName: string) {
   const result = await query<{ present: number }>(
@@ -28,6 +29,15 @@ async function run() {
   ) ENGINE=InnoDB`);
 
   await ensureLoanColumns();
+
+  const parStatusApplied = await query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1 LIMIT 1", [PAR_STATUS_MIGRATION]);
+  if (parStatusApplied.rowCount === 0) {
+    await withTransaction(async client => {
+      await client.query("UPDATE loans SET status = 'overdue' WHERE par_age > 0 AND status = 'active'");
+      await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [PAR_STATUS_MIGRATION]);
+    });
+    console.log("Existing active loans with positive PAR age were marked overdue.");
+  }
 
   if (process.env.RUN_DATA_RESET_MIGRATION !== "true") {
     console.log("Schema is current. Operational data reset was not requested.");

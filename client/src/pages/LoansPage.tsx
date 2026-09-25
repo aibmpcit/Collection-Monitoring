@@ -755,7 +755,9 @@ export function LoansPage() {
             otherCharges: parseMoney(normalized["other charges"] || normalized["othercharges"] || 0),
             total: parseMoney(normalized["total"] || 0),
             parAge: parseWholeNumber(normalized["par age"] || normalized["parage"] || 0),
-            status: normalizeImportedLoanStatus(normalized["status"] || "active"),
+            status: normalized["status"]
+              ? normalizeImportedLoanStatus(normalized["status"])
+              : parseWholeNumber(normalized["par age"] || normalized["parage"] || 0) > 0 ? "overdue" : "active",
             notes: normalized["remarks"] || normalized["notes"] || "",
             ...(user?.role === "super_admin"
               ? {

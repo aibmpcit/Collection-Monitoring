@@ -735,7 +735,10 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
         const memberName = String(row?.memberName ?? "").trim();
         const contactInfo = String(row?.contactInfo ?? "").trim();
         const address = normalizeImportedAddress(row?.address);
-        const normalizedStatus = normalizeImportedLoanStatus(row?.status);
+        const importedParAge = Number(row?.parAge ?? 0);
+        const normalizedStatus = String(row?.status ?? "").trim()
+          ? normalizeImportedLoanStatus(row?.status)
+          : importedParAge > 0 ? "overdue" : "active";
         const resolvedBranchId = isSuperAdmin(user) ? Number(row?.branchId ?? 0) : userBranchId(user);
         const hasLoanAndBorrowerIds = explicitLoanId > 0 && borrowerId > 0;
         const hasCifAndAccountNo = Boolean(cifKey && loanAccountNo);
