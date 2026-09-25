@@ -45,9 +45,11 @@ CREATE TABLE IF NOT EXISTS loans (
   date_release DATE NULL,
   maturity_date DATE NULL,
   loan_amount DECIMAL(12,2) NULL,
+  loan_balance DECIMAL(12,2) NOT NULL DEFAULT 0,
   principal_due DECIMAL(12,2) NULL,
   penalty_due DECIMAL(12,2) NULL,
   other_charges DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total DECIMAL(12,2) NOT NULL DEFAULT 0,
   par_age INT NOT NULL DEFAULT 0,
   notes TEXT NULL,
   principal DECIMAL(12,2) NOT NULL,
@@ -58,6 +60,12 @@ CREATE TABLE IF NOT EXISTS loans (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), UNIQUE KEY uq_loans_account (loan_account_no), KEY idx_loans_borrower (borrower_id),
   CONSTRAINT fk_loans_borrower FOREIGN KEY (borrower_id) REFERENCES borrowers(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id VARCHAR(190) NOT NULL,
+  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS collections (

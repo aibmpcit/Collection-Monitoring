@@ -339,6 +339,26 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          l.due_date,
          l.status,
          DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
+         (SELECT lr.remark_text
+          FROM loan_remarks lr
+          WHERE lr.loan_id = l.id
+          ORDER BY lr.created_at DESC, lr.id DESC
+          LIMIT 1) AS latest_remark_1,
+         (SELECT lr.remark_category
+          FROM loan_remarks lr
+          WHERE lr.loan_id = l.id
+          ORDER BY lr.created_at DESC, lr.id DESC
+          LIMIT 1) AS latest_remark_category_1,
+         (SELECT lr.remark_text
+          FROM loan_remarks lr
+          WHERE lr.loan_id = l.id
+          ORDER BY lr.created_at DESC, lr.id DESC
+          LIMIT 1 OFFSET 1) AS latest_remark_2,
+         (SELECT lr.remark_category
+          FROM loan_remarks lr
+          WHERE lr.loan_id = l.id
+          ORDER BY lr.created_at DESC, lr.id DESC
+          LIMIT 1 OFFSET 1) AS latest_remark_category_2,
          b.cif_key,
          b.member_name,
          b.contact_info,
@@ -357,7 +377,16 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
         cifKey: String(row.cif_key ?? ""),
         memberName: String(row.member_name ?? ""),
         contactInfo: String(row.contact_info ?? ""),
-        address: String(row.address ?? "")
+        address: String(row.address ?? ""),
+        latestRemarks: [
+          { remark: row.latest_remark_1, remarkCategory: row.latest_remark_category_1 },
+          { remark: row.latest_remark_2, remarkCategory: row.latest_remark_category_2 }
+        ]
+          .filter((item) => item.remark != null && String(item.remark).trim() !== "")
+          .map((item) => ({
+            remark: String(item.remark),
+            remarkCategory: String(item.remarkCategory ?? "others")
+          }))
       }))
     );
   } catch (error) {
@@ -952,10 +981,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       }
 
       try {
-        await withTransaction(async (client) => {
-          await client.query("DELETE FROM collections WHERE loan_id = $1", [loanId]);
-          await client.query("DELETE FROM loans WHERE id = $1", [loanId]);
-        });
+        await query("UPDATE loans SET status = 'closed' WHERE id = $1", [loanId]);
         deleted += 1;
       } catch {
         skipped.push({ id: loanId, reason: "delete_failed" });
@@ -1091,12 +1117,9 @@ router.delete("/:loanId", authenticate, authorize(["super_admin", "branch_admin"
     }
     assertBranchAccess(user, Number(context.branch_id ?? 0));
 
-    await withTransaction(async (client) => {
-      await client.query("DELETE FROM collections WHERE loan_id = $1", [loanId]);
-      await client.query("DELETE FROM loans WHERE id = $1", [loanId]);
-    });
+    await query("UPDATE loans SET status = 'closed' WHERE id = $1", [loanId]);
 
-    return res.json({ message: "Loan deleted" });
+    return res.json({ message: "Loan archived; payment and remark history retained" });
   } catch (error) {
     return next(error);
   }

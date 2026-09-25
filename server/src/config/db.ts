@@ -80,3 +80,9 @@ export async function withTransaction<T>(handler: (client: QueryClient) => Promi
     connection.release();
   }
 }
+
+export async function closeDatabase() {
+  if (!db) return;
+  await db.end();
+  db = null;
+}

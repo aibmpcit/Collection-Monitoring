@@ -60,6 +60,7 @@ export function LoanDetailsPage() {
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [payments, setPayments] = useState<LoanPayment[]>([]);
+  const [historyTab, setHistoryTab] = useState<"payments" | "remarks">("remarks");
   const [paymentPage, setPaymentPage] = useState(1);
   const [remarkPage, setRemarkPage] = useState(1);
   const paymentPages = Math.max(1, Math.ceil(payments.length / HISTORY_PAGE_SIZE));
@@ -431,8 +432,38 @@ export function LoanDetailsPage() {
             </div>
           </motion.section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <section className="panel p-4">
+          <section className="panel p-4">
+            <div className="mb-4 flex gap-2 border-b border-slate-200" role="tablist" aria-label="Loan activity">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={historyTab === "remarks"}
+                className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+                  historyTab === "remarks"
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+                onClick={() => setHistoryTab("remarks")}
+              >
+                Remarks
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={historyTab === "payments"}
+                className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+                  historyTab === "payments"
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+                onClick={() => setHistoryTab("payments")}
+              >
+                Payments
+              </button>
+            </div>
+
+            {historyTab === "payments" ? (
+              <div role="tabpanel">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
@@ -483,9 +514,9 @@ export function LoanDetailsPage() {
                 )}
               </div>
               <HistoryPagination label="Payments" page={currentPaymentPage} pages={paymentPages} onChange={setPaymentPage} disabled={paymentsLoading} />
-            </section>
-
-            <section className="panel p-4">
+              </div>
+            ) : (
+              <div role="tabpanel">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
@@ -535,7 +566,8 @@ export function LoanDetailsPage() {
                 )}
               </div>
               <HistoryPagination label="Remarks" page={currentRemarkPage} pages={remarkPages} onChange={setRemarkPage} disabled={remarksLoading} />
-            </section>
+              </div>
+            )}
           </section>
         </>
       )}

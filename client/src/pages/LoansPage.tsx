@@ -20,6 +20,7 @@ interface LoanRow extends LoanPayload {
   contactInfo: string;
   address: string;
   importedAt: string;
+  latestRemarks: Array<{ remark: string; remarkCategory: string }>;
 }
 
 interface PaymentRecordRow {
@@ -34,6 +35,28 @@ interface PaymentRecordRow {
   orNo: string;
   collectedBy: string;
   collectedAt: string;
+}
+
+interface RemarkRecordRow {
+  id: number;
+  kind: "loan_remark" | "member_remark";
+  branch_id?: number;
+  branch_name?: string | null;
+  loan_id?: number | null;
+  loan_account_no?: string | null;
+  loan_type?: string | null;
+  loan_status?: string | null;
+  maturity_date?: string | null;
+  member_id: number;
+  member_name: string;
+  cif_key?: string | null;
+  contact_info?: string | null;
+  address?: string | null;
+  category?: string | null;
+  remark: string;
+  collector_name?: string | null;
+  occurred_at: string;
+  attachment_name?: string | null;
 }
 
 interface LoanQuickRef {
@@ -266,6 +289,7 @@ export function LoansPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isCollector = user?.role === "staff";
+  const isBranchManager = user?.role === "branch_admin";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canDeleteLoans = user?.role === "super_admin" || user?.role === "branch_admin";
@@ -296,11 +320,16 @@ export function LoansPage() {
   const [loanQuery, setLoanQuery] = useState("");
   const [loanTypeFilter, setLoanTypeFilter] = useState("");
   const [parAgeFilter, setParAgeFilter] = useState("");
-  const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments">(
-    !isCollector && searchParams.get("tab") === "payments" ? "payments" : "loans"
+  const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments" | "remarks">(
+    !isCollector && (searchParams.get("tab") === "payments" || searchParams.get("tab") === "remarks")
+      ? searchParams.get("tab") as "payments" | "remarks"
+      : "loans"
   );
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentQuery, setPaymentQuery] = useState("");
+  const [remarkRecords, setRemarkRecords] = useState<RemarkRecordRow[]>([]);
+  const [remarkQuery, setRemarkQuery] = useState("");
+  const [selectedRemarkRecord, setSelectedRemarkRecord] = useState<RemarkRecordRow | null>(null);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentLoan, setPaymentLoan] = useState<Pick<LoanRow, "id" | "loanAccountNo" | "memberName"> | null>(null);
   const [payments, setPayments] = useState<LoanPayment[]>([]);
@@ -321,6 +350,7 @@ export function LoansPage() {
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<number[]>([]);
   const [loanPage, setLoanPage] = useState(1);
   const [paymentPage, setPaymentPage] = useState(1);
+  const [remarkRecordsPage, setRemarkRecordsPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(() =>
     typeof window === "undefined" ? 13 : computeRowsPerPage(window.innerHeight)
   );
@@ -434,8 +464,25 @@ export function LoansPage() {
     );
   }, [paymentQuery, paymentRecords, selectedBranchId, user?.role]);
 
+  const filteredRemarkRecords = useMemo(() => {
+    const q = remarkQuery.trim().toLowerCase();
+    return remarkRecords.filter((row) => {
+      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(row.branch_id ?? 0) === selectedBranchId;
+      if (!matchesBranch) return false;
+      if (!q) return true;
+      return [
+        row.member_name,
+        row.loan_account_no ?? "",
+        getRemarkCategoryLabel(row.category),
+        row.remark,
+        row.collector_name ?? ""
+      ].join(" ").toLowerCase().includes(q);
+    });
+  }, [remarkQuery, remarkRecords, selectedBranchId, user?.role]);
+
   const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / rowsPerPage));
   const totalPaymentPages = Math.max(1, Math.ceil(filteredPaymentRecords.length / rowsPerPage));
+  const totalRemarkPages = Math.max(1, Math.ceil(filteredRemarkRecords.length / rowsPerPage));
 
   useEffect(() => {
     function handleResize() {
@@ -456,12 +503,20 @@ export function LoansPage() {
   }, [paymentQuery]);
 
   useEffect(() => {
+    setRemarkRecordsPage(1);
+  }, [remarkQuery]);
+
+  useEffect(() => {
     setLoanPage((current) => Math.min(current, totalLoanPages));
   }, [totalLoanPages]);
 
   useEffect(() => {
     setPaymentPage((current) => Math.min(current, totalPaymentPages));
   }, [totalPaymentPages]);
+
+  useEffect(() => {
+    setRemarkRecordsPage((current) => Math.min(current, totalRemarkPages));
+  }, [totalRemarkPages]);
 
   useEffect(() => {
     function closeMenu() {
@@ -492,8 +547,8 @@ export function LoansPage() {
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
-    if (!isCollector && requestedTab === "payments") {
-      setActiveRecordsTab("payments");
+    if (!isCollector && (requestedTab === "payments" || requestedTab === "remarks")) {
+      setActiveRecordsTab(requestedTab);
       return;
     }
 
@@ -539,6 +594,11 @@ export function LoansPage() {
     const start = (paymentPage - 1) * rowsPerPage;
     return filteredPaymentRecords.slice(start, start + rowsPerPage);
   }, [filteredPaymentRecords, paymentPage, rowsPerPage]);
+
+  const paginatedRemarkRecords = useMemo(() => {
+    const start = (remarkRecordsPage - 1) * rowsPerPage;
+    return filteredRemarkRecords.slice(start, start + rowsPerPage);
+  }, [filteredRemarkRecords, remarkRecordsPage, rowsPerPage]);
   const selectedLoanIdSet = useMemo(() => new Set(selectedLoanIds), [selectedLoanIds]);
   const selectedPaymentIdSet = useMemo(() => new Set(selectedPaymentIds), [selectedPaymentIds]);
   const paginatedLoanIds = useMemo(() => paginatedLoans.map((loan) => loan.id), [paginatedLoans]);
@@ -590,17 +650,19 @@ export function LoansPage() {
   }
 
   async function loadData() {
-    const [memberData, loanData, paymentsData, branchData] = await Promise.all([
+    const [memberData, loanData, paymentsData, branchData, remarksData] = await Promise.all([
       apiRequest<Borrower[]>("/borrowers"),
       apiRequest<LoanRow[]>("/loans"),
       apiRequest<PaymentRecordRow[]>("/payments").catch(() => []),
-      apiRequest<Branch[]>("/branches").catch(() => [])
+      apiRequest<Branch[]>("/branches").catch(() => []),
+      apiRequest<{ items: RemarkRecordRow[] }>("/collection-history?type=remarks&export=true").catch(() => ({ items: [] }))
     ]);
     setMembers(memberData);
     setMembersNeedRefresh(false);
     setLoans(loanData);
     setPaymentRecords(paymentsData);
     setBranches(branchData);
+    setRemarkRecords(remarksData.items);
   }
 
   async function refreshLoanImportData() {
@@ -861,7 +923,7 @@ export function LoansPage() {
     setIsDeletePending(true);
     try {
       await apiRequest(`/loans/${loan.id}`, "DELETE");
-      setMessage("Loan deleted.");
+      setMessage("Loan removed from Collections. Its payments and remarks remain in history.");
       if (editingId === loan.id) {
         closeFormModal();
       }
@@ -957,7 +1019,7 @@ export function LoansPage() {
       await loadData();
       setSelectedLoanIds((current) => current.filter((id) => !loanBulkDeleteIds.includes(id)));
       setLoanBulkDeleteIds([]);
-      setMessage(`Deleted ${result.deleted} loan record(s).`);
+      setMessage(`Removed ${result.deleted} loan record(s) from Collections. Their history was retained.`);
 
       if (result.skipped.length > 0) {
         const summary = result.skipped
@@ -1540,7 +1602,7 @@ export function LoansPage() {
       title="Delete this loan record?"
       description={
         loanPendingDelete
-          ? `Loan account ${loanPendingDelete.loanAccountNo} for ${loanPendingDelete.memberName} will be removed permanently.`
+          ? `Loan account ${loanPendingDelete.loanAccountNo} for ${loanPendingDelete.memberName} will be removed from Collections. Its payments and remarks will remain in history.`
           : ""
       }
       confirmLabel={isDeletePending ? "Deleting..." : "Delete Loan"}
@@ -1562,7 +1624,7 @@ export function LoansPage() {
       title="Delete selected loan records?"
       description={
         loanBulkDeleteIds.length > 0
-          ? `${loanBulkDeleteIds.length} selected loan record(s) will be permanently deleted with related remarks and payments.`
+          ? `${loanBulkDeleteIds.length} selected loan record(s) will be removed from Collections. Their payments and remarks will remain in history.`
           : ""
       }
       confirmLabel={isBulkLoanDeletePending ? "Deleting..." : "Delete Selected Loans"}
@@ -1668,6 +1730,37 @@ export function LoansPage() {
           onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/loans/${remarkLoan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarkError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
           onClose={() => setSummaryRemark(null)} />;
       })()}
+      {selectedRemarkRecord && (
+        <RemarkSummaryModal
+          open
+          remark={selectedRemarkRecord.remark}
+          category={selectedRemarkRecord.category ?? DEFAULT_REMARK_CATEGORY}
+          createdAt={selectedRemarkRecord.occurred_at}
+          createdBy={selectedRemarkRecord.collector_name || "System"}
+          member={{
+            name: selectedRemarkRecord.member_name,
+            cifKey: selectedRemarkRecord.cif_key ?? undefined,
+            contact: selectedRemarkRecord.contact_info ?? undefined,
+            address: selectedRemarkRecord.address ?? undefined,
+            branch: selectedRemarkRecord.branch_name ?? undefined
+          }}
+          loan={selectedRemarkRecord.loan_account_no ? {
+            accountNo: selectedRemarkRecord.loan_account_no,
+            type: selectedRemarkRecord.loan_type ?? undefined,
+            status: selectedRemarkRecord.loan_status ?? undefined,
+            maturityDate: selectedRemarkRecord.maturity_date ? formatDate(selectedRemarkRecord.maturity_date) : undefined
+          } : undefined}
+          attachmentName={selectedRemarkRecord.attachment_name}
+          onDownload={selectedRemarkRecord.attachment_name ? () => {
+            const attachmentPath = selectedRemarkRecord.kind === "loan_remark"
+              ? `/loans/${selectedRemarkRecord.loan_id}/remarks/${selectedRemarkRecord.id}/attachment`
+              : `/borrowers/${selectedRemarkRecord.member_id}/remarks/${selectedRemarkRecord.id}/attachment`;
+            void apiDownload(attachmentPath, selectedRemarkRecord.attachment_name || "attachment")
+              .catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
+          } : undefined}
+          onClose={() => setSelectedRemarkRecord(null)}
+        />
+      )}
       {paymentModal}
       {deleteLoanModal}
       {deleteBulkLoanModal}
@@ -1737,6 +1830,15 @@ export function LoansPage() {
               onClick={() => setActiveRecordsTab("loans")}
             >
               Loan Records
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${
+                activeRecordsTab === "remarks" ? "tab-btn-active" : ""
+              }`}
+              onClick={() => setActiveRecordsTab("remarks")}
+            >
+              Remarks
             </button>
             <button
               type="button"
@@ -1847,7 +1949,7 @@ export function LoansPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
-                        <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>
+                        {!isBranchManager && <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>}
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
                         {canDeleteLoans && (
@@ -1864,7 +1966,7 @@ export function LoansPage() {
                     </div>
 
                     <div className="mobile-record-grid">
-                      <LoanRecordField label="CIF Key" value={loan.cifKey} />
+                      {!isBranchManager && <LoanRecordField label="CIF Key" value={loan.cifKey} />}
                       <LoanRecordField label="Loan Type" value={loan.loanType} />
                       <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
                       <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
@@ -1876,7 +1978,16 @@ export function LoansPage() {
                       <LoanRecordField label="PAR Age" value={loan.parAge} />
                       <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
                       <LoanRecordField label="Address" value={loan.address || "-"} />
-                      <LoanRecordField label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
+                      {isBranchManager ? (
+                        <LoanRecordField
+                          label="Remarks"
+                          value={loan.latestRemarks.length
+                            ? loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")
+                            : "-"}
+                        />
+                      ) : (
+                        <LoanRecordField label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
+                      )}
                     </div>
 
                     <div className="mobile-action-row">
@@ -1931,7 +2042,7 @@ export function LoansPage() {
             </div>}
 
             <div className={isCollector ? "hidden" : "table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block"}>
-              <table className="table-clean loan-records-table w-[2200px] text-xs">
+              <table className={`table-clean loan-records-table text-xs ${isBranchManager ? "w-[1900px]" : "w-[2200px]"}`}>
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>
                     {canDeleteLoans && (
@@ -1947,8 +2058,8 @@ export function LoansPage() {
                       </th>
                     )}
                     {canUseLoanActions && <th>Action</th>}
-                    <th>CIF Key</th>
-                    <th>Loan Account No</th>
+                    {!isBranchManager && <th>CIF Key</th>}
+                    {!isBranchManager && <th>Loan Account No</th>}
                     <th>Member Name</th>
                     <th>Loan Type</th>
                     <th>Date Release</th>
@@ -1962,7 +2073,7 @@ export function LoansPage() {
                     <th>Status</th>
                     <th>Contact</th>
                     <th>Address</th>
-                    <th>Notes</th>
+                    <th>{isBranchManager ? "Remarks" : "Notes"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2010,12 +2121,12 @@ export function LoansPage() {
                           </div>
                         </div>
                       </td>}
-                      <td title={loan.cifKey}>
+                      {!isBranchManager && <td title={loan.cifKey}>
                         <span className="cell-clip">{loan.cifKey}</span>
-                      </td>
-                      <td title={loan.loanAccountNo}>
+                      </td>}
+                      {!isBranchManager && <td title={loan.loanAccountNo}>
                         <span className="cell-clip">{loan.loanAccountNo}</span>
-                      </td>
+                      </td>}
                       <td title={loan.memberName}>
                         <span className="cell-clip">{loan.memberName}</span>
                       </td>
@@ -2041,9 +2152,23 @@ export function LoansPage() {
                       <td title={loan.address}>
                         <span className="cell-clip">{loan.address}</span>
                       </td>
-                      <td title={loan.notes ?? ""}>
-                        <span className="cell-clip">{loan.notes ?? ""}</span>
-                      </td>
+                      {isBranchManager ? (
+                        <td title={loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")}>
+                          {loan.latestRemarks.length ? (
+                            <ol className="max-w-[260px] space-y-1 whitespace-normal text-xs text-slate-700">
+                              {loan.latestRemarks.map((item, index) => (
+                                <li key={`${loan.id}-remark-${index}`} className="line-clamp-2">
+                                  <span className="font-semibold text-slate-900">{getRemarkCategoryLabel(item.remarkCategory)}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          ) : "-"}
+                        </td>
+                      ) : (
+                        <td title={loan.notes ?? ""}>
+                          <span className="cell-clip">{loan.notes ?? ""}</span>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -2058,7 +2183,7 @@ export function LoansPage() {
               onPageChange={setLoanPage}
             />
           </>
-        ) : (
+        ) : activeRecordsTab === "payments" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="relative w-full max-w-sm">
@@ -2123,7 +2248,6 @@ export function LoansPage() {
                   <div className="mobile-record-grid">
                     <LoanRecordField label="OR No" value={row.orNo || "-"} />
                     <LoanRecordField label="Collected By" value={row.collectedBy || "System"} />
-                    <LoanRecordField label="CIF Key" value={row.cifKey} />
                     <LoanRecordField label="Amount" value={formatCurrency(row.amount)} />
                     <LoanRecordField label="Collected At" value={formatDateTime(row.collectedAt)} />
                   </div>
@@ -2133,7 +2257,7 @@ export function LoansPage() {
             </div>
 
             <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
-              <table className="table-clean w-[1200px] text-xs">
+              <table className="table-clean w-[1050px] text-xs">
                 <thead className="sticky top-0 z-10 bg-c1">
                   <tr>
                     {canDeletePayments && (
@@ -2152,7 +2276,6 @@ export function LoansPage() {
                     <th>OR No</th>
                     <th>Collected By</th>
                     <th>Loan Account No</th>
-                    <th>CIF Key</th>
                     <th>Member Name</th>
                     <th>Amount</th>
                     <th>Collected At</th>
@@ -2176,7 +2299,6 @@ export function LoansPage() {
                       <td>{row.orNo || "-"}</td>
                       <td>{row.collectedBy || "System"}</td>
                       <td>{row.loanAccountNo}</td>
-                      <td>{row.cifKey}</td>
                       <td>{row.memberName}</td>
                       <td>{formatCurrency(row.amount)}</td>
                       <td>{formatDateTime(row.collectedAt)}</td>
@@ -2192,6 +2314,98 @@ export function LoansPage() {
               totalItems={filteredPaymentRecords.length}
               pageSize={rowsPerPage}
               onPageChange={setPaymentPage}
+            />
+          </>
+        ) : (
+          <>
+            <div className="relative w-full max-w-sm">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                className="field pl-9"
+                value={remarkQuery}
+                onChange={(event) => setRemarkQuery(event.target.value)}
+                placeholder="Search remarks"
+              />
+            </div>
+
+            <div className="mobile-record-list mt-3">
+              {paginatedRemarkRecords.map((row) => (
+                <article
+                  key={`${row.kind}-${row.id}`}
+                  className="mobile-record-card cursor-pointer transition hover:bg-white"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedRemarkRecord(row)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedRemarkRecord(row);
+                    }
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-slate-900">{row.member_name}</p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        {getRemarkCategoryLabel(row.category)}
+                      </p>
+                    </div>
+                    <span className="text-xs text-slate-500">{formatDateTime(row.occurred_at)}</span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-800">{row.remark}</p>
+                  <div className="mobile-record-grid">
+                    <LoanRecordField label="Loan Account No" value={row.loan_account_no || "Member remark"} />
+                    <LoanRecordField label="Added By" value={row.collector_name || "System"} />
+                  </div>
+                </article>
+              ))}
+              {filteredRemarkRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No remarks found.</p>}
+            </div>
+
+            <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
+              <table className="table-clean w-full min-w-[900px] text-xs">
+                <thead className="sticky top-0 z-10 bg-c1">
+                  <tr>
+                    <th>Date</th>
+                    <th>Member Name</th>
+                    <th>Loan Account No</th>
+                    <th>Category</th>
+                    <th>Remark</th>
+                    <th>Added By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedRemarkRecords.map((row) => (
+                    <tr
+                      key={`${row.kind}-${row.id}`}
+                      className="cursor-pointer transition hover:bg-slate-50"
+                      tabIndex={0}
+                      onClick={() => setSelectedRemarkRecord(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedRemarkRecord(row);
+                        }
+                      }}
+                    >
+                      <td>{formatDateTime(row.occurred_at)}</td>
+                      <td>{row.member_name}</td>
+                      <td>{row.loan_account_no || "Member remark"}</td>
+                      <td>{getRemarkCategoryLabel(row.category)}</td>
+                      <td className="max-w-md whitespace-normal break-words">{row.remark}</td>
+                      <td>{row.collector_name || "System"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredRemarkRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No remarks found.</p>}
+            </div>
+            <PaginationControls
+              currentPage={remarkRecordsPage}
+              totalPages={totalRemarkPages}
+              totalItems={filteredRemarkRecords.length}
+              pageSize={rowsPerPage}
+              onPageChange={setRemarkRecordsPage}
             />
           </>
         )}

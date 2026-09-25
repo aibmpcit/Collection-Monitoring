@@ -44,16 +44,16 @@ const NAV_ITEMS: NavDefinition[] = [
     visible: () => true
   },
   {
-    to: "/borrowers",
-    label: "Members",
-    icon: <Users size={18} />,
-    visible: (role) => role !== "staff"
-  },
-  {
     to: "/loans",
     label: "Collections",
     icon: <WalletCards size={18} />,
     visible: () => true
+  },
+  {
+    to: "/borrowers",
+    label: "Members",
+    icon: <Users size={18} />,
+    visible: (role) => role !== "staff"
   },
   {
     to: "/collector-history",
