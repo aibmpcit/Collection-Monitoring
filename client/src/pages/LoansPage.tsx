@@ -1209,25 +1209,25 @@ export function LoansPage() {
                 </label>
 
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Loan Account No
+                  Loan Account Number
                   <input
                     className="field min-w-0"
                     value={form.loanAccountNo}
                     onChange={(event) => setForm((c) => ({ ...c, loanAccountNo: event.target.value }))}
-                    placeholder="Loan Account No"
+                    placeholder="Loan Account Number"
                     required
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Loan Type
-                  <input className="field min-w-0" value={form.loanType} onChange={(event) => setForm((c) => ({ ...c, loanType: event.target.value }))} placeholder="Loan Type" required />
+                  Loan Product
+                  <input className="field min-w-0" value={form.loanType} onChange={(event) => setForm((c) => ({ ...c, loanType: event.target.value }))} placeholder="Loan Product" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Date Release
+                  Release Date
                   <input className="field min-w-0" type="date" value={form.dateRelease} onChange={(event) => setForm((c) => ({ ...c, dateRelease: event.target.value }))} required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Maturity Date
+                  Maturity
                   <input className="field min-w-0" type="date" value={form.maturityDate} onChange={(event) => setForm((c) => ({ ...c, maturityDate: event.target.value }))} required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -1960,7 +1960,7 @@ export function LoansPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
-                        {!isBranchManager && <p className="mt-1 break-all text-xs text-slate-500">{loan.loanAccountNo}</p>}
+                        {!isBranchManager && <p className="mt-1 break-all text-xs text-slate-500">Loan Account Number: {loan.loanAccountNo}</p>}
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
                         {canDeleteLoans && (
@@ -1977,10 +1977,12 @@ export function LoansPage() {
                     </div>
 
                     <div className="mobile-record-grid">
-                      {!isBranchManager && <LoanRecordField label="CIF Key" value={loan.cifKey} />}
-                      <LoanRecordField label="Loan Type" value={loan.loanType} />
-                      <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
-                      <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
+                      {!isBranchManager && <LoanRecordField label="Member Code" value={loan.cifKey} />}
+                      <LoanRecordField label="Address" value={loan.address || "-"} />
+                      <LoanRecordField label="Contact No." value={loan.contactInfo || "-"} />
+                      <LoanRecordField label="Loan Product" value={loan.loanType} />
+                      <LoanRecordField label="Release Date" value={formatDate(loan.dateRelease)} />
+                      <LoanRecordField label="Maturity" value={formatDate(loan.maturityDate)} />
                       <LoanRecordField label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
                       <LoanRecordField label="Loan Balance" value={formatCurrency(loan.loanBalance)} />
                       <LoanRecordField label="Principal Arrears" value={formatCurrency(loan.principalDue)} />
@@ -1988,8 +1990,6 @@ export function LoansPage() {
                       <LoanRecordField label="Interest" value={formatCurrency(loan.interest)} />
                       <LoanRecordField label="Total" value={formatCurrency(loan.total)} />
                       <LoanRecordField label="PAR Age" value={loan.parAge} />
-                      <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
-                      <LoanRecordField label="Address" value={loan.address || "-"} />
                       {isBranchManager ? (
                         <LoanRecordField
                           label="Remarks"
@@ -2070,23 +2070,22 @@ export function LoansPage() {
                       </th>
                     )}
                     {canUseLoanActions && <th>Action</th>}
-                    {!isBranchManager && <th>CIF Key</th>}
-                    {!isBranchManager && <th>Loan Account No</th>}
+                    {!isBranchManager && <th>Member Code</th>}
                     <th>Member Name</th>
-                    <th>Loan Type</th>
-                    <th>Date Release</th>
-                    <th>Maturity Date</th>
+                    <th>Address</th>
+                    <th>Contact No.</th>
+                    {!isBranchManager && <th>Loan Account Number</th>}
+                    <th>Loan Product</th>
+                    <th>Release Date</th>
+                    <th>Maturity</th>
                     <th>Loan Amount</th>
                     <th>Loan Balance</th>
                     <th>Principal Arrears</th>
                     <th>Interest</th>
                     <th>Fines</th>
                     <th>Total</th>
-                    <th>Par Age</th>
-                    <th>Status</th>
-                    <th>Contact</th>
-                    <th>Address</th>
-                    <th>{isBranchManager ? "Remarks" : "Notes"}</th>
+                    <th>PAR Age</th>
+                    <th>Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2137,12 +2136,18 @@ export function LoansPage() {
                       {!isBranchManager && <td title={loan.cifKey}>
                         <span className="cell-clip">{loan.cifKey}</span>
                       </td>}
-                      {!isBranchManager && <td title={loan.loanAccountNo}>
-                        <span className="cell-clip">{loan.loanAccountNo}</span>
-                      </td>}
                       <td title={loan.memberName}>
                         <span className="cell-clip">{loan.memberName}</span>
                       </td>
+                      <td title={loan.address}>
+                        <span className="cell-clip">{loan.address}</span>
+                      </td>
+                      <td title={loan.contactInfo}>
+                        <span className="cell-clip">{loan.contactInfo}</span>
+                      </td>
+                      {!isBranchManager && <td title={loan.loanAccountNo}>
+                        <span className="cell-clip">{loan.loanAccountNo}</span>
+                      </td>}
                       <td title={loan.loanType}>
                         <span className="cell-clip">{loan.loanType}</span>
                       </td>
@@ -2155,17 +2160,6 @@ export function LoansPage() {
                       <td>{formatCurrency(loan.penaltyDue)}</td>
                       <td>{formatCurrency(loan.total)}</td>
                       <td>{loan.parAge}</td>
-                      <td>
-                        <span className={loanStatusClass(loan.status)}>
-                          {loan.status}
-                        </span>
-                      </td>
-                      <td title={loan.contactInfo}>
-                        <span className="cell-clip">{loan.contactInfo}</span>
-                      </td>
-                      <td title={loan.address}>
-                        <span className="cell-clip">{loan.address}</span>
-                      </td>
                       {isBranchManager ? (
                         <td title={loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")}>
                           {loan.latestRemarks.length ? (
