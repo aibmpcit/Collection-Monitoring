@@ -204,10 +204,12 @@ const EMPTY_FORM: LoanPayload = {
   dateRelease: "",
   maturityDate: "",
   loanAmount: 0,
+  loanBalance: 0,
   principalDue: 0,
   penaltyDue: 0,
   interest: 0,
   otherCharges: 0,
+  total: 0,
   parAge: 0,
   status: "active",
   notes: ""
@@ -737,19 +739,21 @@ export function LoansPage() {
           return {
             loanId: parseInteger(normalized["loan id"] || normalized["loanid"] || 0),
             memberId: parseInteger(normalized["member id"] || normalized["memberid"] || normalized["borrower id"] || normalized["borrowerid"] || 0),
-            cifKey: normalized["cif key"] || normalized["cifkey"] || "",
-            loanAccountNo: normalized["loan account no"] || normalized["loanaccountno"] || "",
+            cifKey: normalized["member code"] || normalized["membercode"] || normalized["cif key"] || normalized["cifkey"] || "",
+            loanAccountNo: normalized["loan account number"] || normalized["loanaccountnumber"] || normalized["loan account no"] || normalized["loanaccountno"] || "",
             memberName: normalized["member name"] || normalized["membername"] || "",
-            contactInfo: normalized["contact info"] || normalized["contactinfo"] || "",
+            contactInfo: normalized["contact no."] || normalized["contact no"] || normalized["contactno"] || normalized["contact info"] || normalized["contactinfo"] || "",
             address: normalized["address"] || "",
-            loanType: normalized["loan type"] || normalized["loantype"] || "",
-            dateRelease: normalizeDate(normalized["date release"] || normalized["daterelease"] || ""),
-            maturityDate: normalizeDate(normalized["maturity date"] || normalized["maturitydate"] || ""),
+            loanType: normalized["loan product"] || normalized["loanproduct"] || normalized["loan type"] || normalized["loantype"] || "",
+            dateRelease: normalizeDate(normalized["release date"] || normalized["releasedate"] || normalized["date release"] || normalized["daterelease"] || ""),
+            maturityDate: normalizeDate(normalized["maturity"] || normalized["maturity date"] || normalized["maturitydate"] || ""),
             loanAmount: parseMoney(normalized["loan amount"] || normalized["loanamount"] || 0),
-            principalDue: parseMoney(normalized["principal due"] || normalized["principaldue"] || 0),
-            penaltyDue: parseMoney(normalized["penalty due"] || normalized["penaltydue"] || 0),
+            loanBalance: parseMoney(normalized["loan balance"] || normalized["loanbalance"] || 0),
+            principalDue: parseMoney(normalized["principal arears"] || normalized["principal arrears"] || normalized["principalarrears"] || normalized["principal due"] || normalized["principaldue"] || 0),
+            penaltyDue: parseMoney(normalized["fines"] || normalized["penalty due"] || normalized["penaltydue"] || 0),
             interest: parseMoney(normalized["interest"] || 0),
             otherCharges: parseMoney(normalized["other charges"] || normalized["othercharges"] || 0),
+            total: parseMoney(normalized["total"] || 0),
             parAge: parseWholeNumber(normalized["par age"] || normalized["parage"] || 0),
             status: normalizeImportedLoanStatus(normalized["status"] || "active"),
             notes: normalized["remarks"] || normalized["notes"] || "",
@@ -840,10 +844,12 @@ export function LoansPage() {
       dateRelease: loan.dateRelease,
       maturityDate: loan.maturityDate,
       loanAmount: loan.loanAmount,
+      loanBalance: loan.loanBalance,
       principalDue: loan.principalDue,
       penaltyDue: loan.penaltyDue,
       interest: loan.interest,
       otherCharges: loan.otherCharges,
+      total: loan.total,
       parAge: loan.parAge,
       status: loan.status,
       notes: loan.notes ?? ""
@@ -1229,20 +1235,24 @@ export function LoansPage() {
                   <input className="field min-w-0" type="number" min={0} value={form.loanAmount} onChange={(event) => setForm((c) => ({ ...c, loanAmount: Number(event.target.value) }))} placeholder="Loan Amount" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Principal Due
-                  <input className="field min-w-0" type="number" min={0} value={form.principalDue} onChange={(event) => setForm((c) => ({ ...c, principalDue: Number(event.target.value) }))} placeholder="Principal Due" required />
+                  Loan Balance
+                  <input className="field min-w-0" type="number" min={0} value={form.loanBalance} onChange={(event) => setForm((c) => ({ ...c, loanBalance: Number(event.target.value) }))} placeholder="Loan Balance" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Penalty Due
-                  <input className="field min-w-0" type="number" min={0} value={form.penaltyDue} onChange={(event) => setForm((c) => ({ ...c, penaltyDue: Number(event.target.value) }))} placeholder="Penalty Due" required />
+                  Principal Arrears
+                  <input className="field min-w-0" type="number" min={0} value={form.principalDue} onChange={(event) => setForm((c) => ({ ...c, principalDue: Number(event.target.value) }))} placeholder="Principal Arrears" required />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Fines
+                  <input className="field min-w-0" type="number" min={0} value={form.penaltyDue} onChange={(event) => setForm((c) => ({ ...c, penaltyDue: Number(event.target.value) }))} placeholder="Fines" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Interest
                   <input className="field min-w-0" type="number" min={0} value={form.interest} onChange={(event) => setForm((c) => ({ ...c, interest: Number(event.target.value) }))} placeholder="Interest" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Other Charges
-                  <input className="field min-w-0" type="number" min={0} value={form.otherCharges} onChange={(event) => setForm((c) => ({ ...c, otherCharges: Number(event.target.value) }))} placeholder="Other Charges" required />
+                  Total
+                  <input className="field min-w-0" type="number" min={0} value={form.total} onChange={(event) => setForm((c) => ({ ...c, total: Number(event.target.value) }))} placeholder="Total" required />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Par Age
@@ -1305,10 +1315,11 @@ export function LoansPage() {
                 <LoanRecordField label="Date Release" value={formatDate(mobileLoanPreview.dateRelease)} />
                 <LoanRecordField label="Maturity Date" value={formatDate(mobileLoanPreview.maturityDate)} />
                 <LoanRecordField label="Loan Amount" value={formatCurrency(mobileLoanPreview.loanAmount)} />
-                <LoanRecordField label="Principal Due" value={formatCurrency(mobileLoanPreview.principalDue)} />
-                <LoanRecordField label="Penalty Due" value={formatCurrency(mobileLoanPreview.penaltyDue)} />
+                <LoanRecordField label="Loan Balance" value={formatCurrency(mobileLoanPreview.loanBalance)} />
+                <LoanRecordField label="Principal Arrears" value={formatCurrency(mobileLoanPreview.principalDue)} />
+                <LoanRecordField label="Fines" value={formatCurrency(mobileLoanPreview.penaltyDue)} />
                 <LoanRecordField label="Interest" value={formatCurrency(mobileLoanPreview.interest)} />
-                <LoanRecordField label="Other Charges" value={formatCurrency(mobileLoanPreview.otherCharges)} />
+                <LoanRecordField label="Total" value={formatCurrency(mobileLoanPreview.total)} />
                 <LoanRecordField label="PAR Age" value={mobileLoanPreview.parAge} />
                 <LoanRecordField label="Contact" value={mobileLoanPreview.contactInfo || "-"} />
                 <div className="col-span-2">
@@ -1420,7 +1431,7 @@ export function LoansPage() {
                     <p>Uploading loan records and refreshing the list. Please keep this window open.</p>
                   </div>
                 )}
-                <p className="text-xs text-black/60">Bulk upload CSV/Excel. Inserts use CIF Key, Loan Account No, Member Name, Loan Type, Date Release, Maturity Date, Loan Amount, Principal Due, Penalty Due, Interest, Other Charges, Par Age, Status, Contact Info, and Address. Updates match by Loan ID + Member ID/Borrower ID, or by CIF Key + Loan Account No.</p>
+                <p className="text-xs text-black/60">Bulk upload CSV/Excel columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age, and Remarks.</p>
               </div>
             </div>
           </section>,
@@ -1971,10 +1982,11 @@ export function LoansPage() {
                       <LoanRecordField label="Date Release" value={formatDate(loan.dateRelease)} />
                       <LoanRecordField label="Maturity Date" value={formatDate(loan.maturityDate)} />
                       <LoanRecordField label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
-                      <LoanRecordField label="Principal Due" value={formatCurrency(loan.principalDue)} />
-                      <LoanRecordField label="Penalty Due" value={formatCurrency(loan.penaltyDue)} />
+                      <LoanRecordField label="Loan Balance" value={formatCurrency(loan.loanBalance)} />
+                      <LoanRecordField label="Principal Arrears" value={formatCurrency(loan.principalDue)} />
+                      <LoanRecordField label="Fines" value={formatCurrency(loan.penaltyDue)} />
                       <LoanRecordField label="Interest" value={formatCurrency(loan.interest)} />
-                      <LoanRecordField label="Other Charges" value={formatCurrency(loan.otherCharges)} />
+                      <LoanRecordField label="Total" value={formatCurrency(loan.total)} />
                       <LoanRecordField label="PAR Age" value={loan.parAge} />
                       <LoanRecordField label="Contact" value={loan.contactInfo || "-"} />
                       <LoanRecordField label="Address" value={loan.address || "-"} />
@@ -2065,10 +2077,11 @@ export function LoansPage() {
                     <th>Date Release</th>
                     <th>Maturity Date</th>
                     <th>Loan Amount</th>
-                    <th>Principal Due</th>
-                    <th>Penalty Due</th>
+                    <th>Loan Balance</th>
+                    <th>Principal Arrears</th>
                     <th>Interest</th>
-                    <th>Other Charges</th>
+                    <th>Fines</th>
+                    <th>Total</th>
                     <th>Par Age</th>
                     <th>Status</th>
                     <th>Contact</th>
@@ -2136,10 +2149,11 @@ export function LoansPage() {
                       <td>{new Date(loan.dateRelease).toLocaleDateString()}</td>
                       <td>{new Date(loan.maturityDate).toLocaleDateString()}</td>
                       <td>{formatCurrency(loan.loanAmount)}</td>
+                      <td>{formatCurrency(loan.loanBalance)}</td>
                       <td>{formatCurrency(loan.principalDue)}</td>
-                      <td>{formatCurrency(loan.penaltyDue)}</td>
                       <td>{formatCurrency(loan.interest)}</td>
-                      <td>{formatCurrency(loan.otherCharges)}</td>
+                      <td>{formatCurrency(loan.penaltyDue)}</td>
+                      <td>{formatCurrency(loan.total)}</td>
                       <td>{loan.parAge}</td>
                       <td>
                         <span className={loanStatusClass(loan.status)}>

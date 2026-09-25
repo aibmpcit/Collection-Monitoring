@@ -424,7 +424,11 @@ export function LoanDetailsPage() {
               <Detail label="Date Release" value={formatDate(loan.dateRelease)} />
               <Detail label="Maturity Date" value={formatDate(loan.maturityDate)} />
               <Detail label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
-              <Detail label="Other Charges" value={formatCurrency(loan.otherCharges)} />
+              <Detail label="Loan Balance" value={formatCurrency(loan.loanBalance)} />
+              <Detail label="Principal Arrears" value={formatCurrency(loan.principalDue)} />
+              <Detail label="Interest" value={formatCurrency(loan.interest)} />
+              <Detail label="Fines" value={formatCurrency(loan.penaltyDue)} />
+              <Detail label="Total" value={formatCurrency(loan.total)} />
               <Detail label="PAR Age" value={String(loan.parAge)} />
               <Detail label="Due Date" value={formatDate(loan.dueDate)} />
               <Detail label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />

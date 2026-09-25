@@ -114,10 +114,12 @@ const loanSchema = z.object({
   dateRelease: normalizedDateSchema,
   maturityDate: normalizedDateSchema,
   loanAmount: z.coerce.number().nonnegative(),
+  loanBalance: z.coerce.number().nonnegative().default(0),
   principalDue: z.coerce.number().nonnegative(),
   penaltyDue: z.coerce.number().nonnegative(),
   interest: z.coerce.number().nonnegative(),
   otherCharges: z.coerce.number().nonnegative().default(0),
+  total: z.coerce.number().nonnegative().default(0),
   parAge: normalizedWholeNumberSchema.default(0),
   status: z.enum(["active", "closed", "overdue"]).default("active"),
   notes: z.string().optional().default("")
@@ -131,10 +133,12 @@ const loanImportInsertSchema = z.object({
   dateRelease: normalizedDateSchema,
   maturityDate: normalizedDateSchema,
   loanAmount: z.coerce.number().nonnegative(),
+  loanBalance: z.coerce.number().nonnegative().default(0),
   principalDue: z.coerce.number().nonnegative(),
   penaltyDue: z.coerce.number().nonnegative(),
   interest: z.coerce.number().nonnegative(),
   otherCharges: z.coerce.number().nonnegative().default(0),
+  total: z.coerce.number().nonnegative().default(0),
   parAge: normalizedWholeNumberSchema.default(0),
   status: z.enum(["active", "closed", "overdue"]).default("active"),
   contactInfo: z.string().trim().default(""),
@@ -295,9 +299,11 @@ function mapLoanRow(row: Record<string, unknown>) {
     dateRelease: String(row.date_release ?? row.due_date ?? ""),
     maturityDate: String(row.maturity_date ?? row.due_date ?? ""),
     loanAmount: toNumber(row.loan_amount ?? row.principal ?? 0),
+    loanBalance: toNumber(row.loan_balance ?? 0),
     principalDue: toNumber(row.principal_due ?? row.principal ?? 0),
     penaltyDue: toNumber(row.penalty_due ?? row.penalty ?? 0),
     otherCharges: toNumber(row.other_charges ?? 0),
+    total: toNumber(row.total ?? 0),
     parAge: Number(row.par_age ?? 0),
     notes: String(row.notes ?? ""),
     principal: toNumber(row.principal_due ?? row.principal ?? 0),
@@ -328,9 +334,11 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          l.date_release,
          l.maturity_date,
          l.loan_amount,
+         l.loan_balance,
          l.principal_due,
          l.penalty_due,
          l.other_charges,
+         l.total,
          l.par_age,
          l.notes,
          l.principal,
@@ -412,11 +420,11 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
       const loanAccountNo = parsed.data.loanAccountNo.trim() || (await nextLoanAccountNo(client));
       const result = await client.query<{ id: number }>(
         `INSERT INTO loans (
-           borrower_id, loan_account_no, loan_type, date_release, maturity_date, loan_amount,
-           principal_due, penalty_due, interest, other_charges, par_age, notes, principal, penalty, due_date, status
+           borrower_id, loan_account_no, loan_type, date_release, maturity_date, loan_amount, loan_balance,
+           principal_due, penalty_due, interest, other_charges, total, par_age, notes, principal, penalty, due_date, status
          ) VALUES (
-           $1, $2, $3, $4, $5, $6,
-           $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+           $1, $2, $3, $4, $5, $6, $7,
+           $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
          ) RETURNING id`,
         [
           parsed.data.borrowerId,
@@ -425,10 +433,12 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
           parsed.data.dateRelease.trim(),
           parsed.data.maturityDate.trim(),
           parsed.data.loanAmount,
+          parsed.data.loanBalance,
           parsed.data.principalDue,
           parsed.data.penaltyDue,
           parsed.data.interest,
           parsed.data.otherCharges,
+          parsed.data.total,
           parsed.data.parAge,
           parsed.data.notes ?? "",
           parsed.data.principalDue,
@@ -452,10 +462,12 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
       dateRelease: parsed.data.dateRelease.trim(),
       maturityDate: parsed.data.maturityDate.trim(),
       loanAmount: parsed.data.loanAmount,
+      loanBalance: parsed.data.loanBalance,
       principalDue: parsed.data.principalDue,
       penaltyDue: parsed.data.penaltyDue,
       interest: parsed.data.interest,
       otherCharges: parsed.data.otherCharges,
+      total: parsed.data.total,
       parAge: parsed.data.parAge,
       status: parsed.data.status,
       notes: parsed.data.notes ?? ""
@@ -790,10 +802,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               dateRelease: String(row?.dateRelease ?? "").trim(),
               maturityDate: String(row?.maturityDate ?? "").trim(),
               loanAmount: Number(row?.loanAmount ?? 0),
+              loanBalance: Number(row?.loanBalance ?? 0),
               principalDue: Number(row?.principalDue ?? 0),
               penaltyDue: Number(row?.penaltyDue ?? 0),
               interest: Number(row?.interest ?? 0),
               otherCharges: Number(row?.otherCharges ?? 0),
+              total: Number(row?.total ?? 0),
               parAge: Number(row?.parAge ?? 0),
               status: normalizedStatus,
               notes: String(row?.notes ?? "")
@@ -813,9 +827,9 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
             await client.query(
               `UPDATE loans
                SET borrower_id = $1, loan_account_no = $2, loan_type = $3, date_release = $4, maturity_date = $5, loan_amount = $6,
-                   principal_due = $7, penalty_due = $8, interest = $9, other_charges = $10, par_age = $11, notes = $12,
-                   principal = $13, penalty = $14, due_date = $15, status = $16, created_at = CURRENT_TIMESTAMP
-               WHERE id = $17`,
+                   loan_balance = $7, principal_due = $8, penalty_due = $9, interest = $10, other_charges = $11, total = $12,
+                   par_age = $13, notes = $14, principal = $15, penalty = $16, due_date = $17, status = $18, created_at = CURRENT_TIMESTAMP
+               WHERE id = $19`,
               [
                 borrower.id,
                 loanAccountNo,
@@ -823,10 +837,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
                 parsed.data.dateRelease.trim(),
                 parsed.data.maturityDate.trim(),
                 parsed.data.loanAmount,
+                parsed.data.loanBalance,
                 parsed.data.principalDue,
                 parsed.data.penaltyDue,
                 parsed.data.interest,
                 parsed.data.otherCharges,
+                parsed.data.total,
                 parsed.data.parAge,
                 parsed.data.notes ?? "",
                 parsed.data.principalDue,
@@ -836,6 +852,14 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
                 matchedLoan.id
               ]
             );
+            if (parsed.data.notes.trim()) {
+              await client.query(
+                `INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by)
+                 SELECT $1, $2, 'follow_up_collection', $3
+                 WHERE NOT EXISTS (SELECT 1 FROM loan_remarks WHERE loan_id = $1 AND remark_text = $2)`,
+                [matchedLoan.id, parsed.data.notes.trim(), user.id]
+              );
+            }
 
             matchedLoan = {
               id: matchedLoan.id,
@@ -857,10 +881,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
             dateRelease: String(row?.dateRelease ?? "").trim(),
             maturityDate: String(row?.maturityDate ?? "").trim(),
             loanAmount: Number(row?.loanAmount ?? 0),
+            loanBalance: Number(row?.loanBalance ?? 0),
             principalDue: Number(row?.principalDue ?? 0),
             penaltyDue: Number(row?.penaltyDue ?? 0),
             interest: Number(row?.interest ?? 0),
             otherCharges: Number(row?.otherCharges ?? 0),
+            total: Number(row?.total ?? 0),
             parAge: Number(row?.parAge ?? 0),
             status: normalizedStatus,
             contactInfo,
@@ -907,11 +933,11 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
 
           const insertedLoan = await client.query<{ id: number }>(
             `INSERT INTO loans (
-               borrower_id, loan_account_no, loan_type, date_release, maturity_date, loan_amount,
-               principal_due, penalty_due, interest, other_charges, par_age, notes, principal, penalty, due_date, status
+               borrower_id, loan_account_no, loan_type, date_release, maturity_date, loan_amount, loan_balance,
+               principal_due, penalty_due, interest, other_charges, total, par_age, notes, principal, penalty, due_date, status
              ) VALUES (
-               $1, $2, $3, $4, $5, $6,
-               $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+               $1, $2, $3, $4, $5, $6, $7,
+               $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
              )
              RETURNING id`,
             [
@@ -921,10 +947,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               insertPayload.data.dateRelease,
               insertPayload.data.maturityDate,
               insertPayload.data.loanAmount,
+              insertPayload.data.loanBalance,
               insertPayload.data.principalDue,
               insertPayload.data.penaltyDue,
               insertPayload.data.interest,
               insertPayload.data.otherCharges,
+              insertPayload.data.total,
               insertPayload.data.parAge,
               insertPayload.data.notes ?? "",
               insertPayload.data.principalDue,
@@ -933,6 +961,12 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               insertPayload.data.status
             ]
           );
+          if (insertPayload.data.notes.trim()) {
+            await client.query(
+              "INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by) VALUES ($1, $2, 'follow_up_collection', $3)",
+              [insertedLoan.rows[0].id, insertPayload.data.notes.trim(), user.id]
+            );
+          }
 
           cacheLoan({
             id: insertedLoan.rows[0].id,
@@ -1011,9 +1045,11 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
          l.date_release,
          l.maturity_date,
          l.loan_amount,
+         l.loan_balance,
          l.principal_due,
          l.penalty_due,
          l.other_charges,
+         l.total,
          l.par_age,
          l.notes,
          l.principal,
@@ -1073,20 +1109,22 @@ router.patch("/:loanId", authenticate, authorize(["super_admin", "branch_admin",
 
     await query(
       `UPDATE loans
-       SET loan_account_no = $1, loan_type = $2, date_release = $3, maturity_date = $4, loan_amount = $5, principal_due = $6,
-           penalty_due = $7, interest = $8, other_charges = $9, par_age = $10, notes = $11, principal = $12, penalty = $13,
-           due_date = $14, status = $15
-       WHERE id = $16`,
+       SET loan_account_no = $1, loan_type = $2, date_release = $3, maturity_date = $4, loan_amount = $5, loan_balance = $6,
+           principal_due = $7, penalty_due = $8, interest = $9, other_charges = $10, total = $11, par_age = $12,
+           notes = $13, principal = $14, penalty = $15, due_date = $16, status = $17
+       WHERE id = $18`,
       [
         parsed.data.loanAccountNo.trim(),
         parsed.data.loanType.trim(),
         parsed.data.dateRelease.trim(),
         parsed.data.maturityDate.trim(),
         parsed.data.loanAmount,
+        parsed.data.loanBalance,
         parsed.data.principalDue,
         parsed.data.penaltyDue,
         parsed.data.interest,
         parsed.data.otherCharges,
+        parsed.data.total,
         parsed.data.parAge,
         parsed.data.notes ?? "",
         parsed.data.principalDue,

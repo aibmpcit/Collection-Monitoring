@@ -24,9 +24,11 @@ export interface Loan {
   dateRelease: string;
   maturityDate: string;
   loanAmount: number;
+  loanBalance: number;
   principalDue: number;
   penaltyDue: number;
   otherCharges: number;
+  total: number;
   parAge: number;
   principal: number;
   interest: number;
@@ -65,10 +67,12 @@ export interface LoanPayload {
   dateRelease: string;
   maturityDate: string;
   loanAmount: number;
+  loanBalance: number;
   principalDue: number;
   penaltyDue: number;
   interest: number;
   otherCharges: number;
+  total: number;
   parAge: number;
   status: "active" | "closed" | "overdue";
   notes: string;
