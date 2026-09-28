@@ -193,3 +193,34 @@ describe("collector history access and filters", () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 });
+
+// Loan deletion must retain the records used by Collector History.
+it.each(["single", "bulk"])("archives a loan through %s deletion without deleting its history", async mode => {
+  mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+  mocks.query.mockReset();
+  mocks.query.mockResolvedValueOnce({ rows: [{ id: 9, branch_id: 2 }], rowCount: 1 })
+    .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+  const response = await fetch(base + (mode === "bulk" ? "/loans/bulk" : "/loans/9"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    ...(mode === "bulk" ? { body: JSON.stringify({ ids: [9] }) } : {})
+  });
+  expect(response.status).toBe(200);
+  expect(mocks.query).toHaveBeenCalledWith("UPDATE loans SET status = 'closed' WHERE id = $1", [9]);
+  expect(mocks.query.mock.calls.some(([sql]) => /DELETE\s+FROM/i.test(sql))).toBe(false);
+});
+
+it.each(["payments", "remarks"])("includes archived loans in collector %s history and totals", async type => {
+  mocks.query.mockReset();
+  const item = { id: 11, loan_id: 9, loan_status: "closed", kind: type === "payments" ? "payment" : "loan_remark" };
+  mocks.query.mockResolvedValueOnce({ rows: [{ total: 1, amount: 100, payments: type === "payments" ? 1 : 0, members: 1 }] })
+    .mockResolvedValueOnce({ rows: [item] });
+  const response = await fetch(base + "?type=" + type);
+  const data = await response.json();
+  expect(response.status).toBe(200);
+  expect(data.items).toEqual([item]);
+  expect(data.total).toBe(1);
+  for (const [sql] of mocks.query.mock.calls) {
+    expect(sql).not.toMatch(/(?:l\.status|a\.loan_status)\s*(?:=|!=|<>|IN\s*\()/i);
+  }
+});

@@ -3,7 +3,27 @@ import type { QueryClient } from "../config/db.js";
 import type { AuthedRequest } from "../middleware/auth.js";
 import type { JwtUser, Role } from "../types/models.js";
 
+export const IMPORT_REMARK_CATEGORIES = new Set([
+"other_source_of_income",
+"personal_visit",
+"reminder_letter",
+"demand_letter",
+"branch_final_demand",
+"branch_compromise_agreement",
+"mediated",
+"letter_for_non_compliance",
+"atty_s_final_demand",
+"attys_demand_for_blocked_atm",
+"notice_for_co_makership",
+"final_notice_for_small_claims",
+"small_claims",
+"bp22_estafa",
+"foreclosed",
+"endorsed_to_rmu",
+]);
+
 export const REMARK_CATEGORIES = new Set([
+  ...IMPORT_REMARK_CATEGORIES,
   "follow_up_collection",
   "with_small_claims",
   "partially_paid",

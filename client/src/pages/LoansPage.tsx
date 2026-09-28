@@ -1,3 +1,4 @@
+import { RemarkImport } from "../components/RemarkImport";
 import { MoreVertical, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -476,6 +477,8 @@ export function LoansPage() {
     const grouped = new Map<number, { latest: RemarkRecordRow; recent: RemarkRecordRow[]; matchesQuery: boolean }>();
     for (const row of remarkRecords) {
       if (row.kind !== "loan_remark" || !row.loan_id || !row.remark.trim()) continue;
+      // Deleted loans are archived as closed; their history stays available in Collector History.
+      if (row.loan_status === "closed") continue;
       if (user?.role === "super_admin" && selectedBranchId > 0 && Number(row.branch_id ?? 0) !== selectedBranchId) continue;
       const matchesQuery = !q || [row.member_name, row.loan_account_no ?? "", row.loan_type ?? "", getRemarkCategoryLabel(row.category), row.remark, row.collector_name ?? ""].join(" ").toLowerCase().includes(q);
       const group = grouped.get(row.loan_id);
@@ -782,7 +785,7 @@ export function LoansPage() {
             loanId: parseInteger(normalized["loan id"] || normalized["loanid"] || 0),
             memberId: parseInteger(normalized["member id"] || normalized["memberid"] || normalized["borrower id"] || normalized["borrowerid"] || 0),
             cifKey: normalized["member code"] || normalized["membercode"] || normalized["cif key"] || normalized["cifkey"] || "",
-            loanAccountNo: normalized["loan account number"] || normalized["loanaccountnumber"] || normalized["loan account no"] || normalized["loanaccountno"] || "",
+            loanAccountNo: normalized["loan acct. no."] || normalized["loan acct no"] || normalized["loan account number"] || normalized["loanaccountnumber"] || normalized["loan account no"] || normalized["loanaccountno"] || "",
             memberName: normalized["member name"] || normalized["membername"] || "",
             contactInfo: normalized["contact no."] || normalized["contact no"] || normalized["contactno"] || normalized["contact info"] || normalized["contactinfo"] || "",
             address: normalized["address"] || "",
@@ -800,7 +803,7 @@ export function LoansPage() {
             status: normalized["status"]
               ? normalizeImportedLoanStatus(normalized["status"])
               : parseWholeNumber(normalized["par age"] || normalized["parage"] || 0) > 0 ? "overdue" : "active",
-            notes: normalized["remarks"] || normalized["notes"] || "",
+            notes: "",
             ...(user?.role === "super_admin"
               ? {
                   branchId: parseInteger(normalized["branch id"] || normalized["branchid"] || importBranchId)
@@ -1487,7 +1490,7 @@ export function LoansPage() {
                     <p>Uploading loan records and refreshing the list. Please keep this window open.</p>
                   </div>
                 )}
-                <p className="text-xs text-black/60">Bulk upload CSV/Excel columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age, and Remarks.</p>
+                <p className="text-xs text-black/60">Bulk upload CSV/Excel columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age, with remark columns ignored.</p>
               </div>
             </div>
           </section>,
@@ -2378,6 +2381,7 @@ export function LoansPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
+            {user?.role === "super_admin" && <RemarkImport branches={branches} onImported={loadData} />}
             <div className="relative w-full max-w-sm">
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input

@@ -528,3 +528,63 @@
     transition: none !important;
   }
 }
+
+/* Desktop navigation reveals labels on hover or keyboard focus. */
+@media (min-width: 1024px) {
+  .app-grid {
+    grid-template-columns: 84px minmax(0, 1fr);
+    transition: grid-template-columns 200ms ease;
+  }
+
+  .app-grid:has(> .side-panel:hover),
+  .app-grid:has(> .side-panel :focus-visible) {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  .side-panel {
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .side-panel .sidebar-shell {
+    padding: 20px 12px;
+  }
+
+  .side-panel .sidebar-icon,
+  .side-panel .sidebar-signout-btn svg {
+    flex-shrink: 0;
+  }
+
+  .side-panel .sidebar-text {
+    white-space: nowrap;
+  }
+
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-text,
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-text {
+    display: none;
+  }
+
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-nav-link,
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-link > div {
+    justify-content: center;
+    gap: 0;
+  }
+
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-link,
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-user-card {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-signout-btn {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    gap: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-grid { transition: none; }
+}

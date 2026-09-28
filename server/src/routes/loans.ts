@@ -1,3 +1,4 @@
+import { remarkImportRouter } from "./remarkImport.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query, withTransaction } from "../config/db.js";
@@ -15,6 +16,7 @@ import {
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
 
 const router = Router();
+router.use(remarkImportRouter);
 
 function normalizeImportedWholeNumber(value: unknown): number {
   if (value === null || value === undefined || value === "") {
@@ -813,7 +815,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               total: Number(row?.total ?? 0),
               parAge: Number(row?.parAge ?? 0),
               status: normalizedStatus,
-              notes: String(row?.notes ?? "")
+              notes: ""
             });
 
             if (!parsed.success) {
@@ -831,7 +833,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               `UPDATE loans
                SET borrower_id = $1, loan_account_no = $2, loan_type = $3, date_release = $4, maturity_date = $5, loan_amount = $6,
                    loan_balance = $7, principal_due = $8, penalty_due = $9, interest = $10, other_charges = $11, total = $12,
-                   par_age = $13, notes = $14, principal = $15, penalty = $16, due_date = $17, status = $18, created_at = CURRENT_TIMESTAMP
+                   par_age = $13, notes = COALESCE($14, notes), principal = $15, penalty = $16, due_date = $17, status = $18, created_at = CURRENT_TIMESTAMP
                WHERE id = $19`,
               [
                 borrower.id,
@@ -847,7 +849,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
                 parsed.data.otherCharges,
                 parsed.data.total,
                 parsed.data.parAge,
-                parsed.data.notes ?? "",
+                null,
                 parsed.data.principalDue,
                 parsed.data.penaltyDue,
                 parsed.data.maturityDate.trim(),
@@ -855,14 +857,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
                 matchedLoan.id
               ]
             );
-            if (parsed.data.notes.trim()) {
-              await client.query(
-                `INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by)
-                 SELECT $1, $2, 'follow_up_collection', $3
-                 WHERE NOT EXISTS (SELECT 1 FROM loan_remarks WHERE loan_id = $1 AND remark_text = $2)`,
-                [matchedLoan.id, parsed.data.notes.trim(), user.id]
-              );
-            }
+
 
             matchedLoan = {
               id: matchedLoan.id,
@@ -894,7 +889,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
             status: normalizedStatus,
             contactInfo,
             address,
-            notes: String(row?.notes ?? "")
+            notes: ""
           });
 
           if (!insertPayload.success) {
@@ -964,12 +959,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
               insertPayload.data.status
             ]
           );
-          if (insertPayload.data.notes.trim()) {
-            await client.query(
-              "INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by) VALUES ($1, $2, 'follow_up_collection', $3)",
-              [insertedLoan.rows[0].id, insertPayload.data.notes.trim(), user.id]
-            );
-          }
+
 
           cacheLoan({
             id: insertedLoan.rows[0].id,

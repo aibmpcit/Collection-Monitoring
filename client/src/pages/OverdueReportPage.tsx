@@ -307,99 +307,6 @@ export function OverdueReportPage() {
         </article>
       </section>
 
-      <section ref={upcomingSectionRef} className="panel p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Upcoming Due Accounts</h2>
-          </div>
-          <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
-        </div>
-
-        <div className="mobile-record-list md:hidden">
-          {paginatedDueSoonRows.map((loan) => (
-            <article
-              key={loan.id}
-              className="mobile-record-card cursor-pointer transition hover:bg-white"
-              tabIndex={0}
-              onClick={() => openLoanDetails(loan.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  openLoanDetails(loan.id);
-                }
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{loan.loanAccountNo}</p>
-                </div>
-                <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
-              </div>
-
-              <div className="mobile-record-grid">
-                <OverdueField label="Due Date" value={formatDate(loan.maturityDate)} />
-                <OverdueField label="Outstanding Balance" value={formatCurrency(loan.outstanding)} />
-              </div>
-            </article>
-          ))}
-          {dueSoonRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No upcoming due accounts found.</p>}
-        </div>
-
-        <div className="table-shell hidden md:block">
-            <table className="table-clean">
-              <thead>
-                <tr>
-                <th>Member</th>
-                <th>Loan Account</th>
-                <th>Due Date</th>
-                <th>Status</th>
-                <th>Outstanding Balance</th>
-              </tr>
-              </thead>
-              <tbody>
-                {paginatedDueSoonRows.map((loan) => (
-                <tr
-                  key={loan.id}
-                  className="cursor-pointer"
-                  tabIndex={0}
-                  onClick={() => openLoanDetails(loan.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openLoanDetails(loan.id);
-                    }
-                  }}
-                >
-                  <td>{loan.memberName}</td>
-                  <td>{loan.loanAccountNo}</td>
-                  <td>{formatDate(loan.maturityDate)}</td>
-                  <td>
-                    <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
-                  </td>
-                  <td>{formatCurrency(loan.outstanding)}</td>
-                </tr>
-              ))}
-              {dueSoonRows.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-4 text-sm text-slate-600">
-                    No upcoming due accounts found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <PaginationControls
-          currentPage={dueSoonPage}
-          totalPages={totalDueSoonPages}
-          totalItems={dueSoonRows.length}
-          pageSize={TABLE_PAGE_SIZE}
-          onPageChange={setDueSoonPage}
-        />
-      </section>
-
       <section ref={overdueSectionRef} className="panel p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -505,6 +412,99 @@ export function OverdueReportPage() {
           totalItems={overdueRows.length}
           pageSize={TABLE_PAGE_SIZE}
           onPageChange={setOverduePage}
+        />
+      </section>
+
+      <section ref={upcomingSectionRef} className="panel p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Upcoming Due Accounts</h2>
+          </div>
+          <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+        </div>
+
+        <div className="mobile-record-list md:hidden">
+          {paginatedDueSoonRows.map((loan) => (
+            <article
+              key={loan.id}
+              className="mobile-record-card cursor-pointer transition hover:bg-white"
+              tabIndex={0}
+              onClick={() => openLoanDetails(loan.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openLoanDetails(loan.id);
+                }
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-slate-900">{loan.memberName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{loan.loanAccountNo}</p>
+                </div>
+                <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
+              </div>
+
+              <div className="mobile-record-grid">
+                <OverdueField label="Due Date" value={formatDate(loan.maturityDate)} />
+                <OverdueField label="Outstanding Balance" value={formatCurrency(loan.outstanding)} />
+              </div>
+            </article>
+          ))}
+          {dueSoonRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No upcoming due accounts found.</p>}
+        </div>
+
+        <div className="table-shell hidden md:block">
+            <table className="table-clean">
+              <thead>
+                <tr>
+                <th>Member</th>
+                <th>Loan Account</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th>Outstanding Balance</th>
+              </tr>
+              </thead>
+              <tbody>
+                {paginatedDueSoonRows.map((loan) => (
+                <tr
+                  key={loan.id}
+                  className="cursor-pointer"
+                  tabIndex={0}
+                  onClick={() => openLoanDetails(loan.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openLoanDetails(loan.id);
+                    }
+                  }}
+                >
+                  <td>{loan.memberName}</td>
+                  <td>{loan.loanAccountNo}</td>
+                  <td>{formatDate(loan.maturityDate)}</td>
+                  <td>
+                    <span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>
+                  </td>
+                  <td>{formatCurrency(loan.outstanding)}</td>
+                </tr>
+              ))}
+              {dueSoonRows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-4 text-sm text-slate-600">
+                    No upcoming due accounts found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <PaginationControls
+          currentPage={dueSoonPage}
+          totalPages={totalDueSoonPages}
+          totalItems={dueSoonRows.length}
+          pageSize={TABLE_PAGE_SIZE}
+          onPageChange={setDueSoonPage}
         />
       </section>
     </main>

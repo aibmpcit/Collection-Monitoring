@@ -87,6 +87,7 @@ function NavItem({ to, label, icon, onClick }: { to: string; label: string; icon
       to={to}
       onClick={onClick}
       title={label}
+      aria-label={label}
       className={({ isActive }) =>
         `sidebar-nav-link group inline-flex min-w-max items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition lg:min-w-0 ${
           isActive
@@ -120,12 +121,13 @@ function WorkspaceSidebar({
     <div className="sidebar-shell flex h-full min-h-[320px] flex-col p-4 lg:p-5">
       <Link
         to="/dashboard"
-        className="block px-3 py-3"
+        className="sidebar-brand-link block px-3 py-3"
+        aria-label="Collection Monitoring dashboard"
         onClick={onNavigate}
       >
         <div className="flex items-center gap-2">
         <SystemLogo className="h-9 w-9" />
-        <div className="min-w-0">
+        <div className="sidebar-brand-text min-w-0">
         <p className="sidebar-text text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Operations</p>
         <p className="sidebar-text mt-1 whitespace-nowrap text-[15px] font-bold tracking-tight text-white">Collection Monitoring</p>
         </div>
@@ -145,6 +147,8 @@ function WorkspaceSidebar({
         <p className="sidebar-text text-xs uppercase tracking-wide text-white/70">{role}</p>
         <button
           onClick={onLogout}
+          aria-label="Sign Out"
+          title="Sign Out"
           className="sidebar-signout-btn mt-3 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-sm font-semibold transition hover:bg-white/20"
         >
           <LogOut size={16} />
