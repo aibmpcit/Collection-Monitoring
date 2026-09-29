@@ -53,10 +53,6 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     };
     if (!isSuperAdmin(user)) add("a.branch_id = ?", userBranchId(user));
     if (user.role === "staff" || filter.collectorId) add("a.collector_id = ?", user.role === "staff" ? user.id : filter.collectorId);
-    if (user.role === "branch_admin") {
-      conditions.push("u.role = 'staff'");
-      add("u.branch_id = ?", userBranchId(user));
-    }
     if (filter.from) add("a.occurred_at >= ?", filter.from);
     if (filter.to) add("a.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)", filter.to);
     if (filter.search) add("LOCATE(?, CONCAT_WS(' ', a.member_name, a.cif_key, a.loan_account_no, a.or_no, a.remark, u.username, br.name)) > 0", filter.search);

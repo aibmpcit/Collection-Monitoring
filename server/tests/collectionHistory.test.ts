@@ -131,8 +131,8 @@ describe("collector history access and filters", () => {
     mocks.user.role = "branch_admin";
     expect((await fetch(base)).status).toBe(200);
     for (const [sql, params] of mocks.query.mock.calls) {
-      expect(sql).toContain("a.branch_id = $1 AND u.role = 'staff' AND u.branch_id = $2");
-      expect(params).toEqual([2, 2]);
+      expect(sql).toContain("a.branch_id = $1");
+      expect(params).toEqual([2]);
     }
   });
   it("scopes both totals and records to the collector and branch", async () => {
@@ -151,8 +151,7 @@ describe("collector history access and filters", () => {
     mocks.user.role = "branch_admin";
     expect((await fetch(`${base}?collectorId=8`)).status).toBe(200);
     for (const [sql, params] of mocks.query.mock.calls) {
-      expect(params).toEqual([2, 8, 2]);
-      expect(sql).toContain("u.role = 'staff' AND u.branch_id = $3");
+      expect(params).toEqual([2, 8]);
     }
   });
   it("allows super administrators to review across branches with inclusive end dates", async () => {
