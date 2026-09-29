@@ -1,4 +1,5 @@
-export type Role = "super_admin" | "branch_admin" | "staff";
+export type Role = "super_admin" | "branch_admin" | "staff" | "las";
+export type Permission = "import_collections" | "add_remarks" | "add_payments";
 
 export interface User {
   id: number;
@@ -6,6 +7,7 @@ export interface User {
   role: Role;
   branchId?: number | null;
   branchName?: string | null;
+  permissions?: Partial<Record<Permission, boolean>>;
 }
 
 export interface Branch {

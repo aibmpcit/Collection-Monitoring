@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams, useParams } from "react-router-dom";
 import { DuesCard } from "../components/DuesCard";
+import { useAuth } from "../context/AuthContext";
+import { hasPermission } from "../services/permissions";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
@@ -54,6 +56,7 @@ function toLocalDateTimeInputValue(value: string): string {
 }
 
 export function LoanDetailsPage() {
+  const { user } = useAuth();
   const { loanId = "0" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const numericLoanId = Number(loanId);
@@ -531,14 +534,14 @@ export function LoanDetailsPage() {
                   <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
-                  <button type="button" className="btn-primary" onClick={() => {
+                  {hasPermission(user, "add_payments") && <button type="button" className="btn-primary" onClick={() => {
                     setPaymentError("");
                     setEditingPaymentId(null);
                     setPaymentAmount("");
                     setPaymentOrNo("");
                     setPaymentDateTime(getLocalDateTimeInputValue());
                     setPaymentModalOpen(true);
-                  }}>Add Payment</button>
+                  }}>Add Payment</button>}
                 </div>
               </div>
 
@@ -584,14 +587,14 @@ export function LoanDetailsPage() {
                   <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
-                  <button type="button" className="btn-primary" onClick={() => {
+                  {hasPermission(user, "add_remarks") && <button type="button" className="btn-primary" onClick={() => {
                     setRemarkError("");
                     setEditingRemarkId(null);
                     setRemarkInput("");
                     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
                     setRemarkAttachment(null);
                     setRemarkModalOpen(true);
-                  }}>Add Remark</button>
+                  }}>Add Remark</button>}
                 </div>
               </div>
 

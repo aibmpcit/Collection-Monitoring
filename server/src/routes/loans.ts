@@ -2,7 +2,7 @@ import { remarkImportRouter } from "./remarkImport.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query, withTransaction } from "../config/db.js";
-import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
+import { authenticate, authorize, authorizePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   assertBranchAccess,
   formatPaymentId,
@@ -479,7 +479,7 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
   }
 });
 
-router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
+router.post("/bulk", authenticate, authorizePermission("import_collections"), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
@@ -606,6 +606,7 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
           null;
 
         if (borrower) {
+          assertBranchAccess(user, Number(borrower.branch_id ?? params.branchId));
           const nextBranchId = borrower.branch_id ?? params.branchId;
           const isUnchanged =
             (borrower.cif_key ?? "") === params.cifKey &&
@@ -1218,7 +1219,7 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
-        canEdit: user.role !== "staff" || Number(row.author_id) === user.id,
+        canEdit: user.role !== "las" && (user.role !== "staff" || Number(row.author_id) === user.id),
         paymentId: formatPaymentId(row.id),
         loanId: row.loan_id,
         amount: toNumber(row.amount),
@@ -1232,7 +1233,7 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
   }
 });
 
-router.post("/:loanId/payments", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.post("/:loanId/payments", authenticate, authorizePermission("add_payments"), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const loanId = Number(req.params.loanId);
@@ -1388,7 +1389,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
-        canEdit: user.role !== "staff" || Number(row.author_id) === user.id,
+        canEdit: user.role !== "las" && (user.role !== "staff" || Number(row.author_id) === user.id),
         loanId: row.loan_id,
         remark: row.remark_text,
         remarkCategory: row.remark_category,
@@ -1402,7 +1403,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
   }
 });
 
-router.post("/:loanId/remarks", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks"), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const loanId = Number(req.params.loanId);

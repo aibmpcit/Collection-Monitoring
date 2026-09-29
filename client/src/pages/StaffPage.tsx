@@ -8,19 +8,23 @@ import { PageHeader } from "../components/PageHeader";
 import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
-import type { Branch, Role } from "../types/models";
+import type { Branch, Role, User } from "../types/models";
+import { ACCOUNT_PERMISSIONS, hasPermission } from "../services/permissions";
 
 type ManagedRole = Exclude<Role, "super_admin">;
+type AccountRole = ManagedRole | "super_admin";
 
 interface AccountRow {
+  permissions?: User["permissions"];
   id: number;
   username: string;
-  role: ManagedRole;
+  role: AccountRole;
   branchId?: number | null;
   branchName?: string | null;
 }
 
 interface AccountForm {
+  permissions: NonNullable<User["permissions"]>;
   username: string;
   password: string;
   branchId: number;
@@ -28,11 +32,14 @@ interface AccountForm {
 }
 
 interface AccountEditForm {
+  role: ManagedRole;
+  permissions: NonNullable<User["permissions"]>;
   branchId: number;
   password: string;
 }
 
 const EMPTY_FORM: AccountForm = {
+  permissions: {},
   username: "",
   password: "",
   branchId: 0,
@@ -40,6 +47,8 @@ const EMPTY_FORM: AccountForm = {
 };
 
 const EMPTY_EDIT_FORM: AccountEditForm = {
+  role: "staff",
+  permissions: {},
   branchId: 0,
   password: ""
 };
@@ -51,8 +60,8 @@ function computeRowsPerPage(viewportHeight: number): number {
   return Math.max(8, Math.min(22, rawRows));
 }
 
-function formatRoleLabel(role: ManagedRole): string {
-  return role === "branch_admin" ? "Branch Admin" : "Collector";
+function formatRoleLabel(role: AccountRole): string {
+  return role === "super_admin" ? "Super Admin" : role === "las" ? "Loan Account Specialist (LAS)" : role === "branch_admin" ? "Branch Admin" : "Collector";
 }
 
 function PaginationControls({
@@ -256,12 +265,15 @@ export function StaffPage() {
   }
 
   function openEditModal(account: AccountRow) {
+    if (account.role === "super_admin" || account.username.toLowerCase() === "admin") return;
     setError("");
     setMessage("");
     setEditingAccount(account);
     setShowCreatePassword(false);
     setShowEditPassword(false);
     setEditForm({
+      role: account.role,
+      permissions: account.permissions ?? {},
       branchId: account.branchId ?? branches[0]?.id ?? 0,
       password: ""
     });
@@ -284,8 +296,11 @@ export function StaffPage() {
 
     try {
       if (editingAccount) {
-        const payload: { branchId: number; password?: string } = {
-          branchId: editForm.branchId
+        const payload = {
+          branchId: editForm.branchId,
+          role: editForm.role,
+          permissions: editForm.permissions,
+          password: undefined as string | undefined
         };
         if (editForm.password.trim()) {
           payload.password = editForm.password;
@@ -298,7 +313,8 @@ export function StaffPage() {
           username: form.username.trim(),
           password: form.password,
           branchId: isSuperAdmin ? form.branchId : user?.branchId,
-          role: isSuperAdmin ? form.role : "staff"
+          role: isSuperAdmin ? form.role : "staff",
+          ...(isSuperAdmin ? { permissions: form.permissions } : {})
         });
         setMessage(`${formatRoleLabel(isSuperAdmin ? form.role : "staff")} account created.`);
       }
@@ -364,7 +380,11 @@ export function StaffPage() {
                 </div>
                 <div className="grid gap-1 text-sm font-medium text-black/80">
                   <span>Role</span>
-                  <div className="field flex items-center bg-slate-50 text-slate-700">{formatRoleLabel(editingAccount.role)}</div>
+                  <select aria-label="Role" className="field" value={editForm.role} onChange={event => setEditForm(current => ({ ...current, role: event.target.value as ManagedRole }))}>
+                    <option value="staff">Collector</option>
+                    <option value="branch_admin">Branch Admin</option>
+                    <option value="las">Loan Account Specialist (LAS)</option>
+                  </select>
                 </div>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Branch
@@ -395,7 +415,7 @@ export function StaffPage() {
                   />
                 </label>
                 <p className="md:col-span-2 text-xs text-black/65">
-                  Super admin can move this account to another branch and optionally set a new password.
+                  Update the role, branch, permissions, or password for this account.
                 </p>
               </>
             ) : (
@@ -431,6 +451,7 @@ export function StaffPage() {
                     >
                       <option value="staff">Collector</option>
                       <option value="branch_admin">Branch Admin</option>
+                      <option value="las">Loan Account Specialist (LAS)</option>
                     </select>
                   </label>
                 )}
@@ -458,6 +479,23 @@ export function StaffPage() {
                 )}
               </>
             )}
+            {isSuperAdmin && <fieldset className="md:col-span-2 grid gap-2 rounded-xl border border-slate-200 p-3">
+              <legend className="px-1 text-sm font-semibold">Account access</legend>
+              <p className="text-xs text-slate-600">Permissions apply only to this account and its assigned branch. LAS accounts are read-only unless access is enabled here.</p>
+              {ACCOUNT_PERMISSIONS.map(permission => {
+                const current = editingAccount ? editForm : form;
+                return <label key={permission.key} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={hasPermission(current, permission.key)} onChange={event => {
+                    const checked = event.target.checked;
+                    const update = (value: typeof current) => ({ ...value, permissions: { ...value.permissions, [permission.key]: checked } });
+                    if (editingAccount) setEditForm(value => update(value));
+                    else setForm(value => ({ ...value, permissions: { ...value.permissions, [permission.key]: checked } }));
+                  }} />
+                  {permission.label}
+                </label>;
+              })}
+              <button type="button" className="btn-muted w-fit" onClick={() => editingAccount ? setEditForm(value => ({ ...value, permissions: {} })) : setForm(value => ({ ...value, permissions: {} }))}>Use role defaults</button>
+            </fieldset>}
             <div className="md:col-span-2">
               <button type="submit" className="btn-primary">
                 {editingAccount ? "Save Changes" : `Add ${formatRoleLabel(isSuperAdmin ? form.role : "staff")}`}
@@ -526,7 +564,7 @@ export function StaffPage() {
             <article key={row.id} className="mobile-record-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <Link to={`/collector-history?collectorId=${row.id}`} className="break-words text-sm font-semibold text-brand-700 underline">{row.username}</Link>
+                  <Link to={`/collector-history?userId=${row.id}`} className="break-words text-sm font-semibold text-brand-700 underline">{row.username}</Link>
                   <p className="mt-1 text-xs text-slate-500">{formatRoleLabel(row.role)}</p>
                 </div>
               </div>
@@ -536,7 +574,7 @@ export function StaffPage() {
                 <AccountField label="Branch" value={row.branchName ?? "-"} />
               </div>
 
-              {isSuperAdmin && (
+              {isSuperAdmin && row.role !== "super_admin" && row.username.toLowerCase() !== "admin" && (
                 <div className="mobile-action-row">
                   <button type="button" className="btn-muted btn-page w-full sm:w-auto" onClick={() => openEditModal(row)}>
                     Edit
@@ -570,18 +608,18 @@ export function StaffPage() {
                 <tr key={row.id} tabIndex={0}
                   className="cursor-pointer hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
                   aria-label={`View collection history for ${row.username}`}
-                  onClick={() => navigate(`/collector-history?collectorId=${row.id}`)}
+                  onClick={() => navigate(`/collector-history?userId=${row.id}`)}
                   onKeyDown={event => {
                     if (event.target !== event.currentTarget) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(`/collector-history?collectorId=${row.id}`);
+                      navigate(`/collector-history?userId=${row.id}`);
                     }
                   }}>
                   <td>{row.username}</td>
                   <td>{formatRoleLabel(row.role)}</td>
                   <td>{row.branchName ?? "-"}</td>
-                  {isSuperAdmin && (
+                  {isSuperAdmin && row.role !== "super_admin" && row.username.toLowerCase() !== "admin" && (
                     <td onClick={event => event.stopPropagation()}>
                       <div className="flex items-center justify-center gap-2">
                         <button type="button" className="btn-muted btn-table" onClick={() => openEditModal(row)}>

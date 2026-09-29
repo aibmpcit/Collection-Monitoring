@@ -8,22 +8,31 @@ import {
   isSuperAdmin,
   userBranchId
 } from "../services/access.js";
+import { parsePermissions } from "../services/permissions.js";
 
 const router = Router();
 
-const managedRoleSchema = z.enum(["staff", "branch_admin"]);
+const managedRoleSchema = z.enum(["staff", "branch_admin", "las"]);
+const permissionsSchema = z.object({
+  import_collections: z.boolean().optional(),
+  add_remarks: z.boolean().optional(),
+  add_payments: z.boolean().optional()
+}).strict();
 
 const createStaffSchema = z.object({
   username: z.string().trim().min(1),
   password: z.string().min(8),
   branchId: z.coerce.number().int().positive(),
-  role: managedRoleSchema.optional()
+  role: managedRoleSchema.optional(),
+  permissions: permissionsSchema.optional()
 });
 
 const updateStaffSchema = z.object({
+  role: managedRoleSchema.optional(),
+  permissions: permissionsSchema.optional(),
   branchId: z.coerce.number().int().positive().optional(),
   password: z.string().min(8).optional()
-}).refine((data) => data.branchId !== undefined || data.password !== undefined, {
+}).refine((data) => data.branchId !== undefined || data.password !== undefined || data.role !== undefined || data.permissions !== undefined, {
   message: "At least one change is required"
 });
 
@@ -32,7 +41,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
     const user = getRequestUser(req);
     const params: unknown[] = [];
     const where = isSuperAdmin(user)
-      ? "WHERE u.role IN ('staff', 'branch_admin')"
+      ? "WHERE u.role IN ('super_admin', 'staff', 'branch_admin', 'las')"
       : "WHERE u.role = 'staff' AND u.branch_id = $1";
     if (!isSuperAdmin(user)) {
       params.push(userBranchId(user));
@@ -41,7 +50,8 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
     const result = await query<{
       id: number;
       username: string;
-      role: "staff" | "branch_admin";
+      role: "super_admin" | "staff" | "branch_admin" | "las";
+      permissions: unknown;
       branch_id: number | null;
       branch_name: string | null;
     }>(
@@ -49,6 +59,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
          u.id,
          u.username,
          u.role,
+         u.permissions,
          u.branch_id,
          b.name AS branch_name
        FROM users u
@@ -63,6 +74,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
         id: row.id,
         username: row.username,
         role: row.role,
+        permissions: parsePermissions(row.permissions),
         branchId: row.branch_id,
         branchName: row.branch_name
       }))
@@ -81,6 +93,9 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
     }
 
     const role = isSuperAdmin(user) ? (parsed.data.role ?? "staff") : "staff";
+    if (!isSuperAdmin(user) && (parsed.data.permissions !== undefined || (parsed.data.role && parsed.data.role !== "staff"))) {
+      return res.status(403).json({ message: "Only super admins can assign roles and permissions" });
+    }
     const branchId = isSuperAdmin(user) ? parsed.data.branchId : userBranchId(user);
     if (branchId <= 0) {
       return res.status(400).json({ message: "Branch is required" });
@@ -93,8 +108,8 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
 
     const passwordHash = await hashPassword(parsed.data.password);
     const created = await query<{ id: number }>(
-      "INSERT INTO users (username, password_hash, role, branch_id) VALUES ($1, $2, $3, $4) RETURNING id",
-      [parsed.data.username.trim(), passwordHash, role, branchId]
+      "INSERT INTO users (username, password_hash, role, branch_id, permissions) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [parsed.data.username.trim(), passwordHash, role, branchId, JSON.stringify(parsed.data.permissions ?? {})]
     );
 
     return res.status(201).json({
@@ -128,7 +143,7 @@ router.delete("/:userId", authenticate, authorize(["super_admin"]), async (req: 
     if (!target) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (!["branch_admin", "staff"].includes(target.role)) {
+    if (!["branch_admin", "staff", "las"].includes(target.role)) {
       return res.status(400).json({ message: "Only staff or branch admin accounts can be deleted" });
     }
 
@@ -155,12 +170,21 @@ router.patch("/:userId", authenticate, authorize(["super_admin"]), async (req, r
     if (target.rowCount === 0) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (!["staff", "branch_admin"].includes(target.rows[0].role)) {
+    if (!["staff", "branch_admin", "las"].includes(target.rows[0].role)) {
       return res.status(400).json({ message: "Only staff or branch admin accounts can be edited here" });
     }
 
     const updates: string[] = [];
     const params: unknown[] = [];
+
+    if (parsed.data.role !== undefined) {
+      params.push(parsed.data.role);
+      updates.push(`role = $${params.length}`);
+    }
+    if (parsed.data.permissions !== undefined) {
+      params.push(JSON.stringify(parsed.data.permissions));
+      updates.push(`permissions = $${params.length}`);
+    }
 
     if (parsed.data.branchId !== undefined) {
       const branch = await query<{ id: number }>("SELECT id FROM branches WHERE id = $1 LIMIT 1", [parsed.data.branchId]);

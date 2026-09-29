@@ -12,6 +12,8 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 const filters = z.object({
   from: date.optional(), to: date.optional(),
   collectorId: z.coerce.number().int().positive().optional(),
+  userId: z.coerce.number().int().positive().optional(),
+  branchId: z.coerce.number().int().positive().optional(),
   search: z.string().trim().max(120).optional(),
   type: z.enum(["payments", "remarks"]).optional(),
   export: z.literal("true").optional(),
@@ -42,7 +44,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     const parsed = filters.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ message: "Invalid history filters or date range" });
     const filter = parsed.data;
-    if (user.role === "staff" && filter.collectorId && filter.collectorId !== user.id) {
+    const selectedUserId = filter.userId ?? filter.collectorId;
+    if (user.role === "staff" && selectedUserId && selectedUserId !== user.id) {
       return res.status(403).json({ message: "You can only view your own history" });
     }
     const params: unknown[] = [];
@@ -52,7 +55,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       conditions.push(expression.replace("?", `$${params.length}`));
     };
     if (!isSuperAdmin(user)) add("a.branch_id = ?", userBranchId(user));
-    if (user.role === "staff" || filter.collectorId) add("a.collector_id = ?", user.role === "staff" ? user.id : filter.collectorId);
+    if (isSuperAdmin(user) && filter.branchId) add("a.branch_id = ?", filter.branchId);
+    if (user.role === "staff" || selectedUserId) add("a.collector_id = ?", user.role === "staff" ? user.id : selectedUserId);
     if (filter.from) add("a.occurred_at >= ?", filter.from);
     if (filter.to) add("a.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)", filter.to);
     if (filter.search) add("LOCATE(?, CONCAT_WS(' ', a.member_name, a.cif_key, a.loan_account_no, a.or_no, a.remark, u.username, br.name)) > 0", filter.search);
@@ -72,10 +76,11 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       : filter.type === "remarks" ? "a.kind IN ('loan_remark', 'member_remark')" : "";
     const rowSource = source + (typeCondition ? ` ${conditions.length ? "AND" : "WHERE"} ${typeCondition}` : "");
     const exportAll = filter.export === "true";
-    const page = exportAll ? 1 : Math.min(filter.page, Math.max(1, Math.ceil(total / 20)));
-    const rows = await query(`SELECT a.*, u.username AS collector_name, br.name AS branch_name, ra.file_name AS attachment_name ${rowSource}
-      ORDER BY a.occurred_at DESC, a.kind, a.id DESC${exportAll ? "" : ` LIMIT 20 OFFSET ${(page - 1) * 20}`}`, params);
-    return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: exportAll ? Math.max(total, 1) : 20 });
+    const pageSize = 15;
+    const page = exportAll ? 1 : Math.min(filter.page, Math.max(1, Math.ceil(total / pageSize)));
+    const rows = await query(`SELECT a.*, u.username AS collector_name, u.role AS collector_role, br.name AS branch_name, ra.file_name AS attachment_name ${rowSource}
+      ORDER BY a.occurred_at DESC, a.kind, a.id DESC${exportAll ? "" : ` LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`}`, params);
+    return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: exportAll ? Math.max(total, 1) : pageSize });
   } catch (error) { return next(error); }
 });
 

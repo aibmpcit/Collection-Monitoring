@@ -5,7 +5,8 @@ import type { JwtUser } from "../src/types/models.js";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), user: { id: 7, role: "staff", branchId: 2 } as JwtUser }));
 vi.mock("../src/config/db.js", () => ({ query: mocks.query }));
-vi.mock("../src/middleware/auth.js", () => ({
+vi.mock("../src/middleware/auth.js", async () => ({
+  ...await vi.importActual<typeof import("../src/middleware/auth.js")>("../src/middleware/auth.js"),
   authenticate: (req: { user: JwtUser }, _res: unknown, next: () => void) => { req.user = mocks.user; next(); },
   authorize: () => (_req: unknown, _res: unknown, next: () => void) => next()
 }));

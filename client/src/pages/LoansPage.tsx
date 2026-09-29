@@ -1,4 +1,5 @@
 import { RemarkImport } from "../components/RemarkImport";
+import { hasPermission } from "../services/permissions";
 import { MoreVertical, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -293,6 +294,7 @@ export function LoansPage() {
   const isCollector = user?.role === "staff";
   const isBranchManager = user?.role === "branch_admin";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
+  const canImportLoans = hasPermission(user, "import_collections");
   const canEditLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canDeleteLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canDeletePayments = user?.role === "super_admin" || user?.role === "branch_admin";
@@ -856,7 +858,7 @@ export function LoansPage() {
   }
 
   async function openImportModal() {
-    if (!canAddLoans) return;
+    if (!canImportLoans) return;
     setError("");
     setMessage("");
     setImportBranchError("");
@@ -1338,7 +1340,7 @@ export function LoansPage() {
       : null;
 
   const loanImportModal =
-    canAddLoans && isImportOpen
+    canImportLoans && isImportOpen
       ? createPortal(
           <section className="modal-shell">
             <div className="modal-card max-w-xl">
@@ -1747,24 +1749,24 @@ export function LoansPage() {
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
             {latestImportedAt && <p className="mt-1 text-xs text-slate-500">As of: {formatDate(latestImportedAt)}</p>}
           </div>
-          {canAddLoans && (
+          {(canAddLoans || canImportLoans) && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-              <button
+              {canImportLoans && <button
                 type="button"
                 className="btn-muted w-full sm:w-auto"
                 onClick={openImportModal}
                 title="Import loan records from CSV/Excel"
               >
                 Import CSV
-              </button>
-              <button
+              </button>}
+              {canAddLoans && <button
                 type="button"
                 className="btn-primary w-full sm:w-auto"
                 onClick={() => void openCreateModal()}
                 title="Add a new loan"
               >
                 Add Loan
-              </button>
+              </button>}
             </div>
           )}
         </div>

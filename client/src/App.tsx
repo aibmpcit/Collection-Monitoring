@@ -57,9 +57,9 @@ const NAV_ITEMS: NavDefinition[] = [
   },
   {
     to: "/collector-history",
-    label: "Collector History",
+    label: "Collection History",
     icon: <History size={18} />,
-    visible: () => true
+    visible: (role) => role !== "las"
   },
   {
     to: "/staff",
@@ -277,7 +277,7 @@ function ShellLayout() {
       ? "Super Admin Workspace"
       : user?.role === "branch_admin"
         ? "Branch Admin Workspace"
-        : "Collector";
+        : user?.role === "las" ? "Loan Account Specialist" : "Collector";
 
   return (
     <div className="app-shell">

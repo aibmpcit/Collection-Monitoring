@@ -30,6 +30,16 @@ async function run() {
 
   await ensureLoanColumns();
 
+  if (!(await columnExists("users", "permissions"))) {
+    await query("ALTER TABLE users ADD COLUMN permissions JSON NULL");
+  }
+  const roleColumn = await query<{ COLUMN_TYPE: string }>(
+    "SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'role'"
+  );
+  if (!roleColumn.rows[0]?.COLUMN_TYPE.includes("'las'")) {
+    await query("ALTER TABLE users MODIFY COLUMN role ENUM('super_admin', 'branch_admin', 'staff', 'las') NOT NULL");
+  }
+
   const parStatusApplied = await query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1 LIMIT 1", [PAR_STATUS_MIGRATION]);
   if (parStatusApplied.rowCount === 0) {
     await withTransaction(async client => {

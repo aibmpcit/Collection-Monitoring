@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { apiRequest } from "../services/api";
 import type { Role, User } from "../types/models";
@@ -14,6 +14,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function normalizeRole(role: string | null | undefined): Role {
   const value = (role ?? "").trim().toLowerCase();
+  if (value === "las") return "las";
   if (value === "super_admin" || value === "superadmin" || value === "super admin" || value === "admin") {
     return "super_admin";
   }
@@ -57,6 +58,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("token", response.token);
     localStorage.setItem("user", JSON.stringify(normalizedUser));
   }
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const current = await apiRequest<User>("/auth/me");
+        if (!active) return;
+        setUser(previous => {
+          const updated = normalizeUserRole({ ...previous, ...current });
+          localStorage.setItem("user", JSON.stringify(updated));
+          return updated;
+        });
+      } catch { /* Requests still enforce current permissions on the server. */ }
+    };
+    void refresh();
+    window.addEventListener("focus", refresh);
+    const interval = window.setInterval(refresh, 30000);
+    return () => { active = false; window.removeEventListener("focus", refresh); window.clearInterval(interval); };
+  }, [token]);
 
   function logout() {
     setToken(null);

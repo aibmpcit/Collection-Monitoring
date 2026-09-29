@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ToastNotification } from "../components/ToastNotification";
@@ -15,7 +14,7 @@ interface Activity {
   cif_key: string | null; collector_name: string | null; branch_name: string | null;
   attachment_name?: string | null;
   loan_type?: string | null; maturity_date?: string | null; loan_status?: string | null;
-  contact_info?: string | null; address?: string | null;
+  contact_info?: string | null; address?: string | null; collector_role?: string | null;
 }
 interface History {
   items: Activity[];
@@ -33,65 +32,11 @@ function initialExportDates() {
   return { from: localDateValue(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDateValue(today) };
 }
 
-interface Collector { id: number; username: string; role: string; branchName: string | null }
+interface Branch { id: number; name: string; code: string }
+interface Account { id: number; username: string; role: string; branchName: string | null }
 
 export function CollectorHistoryPage() {
-  const { user } = useAuth();
-  const [params] = useSearchParams();
-  const [collectors, setCollectors] = useState<Collector[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const collectorId = params.get("collectorId");
-
-  useEffect(() => {
-    if (user?.role === "staff") {
-      return;
-    }
-    let active = true;
-    setLoading(true);
-    setError("");
-    apiRequest<Collector[]>("/staff").then(rows => { if (active) setCollectors(rows); })
-      .catch(() => { if (active) setError("Unable to load collectors. Please try again."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [user?.id, user?.username, user?.role, user?.branchName, refresh]);
-
-  if (user?.role === "staff") {
-    return <CollectorHistoryDetails key={user.id} />;
-  }
-
-  if (collectorId) {
-    const collector = collectors.find(row => String(row.id) === collectorId);
-    return <CollectorHistoryDetails key={collectorId} collectorName={collector?.username} />;
-  }
-
-  const visible = collectors.filter(row => row.role === "staff" &&
-    `${row.username} ${row.branchName ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()));
-  return <main className="page-shell">
-    <PageHeader title="Collector History" eyebrow="Collection Activity"
-      actions={<button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
-    <section className="panel p-4">
-      <label className="grid max-w-md gap-1 text-sm">Search collectors
-        <input className="field" placeholder="Collector name or branch" value={search} onChange={event => setSearch(event.target.value)} />
-      </label>
-      {loading ? <p className="py-6" role="status">Loading collectors...</p>
-        : error ? <p className="py-6 text-red-700" role="alert">{error} <button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Retry</button></p>
-        : <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map(collector => <Link key={collector.id} to={`/collector-history?collectorId=${collector.id}`}
-            aria-label={`View collection history for ${collector.username}`}
-            className="group flex min-w-0 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-brand-300 hover:bg-brand-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 motion-reduce:transition-none">
-            <div className="min-w-0">
-              <h2 className="break-words text-base font-semibold text-slate-900">{collector.username}</h2>
-              <p className="mt-1 break-words text-sm text-slate-500">{collector.branchName || (user?.role === "staff" ? "My collector account" : "No branch assigned")}</p>
-            </div>
-            <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-slate-400 group-hover:text-brand-700" />
-          </Link>)}
-          {visible.length === 0 && <p className="py-6 text-slate-500">{search.trim() ? "No collectors match your search." : "No collectors available."}</p>}
-        </div>}
-    </section>
-  </main>;
+  return <CollectorHistoryDetails />;
 }
 
 function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) {
@@ -103,16 +48,19 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState(params.get("search") ?? "");
   const initialDates = initialExportDates();
-  const [exportFrom, setExportFrom] = useState(initialDates.from);
-  const [exportTo, setExportTo] = useState(initialDates.to);
+  const [exportFrom, setExportFrom] = useState(params.get("from") ?? initialDates.from);
+  const [exportTo, setExportTo] = useState(params.get("to") ?? initialDates.to);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
-  const activeTab = params.get("type") === "remarks" ? "remarks" : "payments";
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const activeTab = params.get("type") ?? "all";
   const requestParams = new URLSearchParams(params);
-  requestParams.delete("from");
-  requestParams.delete("to");
+  requestParams.delete("type");
+  if (user?.role !== "staff") requestParams.delete("collectorId");
   if (user?.role === "staff") requestParams.set("collectorId", String(user.id));
-  requestParams.set("type", activeTab);
+  if (activeTab !== "all") requestParams.set("type", activeTab);
   const query = requestParams.toString();
 
   useEffect(() => {
@@ -126,6 +74,13 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [query, refresh]);
+
+  useEffect(() => {
+    if (user?.role !== "super_admin" && user?.role !== "branch_admin") return;
+    Promise.all([apiRequest<Branch[]>("/branches"), apiRequest<Account[]>("/staff")])
+      .then(([loadedBranches, loadedAccounts]) => { setBranches(loadedBranches); setAccounts(loadedAccounts); })
+      .catch(() => undefined);
+  }, [user?.role, refresh]);
 
   useEffect(() => { setSearch(params.get("search") ?? ""); }, [query]);
 
@@ -145,17 +100,20 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     setExporting(true);
     setExportError("");
     try {
-      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, type: "payments", export: "true" });
+      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
+      if (activeTab !== "all") exportParams.set("type", activeTab);
       const selectedCollectorId = user?.role === "staff" ? String(user.id) : params.get("collectorId");
       if (selectedCollectorId) exportParams.set("collectorId", selectedCollectorId);
+      if (params.get("userId")) exportParams.set("userId", params.get("userId")!);
+      if (params.get("branchId")) exportParams.set("branchId", params.get("branchId")!);
       const report = await apiRequest<History>(`/collection-history?${exportParams.toString()}`);
       const { jsPDF } = await import("jspdf");
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const collector = collectorName ?? user?.username ?? "Collector";
       const columns = [
         { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
-        { label: "Member", width: 42 }, { label: "CIF Key", width: 28 }, { label: "Loan Account", width: 32 },
-        { label: "Receipt", width: 28 }, { label: "Amount", width: 30 }
+        { label: "Member", width: 38 }, { label: "Loan Account", width: 30 }, { label: "Type", width: 22 },
+        { label: "Remarks / Receipt", width: 55 }, { label: "Amount", width: 30 }
       ];
       const fit = (value: unknown, width: number) => {
         const text = String(value ?? "");
@@ -167,12 +125,12 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const drawHeader = () => {
         pdf.setFontSize(16);
         pdf.setFont("helvetica", "bold");
-        pdf.text("Payment Collection Report", 10, 12);
+        pdf.text("Collection History Report", 10, 12);
         pdf.setFontSize(9);
         pdf.setFont("helvetica", "normal");
         pdf.text(`Collector: ${collector}`, 10, 18);
         pdf.text(`Period: ${exportFrom} to ${exportTo}`, 10, 23);
-        pdf.text(`Payments: ${report.total}    Total collected: ${money(Number(report.summary.amount))}`, 10, 28);
+        pdf.text(`Activities: ${report.total}    Total collected: ${money(Number(report.summary.amount))}`, 10, 28);
         pdf.setFillColor(0, 61, 150);
         pdf.setTextColor(255, 255, 255);
         pdf.setFont("helvetica", "bold");
@@ -189,8 +147,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         if (index % 2 === 0) { pdf.setFillColor(245, 248, 252); pdf.rect(10, y - 5, 255, 7, "F"); }
         const values = [
           item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""), item.collector_name ?? "Unattributed",
-          item.branch_name ?? "", item.member_name, item.cif_key ?? "", item.loan_account_no ?? "",
-          item.or_no ?? "", `PHP ${Number(item.amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          item.branch_name ?? "", item.member_name, item.loan_account_no ?? "", item.kind === "payment" ? "Payment" : "Remark",
+          item.kind === "payment" ? `Receipt: ${item.or_no ?? "Not provided"}` : (item.remark ?? getRemarkCategoryLabel(item.category)),
+          item.kind === "payment" ? `PHP ${Number(item.amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""
         ];
         let x = 10;
         values.forEach((value, columnIndex) => {
@@ -213,7 +172,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
 
   return <main className="page-shell">
     {user?.role !== "staff" && <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>}
-    <PageHeader title={collectorName ? `${collectorName}'s History` : user?.role === "staff" ? "My Collection History" : "Collector History"}
+    <PageHeader title={collectorName ? `${collectorName}'s History` : user?.role === "staff" ? "My Collection History" : "Collection History"}
       eyebrow="Collection Activity"
       actions={<button className="btn-muted max-md:absolute max-md:right-4 max-md:top-4" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
     {!loading && data && (
@@ -223,8 +182,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <section className="panel p-4" key={label}><p className="text-sm text-slate-600">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></section>)}
       </div>
     )}
-    <section className="panel p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <section className="panel p-4 lg:flex lg:flex-wrap lg:items-end lg:gap-3">
+      <div className="flex flex-col gap-4 lg:contents">
         <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid min-w-0 flex-1 gap-1 text-sm">
           <label htmlFor="history-search">Search activity</label>
           <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
@@ -232,34 +191,40 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
             <button className="btn-muted" type="submit">Search</button></div>
         </form>
         <div className="grid min-w-0 grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap lg:shrink-0 lg:flex-nowrap">
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none">Export from
-            <input type="date" className="field min-w-0 w-full" value={exportFrom} max={exportTo || undefined} onChange={event => setExportFrom(event.target.value)} />
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">From
+            <input type="date" className="field min-w-0 w-full" value={exportFrom} max={exportTo || undefined} onChange={event => { setExportFrom(event.target.value); change("from", event.target.value); }} />
           </label>
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none">Export to
-            <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => setExportTo(event.target.value)} />
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">To
+            <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
           </label>
-          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
+          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => void exportPaymentReport()}>
             {exporting ? "Exporting..." : "Export PDF"}
           </button>
         </div>
       </div>
+      {(user?.role === "super_admin" || user?.role === "branch_admin") && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:mt-0 lg:contents">
+        {user?.role === "super_admin" && <label className="grid gap-1 text-sm">Branch
+          <select className="field" value={params.get("branchId") ?? ""} onChange={event => change("branchId", event.target.value)}>
+            <option value="">All branches</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
+          </select>
+        </label>}
+        <label className="grid min-w-0 gap-1 text-sm">User account
+          <select className="field" value={params.get("userId") ?? ""} onChange={event => change("userId", event.target.value)}>
+            <option value="">All users</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.username} ({account.role})</option>)}
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-1 text-sm">Activity
+          <select className="field" value={activeTab} onChange={event => change("type", event.target.value === "all" ? "" : event.target.value)}>
+            <option value="all">All activity</option><option value="payments">Payments</option><option value="remarks">Remarks</option>
+          </select>
+        </label>
+      </div>}
+      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
+        {exporting ? "Exporting..." : "Export PDF"}
+      </button>
       {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
-    <div className="flex gap-2" role="tablist" aria-label="History type">
-      {(["payments", "remarks"] as const).map(tab => <button key={tab} type="button" role="tab"
-        id={`history-tab-${tab}`} aria-selected={activeTab === tab} aria-controls="history-panel"
-        tabIndex={activeTab === tab ? 0 : -1}
-        className={activeTab === tab ? "btn-primary" : "btn-muted"}
-        onClick={() => change("type", tab)}
-        onKeyDown={event => {
-          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-          event.preventDefault();
-          const next = event.key === "Home" ? "payments" : event.key === "End" ? "remarks" : activeTab === "payments" ? "remarks" : "payments";
-          change("type", next);
-          document.getElementById(`history-tab-${next}`)?.focus();
-        }}>{tab === "payments" ? "Payments" : "Remarks"}</button>)}
-    </div>
-    <div id="history-panel" role="tabpanel" aria-labelledby={`history-tab-${activeTab}`} aria-busy={loading} className="grid gap-4">
+    <div id="history-panel" aria-busy={loading} className="grid gap-4">
     {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
     {loading ? <p className="panel p-4" role="status">Loading collection history...</p> : data && <>
       <section className="panel p-4">
@@ -268,9 +233,21 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <div className="surface-soft p-3"><p className="text-xs text-slate-600">Members</p><p className="mt-1 text-xl font-bold">{data.summary.members}</p></div>
           <div className="surface-soft p-3"><p className="text-xs text-slate-600">Attachments</p><p className="mt-1 text-xl font-bold">{Number(data.summary.attachments ?? 0)}</p></div>
         </div>}
-        <p className="mb-3 text-sm text-slate-600">{data.total} {activeTab} matching your filters. Latest first.</p>
-        <div className="grid gap-3">
-          {data.items.map(item => <article key={`${item.kind}-${item.id}`} className="rounded-xl border border-slate-200 bg-white/70 p-4">
+        <p className="mb-3 text-sm text-slate-600">{data.total} activities matching your filters. Latest first.</p>
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <div className="grid min-w-[760px] grid-cols-[1.2fr_1.3fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Type</span><span>Remarks / receipt</span><span>Date</span></div>
+          <div className="grid min-w-[760px] gap-0">
+          {data.items.map(item => <article key={`${item.kind}-${item.id}`} tabIndex={0} role="button"
+            onClick={() => setSelectedActivity(item)}
+            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedActivity(item); } }}
+            className="cursor-pointer border-b border-slate-200 bg-white px-4 py-3 text-sm transition hover:bg-brand-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 [&>div:not(:first-child)]:hidden [&>p]:hidden">
+            <div className="grid grid-cols-[1.2fr_1.3fr_1fr_1.5fr_1fr] items-center gap-3">
+              <span className="font-semibold text-slate-900">{item.member_name}<small className="block font-normal text-slate-500">{item.branch_name || "No branch"}</small></span>
+              <span className="text-brand-700">{item.loan_account_no || "-"}</span>
+              <span>{item.kind === "payment" ? "Payment" : "Remark"}</span>
+              <span className="truncate">{item.kind === "payment" ? `Receipt: ${item.or_no || "Not provided"}` : (item.remark || getRemarkCategoryLabel(item.category))}</span>
+              <span className="text-slate-500">{item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</span>
+            </div>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div><h2 className="font-semibold">{item.member_name}</h2><p className="text-xs text-slate-500">CIF: {item.cif_key || "—"} · {item.branch_name || "No branch"}</p></div>
               <div className="sm:text-right"><p className="font-semibold">{item.kind === "payment" ? money(Number(item.amount)) : getRemarkCategoryLabel(item.category)}</p>
@@ -295,7 +272,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
               void apiDownload(path, item.attachment_name || "attachment").catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
             }}>Download {item.attachment_name}</button>}
           </article>)}
-          {data.items.length === 0 && <p className="py-8 text-center text-slate-500">No {activeTab} found for these filters.</p>}
+          {data.items.length === 0 && <p className="py-8 text-center text-slate-500">No collection activity found for these filters.</p>}
+          </div>
         </div>
         <div className="mt-4 flex items-center justify-between gap-2">
           <button className="btn-muted" disabled={data.page <= 1} onClick={() => change("page", String(data.page - 1))}>Previous</button>
@@ -305,5 +283,12 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       </section>
     </>}
     </div>
+    {selectedActivity && <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-center justify-center overflow-y-auto bg-slate-950/45 p-4" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
+      <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedActivity.kind === "payment" ? "Payment" : "Remark"}</p><h2 id="activity-detail-title" className="mt-1 text-xl font-bold">{selectedActivity.member_name}</h2></div><button className="btn-muted" type="button" onClick={() => setSelectedActivity(null)}>Close</button></div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2"><div><p className="text-xs text-slate-500">Date</p><p>{selectedActivity.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</p></div><div><p className="text-xs text-slate-500">Recorded by</p><p>{selectedActivity.collector_name || "Deleted account / unattributed"}</p></div><div><p className="text-xs text-slate-500">Branch</p><p>{selectedActivity.branch_name || "No branch"}</p></div><div><p className="text-xs text-slate-500">Loan account</p><p>{selectedActivity.loan_account_no || "No loan account"}</p></div><div><p className="text-xs text-slate-500">Loan type</p><p>{selectedActivity.loan_type || "-"}</p></div></div>
+        {selectedActivity.kind === "payment" ? <div className="mt-5 grid gap-4 sm:grid-cols-2"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div> : <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
+      </section>
+    </div>}
   </main>;
 }

@@ -3,7 +3,8 @@ import type { Server } from "node:http";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ query: vi.fn(), role: "branch_admin", transaction: vi.fn() }));
 vi.mock("../src/config/db.js", () => ({ query: mocks.query, withTransaction: mocks.transaction }));
-vi.mock("../src/middleware/auth.js", () => ({
+vi.mock("../src/middleware/auth.js", async () => ({
+  ...await vi.importActual<typeof import("../src/middleware/auth.js")>("../src/middleware/auth.js"),
   authenticate: (req: any, _res: any, next: any) => { req.user = { id: 1, role: mocks.role, branchId: 2 }; next(); },
   authorize: (roles: string[]) => (req: any, res: any, next: any) => roles.includes(req.user.role) ? next() : res.sendStatus(403)
 }));

@@ -5,6 +5,8 @@ import { requiredEnv } from "../config/env.js";
 import { query } from "../config/db.js";
 import { verifyPassword } from "../services/access.js";
 import type { Role } from "../types/models.js";
+import { authenticate, type AuthedRequest } from "../middleware/auth.js";
+import { parsePermissions } from "../services/permissions.js";
 
 const router = Router();
 
@@ -27,12 +29,14 @@ router.post("/login", async (req, res, next) => {
       role: Role;
       branch_id: number | null;
       branch_name: string | null;
+      permissions: unknown;
     }>(
       `SELECT
          u.id,
          u.username,
          u.password_hash,
          u.role,
+         u.permissions,
          u.branch_id,
          b.name AS branch_name
        FROM users u
@@ -70,12 +74,15 @@ router.post("/login", async (req, res, next) => {
         username: user.username,
         role: user.role,
         branchId: user.branch_id,
-        branchName: user.branch_name
+        branchName: user.branch_name,
+        permissions: parsePermissions(user.permissions)
       }
     });
   } catch (error) {
     return next(error);
   }
 });
+
+router.get("/me", authenticate, (req: AuthedRequest, res) => res.json(req.user));
 
 export { router as authRouter };
