@@ -42,7 +42,7 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
     const params: unknown[] = [];
     const where = isSuperAdmin(user)
       ? "WHERE u.role IN ('super_admin', 'staff', 'branch_admin', 'las')"
-      : "WHERE u.role = 'staff' AND u.branch_id = $1";
+      : "WHERE u.role IN ('staff', 'las', 'branch_admin') AND u.branch_id = $1";
     if (!isSuperAdmin(user)) {
       params.push(userBranchId(user));
     }

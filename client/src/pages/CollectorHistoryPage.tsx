@@ -91,6 +91,30 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     setParams(next);
   }
 
+  async function exportExcelReport() {
+    if (exporting) return;
+    if (!exportFrom || !exportTo || exportFrom > exportTo) { setExportError("Select a valid export date range."); return; }
+    setExporting(true); setExportError("");
+    try {
+      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
+      if (activeTab !== "all") exportParams.set("type", activeTab);
+      if (params.get("userId")) exportParams.set("userId", params.get("userId")!);
+      if (params.get("branchId")) exportParams.set("branchId", params.get("branchId")!);
+      const report = await apiRequest<History>(`/collection-history?${exportParams}`);
+      const XLSX = await import("xlsx");
+      const rows = report.items.map(item => ({
+        Date: item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""),
+        Member: item.member_name, "Loan Account": item.loan_account_no ?? "", "Loan Type": item.loan_type ?? "",
+        Type: item.kind === "payment" ? "Payment" : "Remark", "Collected By": item.collector_name ?? "Unattributed",
+        Amount: item.kind === "payment" ? Number(item.amount) : "", "Remarks / Receipt": item.kind === "payment" ? (item.or_no ?? "") : (item.remark ?? getRemarkCategoryLabel(item.category)), Branch: item.branch_name ?? ""
+      }));
+      const sheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, "Collection History");
+      XLSX.writeFile(workbook, `collection-history-${exportFrom}-to-${exportTo}.xlsx`);
+    } catch (e) { setExportError(e instanceof Error ? e.message : "Unable to export collection history."); }
+    finally { setExporting(false); }
+  }
+
   async function exportPaymentReport() {
     if (exporting) return;
     if (!exportFrom || !exportTo || exportFrom > exportTo) {
@@ -197,8 +221,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">To
             <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
           </label>
-          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => void exportPaymentReport()}>
-            {exporting ? "Exporting..." : "Export PDF"}
+          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => void exportExcelReport()}>
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>
@@ -219,8 +243,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           </select>
         </label>
       </div>}
-      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
-        {exporting ? "Exporting..." : "Export PDF"}
+      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => void exportExcelReport()}>
+        {exporting ? "Exporting..." : "Export Excel"}
       </button>
       {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
@@ -235,16 +259,19 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         </div>}
         <p className="mb-3 text-sm text-slate-600">{data.total} activities matching your filters. Latest first.</p>
         <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <div className="grid min-w-[760px] grid-cols-[1.2fr_1.3fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Type</span><span>Remarks / receipt</span><span>Date</span></div>
-          <div className="grid min-w-[760px] gap-0">
+          <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>Remarks / receipt</span><span>Date</span></div>
+          <div className="grid min-w-[1200px] gap-0">
           {data.items.map(item => <article key={`${item.kind}-${item.id}`} tabIndex={0} role="button"
             onClick={() => setSelectedActivity(item)}
             onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedActivity(item); } }}
             className="cursor-pointer border-b border-slate-200 bg-white px-4 py-3 text-sm transition hover:bg-brand-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 [&>div:not(:first-child)]:hidden [&>p]:hidden">
-            <div className="grid grid-cols-[1.2fr_1.3fr_1fr_1.5fr_1fr] items-center gap-3">
+            <div className="grid grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] items-center gap-3">
               <span className="font-semibold text-slate-900">{item.member_name}<small className="block font-normal text-slate-500">{item.branch_name || "No branch"}</small></span>
               <span className="text-brand-700">{item.loan_account_no || "-"}</span>
+              <span>{item.loan_type || "-"}</span>
+              <span>{item.collector_name || "Unattributed"}</span>
               <span>{item.kind === "payment" ? "Payment" : "Remark"}</span>
+              <span>{item.kind === "payment" ? money(Number(item.amount)) : "-"}</span>
               <span className="truncate">{item.kind === "payment" ? `Receipt: ${item.or_no || "Not provided"}` : (item.remark || getRemarkCategoryLabel(item.category))}</span>
               <span className="text-slate-500">{item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</span>
             </div>
