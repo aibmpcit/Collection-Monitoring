@@ -10,7 +10,7 @@ export function DuesCard({ principal, interest, penalty }: DuesCardProps) {
   const total = principal + interest + penalty;
 
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="grid grid-cols-2 gap-3">
       <Metric icon={<Landmark size={16} />} label="Principal" value={principal} />
       <Metric icon={<Coins size={16} />} label="Interest" value={interest} />
       <Metric icon={<ReceiptText size={16} />} label="Penalty" value={penalty} />
@@ -38,13 +38,13 @@ function Metric({
   emphasis?: boolean;
 }) {
   return (
-    <article className={`panel relative overflow-hidden p-4 ${emphasis ? "border-c4/35" : ""}`}>
+    <article className={`panel relative min-w-0 overflow-hidden p-3 sm:p-4 ${emphasis ? "border-c4/35" : ""}`}>
       <div className="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-c2/12 blur-2xl" />
-      <div className={`relative flex items-center gap-2 ${emphasis ? "text-c4" : "text-c2"}`}>
+      <div className={`relative flex items-center gap-2 [&>svg]:shrink-0 ${emphasis ? "text-c4" : "text-c2"}`}>
         {icon}
-        <p className="text-sm font-semibold text-slate-700">{label}</p>
+        <p className="text-xs font-semibold text-slate-700 sm:text-sm">{label}</p>
       </div>
-      <h3 className="relative mt-2 text-xl font-bold text-slate-900">{pesoFormatter.format(value)}</h3>
+      <h3 className="relative mt-2 break-words text-base font-bold text-slate-900 sm:text-xl">{pesoFormatter.format(value)}</h3>
     </article>
   );
 }

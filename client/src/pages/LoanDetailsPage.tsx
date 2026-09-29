@@ -432,13 +432,12 @@ export function LoanDetailsPage() {
       <PageHeader
         title="Loan Details"
         eyebrow="Collections"
-        actions={
-          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
-              {backLink.label}
-            </Link>
-            <PageMetaStamp />
-          </div>
+        actionsTopRight
+        actions={<PageMetaStamp />}
+        footer={
+          <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
+            {backLink.label}
+          </Link>
         }
       />
 
@@ -461,7 +460,7 @@ export function LoanDetailsPage() {
                 setDetailsExpanded(expanded => !expanded);
               }
             }}>
-            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-slate-900">{loan.memberName}</h2>
                 <p className="text-xs text-slate-600">
@@ -560,14 +559,14 @@ export function LoanDetailsPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <span className="text-xs text-black/60">{item.paymentId}</span>
-                            <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
+                            {item.canEdit !== false && <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
                               setEditingPaymentId(item.id);
                               setPaymentAmount(String(item.amount));
                               setPaymentOrNo(item.orNo || "");
                               setPaymentDateTime(toLocalDateTimeInputValue(item.collectedAt));
                               setPaymentError("");
                               setPaymentModalOpen(true);
-                            }}>Edit</button>
+                            }}>Edit</button>}
                           </div>
                         </div>
                         <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
@@ -614,7 +613,7 @@ export function LoanDetailsPage() {
                         <p className="mt-1 text-xs text-black/60">
                           {formatDateTime(item.createdAt)} | By: {item.createdBy}
                         </p>
-                        <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
+                        {item.canEdit !== false && <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
                           event.stopPropagation();
                           setEditingRemarkId(item.id);
                           setRemarkInput(item.remark);
@@ -622,7 +621,7 @@ export function LoanDetailsPage() {
                           setRemarkError("");
                           setRemarkAttachment(null);
                           setRemarkModalOpen(true);
-                        }}>Edit</button>
+                        }}>Edit</button>}
                       </li>
                     ))}
                   </ul>

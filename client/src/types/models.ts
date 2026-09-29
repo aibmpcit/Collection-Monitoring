@@ -100,6 +100,7 @@ export interface DashboardMetrics {
 }
 
 export interface LoanRemark {
+  canEdit?: boolean;
   id: number;
   loanId: number;
   remark: string;
@@ -110,6 +111,7 @@ export interface LoanRemark {
 }
 
 export interface LoanPayment {
+  canEdit?: boolean;
   id: number;
   paymentId: string;
   loanId: number;

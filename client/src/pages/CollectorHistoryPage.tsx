@@ -217,7 +217,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       eyebrow="Collection Activity"
       actions={<button className="btn-muted max-md:absolute max-md:right-4 max-md:top-4" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
     {!loading && data && (
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className={`${user?.role === "staff" ? "hidden lg:grid" : "grid"} grid-cols-2 gap-3 xl:grid-cols-4`}>
         {[["Total collected", money(Number(data.summary.amount))], ["Payments", data.summary.payments],
           ["Members reached", data.summary.members], ["Follow-up notes", data.summary.total - data.summary.payments]].map(([label, value]) =>
           <section className="panel p-4" key={label}><p className="text-sm text-slate-600">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></section>)}
@@ -231,14 +231,14 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
             placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
             <button className="btn-muted" type="submit">Search</button></div>
         </form>
-        <div className="flex flex-wrap items-end gap-3 lg:shrink-0 lg:flex-nowrap">
-          <label className="grid min-w-40 flex-1 gap-1 text-sm sm:flex-none">Export from
-            <input type="date" className="field" value={exportFrom} max={exportTo || undefined} onChange={event => setExportFrom(event.target.value)} />
+        <div className="grid min-w-0 grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap lg:shrink-0 lg:flex-nowrap">
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none">Export from
+            <input type="date" className="field min-w-0 w-full" value={exportFrom} max={exportTo || undefined} onChange={event => setExportFrom(event.target.value)} />
           </label>
-          <label className="grid min-w-40 flex-1 gap-1 text-sm sm:flex-none">Export to
-            <input type="date" className="field" value={exportTo} min={exportFrom || undefined} onChange={event => setExportTo(event.target.value)} />
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none">Export to
+            <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => setExportTo(event.target.value)} />
           </label>
-          <button type="button" className="btn-primary w-full sm:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
+          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto" disabled={exporting} onClick={() => void exportPaymentReport()}>
             {exporting ? "Exporting..." : "Export PDF"}
           </button>
         </div>

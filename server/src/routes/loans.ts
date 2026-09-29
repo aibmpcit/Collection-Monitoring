@@ -1193,6 +1193,7 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
 
     const result = await query<{
       id: number;
+      author_id: number | null;
       loan_id: number;
       amount: string | number;
       or_no: string | null;
@@ -1201,6 +1202,7 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
     }>(
       `SELECT
          c.id,
+         c.created_by AS author_id,
          c.loan_id,
          c.amount,
          c.or_no,
@@ -1209,14 +1211,14 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
        FROM collections c
        LEFT JOIN users u ON u.id = c.created_by
        WHERE c.loan_id = $1
-       ${user.role === "staff" ? "AND c.created_by = $2" : ""}
        ORDER BY c.collected_at DESC, c.id DESC`,
-      user.role === "staff" ? [loanId, user.id] : [loanId]
+      [loanId]
     );
 
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
+        canEdit: user.role !== "staff" || Number(row.author_id) === user.id,
         paymentId: formatPaymentId(row.id),
         loanId: row.loan_id,
         amount: toNumber(row.amount),
@@ -1358,6 +1360,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
 
     const result = await query<{
       id: number;
+      author_id: number | null;
       loan_id: number;
       remark_text: string;
       remark_category: string;
@@ -1367,6 +1370,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
     }>(
       `SELECT
          lr.id,
+         lr.created_by AS author_id,
          lr.loan_id,
          lr.remark_text,
          lr.remark_category,
@@ -1377,14 +1381,14 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
        LEFT JOIN users u ON u.id = lr.created_by
        LEFT JOIN remark_attachments ra ON ra.remark_kind = 'loan' AND ra.remark_id = lr.id
        WHERE lr.loan_id = $1
-       ${user.role === "staff" ? "AND lr.created_by = $2" : ""}
        ORDER BY lr.created_at DESC, lr.id DESC`,
-      user.role === "staff" ? [loanId, user.id] : [loanId]
+      [loanId]
     );
 
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
+        canEdit: user.role !== "staff" || Number(row.author_id) === user.id,
         loanId: row.loan_id,
         remark: row.remark_text,
         remarkCategory: row.remark_category,
@@ -1488,7 +1492,7 @@ router.get("/:loanId/remarks/:remarkId/attachment", authenticate, async (req: Au
     const remark = existing.rows[0];
     if (!remark) return res.status(404).json({ message: "Remark not found" });
     assertBranchAccess(user, Number(remark.branch_id ?? 0));
-    if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
+
     const attachment = await getRemarkAttachment("loan", remarkId);
     if (!attachment) return res.status(404).json({ message: "Attachment not found" });
     res.setHeader("Content-Type", attachment.mime_type);

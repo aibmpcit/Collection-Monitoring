@@ -349,7 +349,6 @@ export function LoansPage() {
   const [openMenuLoan, setOpenMenuLoan] = useState<{ loanId: number; top: number; left: number; openUp: boolean } | null>(null);
   const [loanPendingDelete, setLoanPendingDelete] = useState<LoanQuickRef | null>(null);
   const [isDeletePending, setIsDeletePending] = useState(false);
-  const [mobileLoanPreview, setMobileLoanPreview] = useState<LoanRow | null>(null);
   const [loanBulkDeleteIds, setLoanBulkDeleteIds] = useState<number[]>([]);
   const [isBulkLoanDeletePending, setIsBulkLoanDeletePending] = useState(false);
   const [selectedLoanIds, setSelectedLoanIds] = useState<number[]>([]);
@@ -1175,14 +1174,6 @@ export function LoansPage() {
     setPaymentError("");
   }
 
-  function openMobileLoanPreview(loan: LoanRow) {
-    setMobileLoanPreview(loan);
-  }
-
-  function closeMobileLoanPreview() {
-    setMobileLoanPreview(null);
-  }
-
   async function handleSubmitPayment(event: React.FormEvent) {
     event.preventDefault();
     if (!paymentLoan) return;
@@ -1341,85 +1332,6 @@ export function LoansPage() {
                   <button type="submit" className="btn-primary">{editingId ? "Update" : "Create Loan"}</button>
                 </div>
               </form>
-            </div>
-          </section>,
-          document.body
-        )
-      : null;
-
-  const mobileLoanPreviewModal =
-    user?.role === "staff" && mobileLoanPreview
-      ? createPortal(
-          <section className="modal-shell" onClick={closeMobileLoanPreview}>
-            <div className="modal-card max-w-xl" onClick={(event) => event.stopPropagation()}>
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="text-lg font-semibold">{mobileLoanPreview.memberName}</h3>
-                  <p className="mt-1 break-all text-xs text-slate-500">{mobileLoanPreview.loanAccountNo}</p>
-                </div>
-                <button type="button" className="btn-muted" onClick={closeMobileLoanPreview}>
-                  Close
-                </button>
-              </div>
-
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <span className={loanStatusClass(mobileLoanPreview.status)}>{mobileLoanPreview.status}</span>
-                <p className="text-sm font-semibold text-slate-700">{formatCurrency(mobileLoanPreview.loanAmount)}</p>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <LoanRecordField label="CIF Key" value={mobileLoanPreview.cifKey} />
-                <LoanRecordField label="Loan Type" value={mobileLoanPreview.loanType} />
-                <LoanRecordField label="Date Release" value={formatDate(mobileLoanPreview.dateRelease)} />
-                <LoanRecordField label="Maturity Date" value={formatDate(mobileLoanPreview.maturityDate)} />
-                <LoanRecordField label="Loan Amount" value={formatCurrency(mobileLoanPreview.loanAmount)} />
-                <LoanRecordField label="Loan Balance" value={formatCurrency(mobileLoanPreview.loanBalance)} />
-                <LoanRecordField label="Principal Arrears" value={formatCurrency(mobileLoanPreview.principalDue)} />
-                <LoanRecordField label="Fines" value={formatCurrency(mobileLoanPreview.penaltyDue)} />
-                <LoanRecordField label="Interest" value={formatCurrency(mobileLoanPreview.interest)} />
-                <LoanRecordField label="Total" value={formatCurrency(mobileLoanPreview.total)} />
-                <LoanRecordField label="PAR Age" value={mobileLoanPreview.parAge} />
-                <LoanRecordField label="Contact" value={mobileLoanPreview.contactInfo || "-"} />
-                <div className="col-span-2">
-                  <LoanRecordField label="Address" value={mobileLoanPreview.address || "-"} />
-                </div>
-                <div className="col-span-2">
-                  <LoanRecordField label="Notes" value={mobileLoanPreview.notes?.trim() ? mobileLoanPreview.notes : "-"} />
-                </div>
-              </div>
-
-              <div className="mobile-action-row">
-                <button
-                  type="button"
-                  className="btn-primary btn-page w-full sm:w-auto"
-                  onClick={() => {
-                    closeMobileLoanPreview();
-                    openLoanDetails(mobileLoanPreview.id);
-                  }}
-                >
-                  Open Loan
-                </button>
-                <button
-                  type="button"
-                  className="btn-muted btn-page w-full sm:w-auto"
-                  onClick={() => {
-                    closeMobileLoanPreview();
-                    void openRemarksModal(mobileLoanPreview);
-                  }}
-                >
-                  Remarks
-                </button>
-                <button
-                  type="button"
-                  className="btn-muted btn-page w-full sm:w-auto"
-                  onClick={() => {
-                    closeMobileLoanPreview();
-                    void openPaymentModal(mobileLoanPreview);
-                  }}
-                >
-                  Add Payments
-                </button>
-              </div>
             </div>
           </section>,
           document.body
@@ -1788,7 +1700,6 @@ export function LoansPage() {
     <main className="page-shell min-w-0 overflow-x-hidden">
       {loanFormModal}
       {loanImportModal}
-      {mobileLoanPreviewModal}
       {remarksModal}
       {remarkLoan && summaryRemark && (() => {
         const selectedLoan = loans.find(loan => loan.id === remarkLoan.id);
@@ -1827,6 +1738,7 @@ export function LoansPage() {
       <PageHeader
         title="Collections"
         eyebrow="Loan Operations"
+        actionsTopRight
         actions={<PageMetaStamp />}
       />
 
@@ -1904,8 +1816,8 @@ export function LoansPage() {
         {activeRecordsTab === "loans" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 md:flex-nowrap">
-              <div className="flex w-full flex-col gap-2 sm:flex-row md:min-w-0 md:flex-1">
-                <div className="relative min-w-0 flex-1">
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-row md:min-w-0 md:flex-1">
+                <div className="relative col-span-2 min-w-0 flex-1">
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     className="field pl-9"
@@ -1915,7 +1827,7 @@ export function LoansPage() {
                   />
                 </div>
                 <select
-                  className="field w-full sm:w-52 md:w-44 md:shrink-0"
+                  className="field min-w-0 w-full sm:w-52 md:w-44 md:shrink-0"
                   value={loanTypeFilter}
                   onChange={(event) => setLoanTypeFilter(event.target.value)}
                   aria-label="Filter by loan type"
@@ -1924,7 +1836,7 @@ export function LoansPage() {
                   {loanTypeOptions.map((loanType) => <option key={loanType} value={loanType}>{loanType}</option>)}
                 </select>
                 <select
-                  className="field w-full sm:w-48 md:w-40 md:shrink-0"
+                  className="field min-w-0 w-full sm:w-48 md:w-40 md:shrink-0"
                   value={parAgeFilter}
                   onChange={(event) => setParAgeFilter(event.target.value)}
                   aria-label="Filter by PAR age"
@@ -1974,7 +1886,7 @@ export function LoansPage() {
                     key={loan.id}
                     type="button"
                     className="collector-loan-list-item text-left"
-                    onClick={() => openMobileLoanPreview(loan)}
+                    onClick={() => openLoanDetails(loan.id)}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-900">{loan.memberName}</p>

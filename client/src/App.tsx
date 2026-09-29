@@ -277,7 +277,7 @@ function ShellLayout() {
       ? "Super Admin Workspace"
       : user?.role === "branch_admin"
         ? "Branch Admin Workspace"
-        : "Collector Workspace";
+        : "Collector";
 
   return (
     <div className="app-shell">

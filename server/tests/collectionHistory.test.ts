@@ -109,8 +109,8 @@ describe("collector history access and filters", () => {
   });
 
   it.each([
-    ["/loans/9/payments", "c.created_by"],
-    ["/loans/9/remarks", "lr.created_by"],
+
+
     ["/borrowers/9/remarks", "br.created_by"]
   ])("limits collector records on %s even through direct URLs", async (path, actor) => {
     mocks.query.mockReset();
@@ -223,4 +223,24 @@ it.each(["payments", "remarks"])("includes archived loans in collector %s histor
   for (const [sql] of mocks.query.mock.calls) {
     expect(sql).not.toMatch(/(?:l\.status|a\.loan_status)\s*(?:=|!=|<>|IN\s*\()/i);
   }
+});
+
+it.each(["payments", "remarks"])("lets collectors read all branch loan %s with ownership permissions", async type => {
+  mocks.query.mockReset();
+  mocks.query.mockResolvedValueOnce({ rows: [{ id: 9, branch_id: 2 }] })
+    .mockResolvedValueOnce({ rows: [{ id: 11, loan_id: 9, author_id: 99 }, { id: 12, loan_id: 9, author_id: 7 }] });
+  const response = await fetch(base + "/loans/9/" + type);
+  expect(response.status).toBe(200);
+  const data = await response.json();
+  expect(data).toHaveLength(2);
+  expect(data[0].canEdit).toBe(false);
+  expect(data[1].canEdit).toBe(true);
+  expect(mocks.query.mock.calls[1][1]).toEqual([9]);
+  expect(mocks.query.mock.calls[1][0]).not.toContain("created_by =");
+});
+it.each(["payments", "remarks"])("blocks collectors from reading other branch loan %s", async type => {
+  mocks.query.mockReset();
+  mocks.query.mockResolvedValueOnce({ rows: [{ id: 9, branch_id: 3 }] });
+  expect((await fetch(base + "/loans/9/" + type)).status).toBe(403);
+  expect(mocks.query).toHaveBeenCalledTimes(1);
 });
