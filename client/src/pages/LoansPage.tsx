@@ -218,11 +218,9 @@ const EMPTY_FORM: LoanPayload = {
 };
 
 function computeRowsPerPage(viewportHeight: number): number {
-  // Reserve space for header, tabs, search, messages, and pagination.
-  const reservedHeight = 430;
-  const rowHeight = 42;
-  const rawRows = Math.floor((viewportHeight - reservedHeight) / rowHeight);
-  return Math.max(8, Math.min(22, rawRows));
+  // Keep pagination consistent across screen sizes.
+  void viewportHeight;
+  return 15;
 }
 
 function PaginationControls({
@@ -495,7 +493,8 @@ export function LoansPage() {
     return [...grouped.values()]
       .filter(group => group.matchesQuery)
       .map(group => ({ ...group.latest, recentRemarks: group.recent }))
-      .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime() || b.id - a.id);
+      .sort((a, b) => a.member_name.localeCompare(b.member_name, undefined, { sensitivity: "base" }) ||
+        (a.loan_account_no ?? "").localeCompare(b.loan_account_no ?? "", undefined, { sensitivity: "base" }));
   }, [remarkQuery, remarkRecords, selectedBranchId, user?.role]);
 
   useEffect(() => {
