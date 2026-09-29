@@ -28,11 +28,12 @@ const createStaffSchema = z.object({
 });
 
 const updateStaffSchema = z.object({
+  username: z.string().trim().min(1).optional(),
   role: managedRoleSchema.optional(),
   permissions: permissionsSchema.optional(),
   branchId: z.coerce.number().int().positive().optional(),
   password: z.string().min(8).optional()
-}).refine((data) => data.branchId !== undefined || data.password !== undefined || data.role !== undefined || data.permissions !== undefined, {
+}).refine((data) => data.username !== undefined || data.branchId !== undefined || data.password !== undefined || data.role !== undefined || data.permissions !== undefined, {
   message: "At least one change is required"
 });
 
@@ -176,6 +177,13 @@ router.patch("/:userId", authenticate, authorize(["super_admin"]), async (req, r
 
     const updates: string[] = [];
     const params: unknown[] = [];
+
+    if (parsed.data.username !== undefined) {
+      const duplicate = await query("SELECT id FROM users WHERE username = $1 AND id <> $2 LIMIT 1", [parsed.data.username, targetUserId]);
+      if (duplicate.rowCount) return res.status(409).json({ message: "Username is already in use" });
+      params.push(parsed.data.username);
+      updates.push(`username = $${params.length}`);
+    }
 
     if (parsed.data.role !== undefined) {
       params.push(parsed.data.role);

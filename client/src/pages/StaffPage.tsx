@@ -32,6 +32,7 @@ interface AccountForm {
 }
 
 interface AccountEditForm {
+  username: string;
   role: ManagedRole;
   permissions: NonNullable<User["permissions"]>;
   branchId: number;
@@ -47,6 +48,7 @@ const EMPTY_FORM: AccountForm = {
 };
 
 const EMPTY_EDIT_FORM: AccountEditForm = {
+  username: "",
   role: "staff",
   permissions: {},
   branchId: 0,
@@ -272,6 +274,7 @@ export function StaffPage() {
     setShowCreatePassword(false);
     setShowEditPassword(false);
     setEditForm({
+      username: account.username,
       role: account.role,
       permissions: account.permissions ?? {},
       branchId: account.branchId ?? branches[0]?.id ?? 0,
@@ -297,6 +300,7 @@ export function StaffPage() {
     try {
       if (editingAccount) {
         const payload = {
+          username: editForm.username.trim(),
           branchId: editForm.branchId,
           role: editForm.role,
           permissions: editForm.permissions,
@@ -376,7 +380,7 @@ export function StaffPage() {
               <>
                 <div className="grid gap-1 text-sm font-medium text-black/80">
                   <span>Username</span>
-                  <div className="field flex items-center bg-slate-50 text-slate-700">{editingAccount.username}</div>
+                  <input className="field" value={editForm.username} onChange={event => setEditForm(current => ({ ...current, username: event.target.value }))} required />
                 </div>
                 <div className="grid gap-1 text-sm font-medium text-black/80">
                   <span>Role</span>
