@@ -172,7 +172,7 @@ describe("collector history access and filters", () => {
     expect(body.page).toBe(2);
     expect(body.summary.total).toBe(45);
     expect(mocks.query.mock.calls[1][0]).toContain(type === "payments" ? "AND a.kind = 'payment'" : "AND a.kind IN ('loan_remark', 'member_remark')");
-    expect(mocks.query.mock.calls[1][0]).toContain("LIMIT 20 OFFSET 20");
+    expect(mocks.query.mock.calls[1][0]).toContain("LIMIT 15 OFFSET 15");
     expect(mocks.query.mock.calls[1][1]).toEqual([2, 7]);
   });
   it("exports the collector's full date range without pagination", async () => {
