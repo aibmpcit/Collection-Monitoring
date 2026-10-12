@@ -7,6 +7,7 @@ import { verifyPassword } from "../services/access.js";
 import type { Role } from "../types/models.js";
 import { authenticate, type AuthedRequest } from "../middleware/auth.js";
 import { parsePermissions } from "../services/permissions.js";
+import { recordActivity } from "../services/activity.js";
 
 const router = Router();
 
@@ -66,6 +67,9 @@ router.post("/login", async (req, res, next) => {
       requiredEnv("JWT_SECRET"),
       { expiresIn: "8h" }
     );
+
+    // Tracking must never block sign-in.
+    await recordActivity(user.id, "login").catch(error => console.error("Unable to record login", error));
 
     return res.json({
       token,

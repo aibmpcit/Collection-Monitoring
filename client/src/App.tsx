@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   BarChart3,
   Building2,
+  FileText,
   FileWarning,
   History,
   LogOut,
@@ -18,6 +19,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SystemLogo } from "./components/SystemLogo";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
+import { useActivityTracking } from "./services/activity";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { BranchesPage } from "./pages/BranchesPage";
 import { BorrowersPage } from "./pages/BorrowersPage";
@@ -26,6 +28,7 @@ import { LoanDetailsPage } from "./pages/LoanDetailsPage";
 import { LoansPage } from "./pages/LoansPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverdueReportPage } from "./pages/OverdueReportPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { StaffPage } from "./pages/StaffPage";
 import { CollectorHistoryPage } from "./pages/CollectorHistoryPage";
 
@@ -77,6 +80,12 @@ const NAV_ITEMS: NavDefinition[] = [
     to: "/reports/overdue",
     label: "Due Monitoring",
     icon: <FileWarning size={18} />,
+    visible: (role) => role === "super_admin" || role === "branch_admin"
+  },
+  {
+    to: "/reports",
+    label: "Reports",
+    icon: <FileText size={18} />,
     visible: (role) => role === "super_admin" || role === "branch_admin"
   }
 ];
@@ -258,6 +267,7 @@ function ShellLayout() {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const location = useLocation();
   const isCollectorMobileNav = user?.role === "staff";
+  useActivityTracking(location.pathname, Boolean(user));
 
   const navItems = useMemo(
     () => NAV_ITEMS.filter((item) => item.visible(user?.role)),
@@ -397,6 +407,14 @@ function ShellLayout() {
               />
               <Route path="/loan-details/:loanId" element={<LoanDetailsPage />} />
               <Route path="/reports/overdue" element={<OverdueReportPage />} />
+              <Route
+                path="/reports"
+                element={
+                  <ProtectedRoute roles={["super_admin", "branch_admin"]}>
+                    <ReportsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/analytics"
                 element={

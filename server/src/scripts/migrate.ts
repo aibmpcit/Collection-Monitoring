@@ -29,6 +29,16 @@ async function run() {
   ) ENGINE=InnoDB`);
 
   await ensureLoanColumns();
+  await query(`CREATE TABLE IF NOT EXISTS user_activity_daily (
+  user_id INT UNSIGNED NOT NULL,
+  day DATE NOT NULL,
+  logins INT UNSIGNED NOT NULL DEFAULT 0,
+  visits INT UNSIGNED NOT NULL DEFAULT 0,
+  screen_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+  last_seen_at DATETIME NULL,
+  PRIMARY KEY (user_id, day), KEY idx_user_activity_day (day),
+  CONSTRAINT fk_user_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB`);
 
   if (!(await columnExists("users", "permissions"))) {
     await query("ALTER TABLE users ADD COLUMN permissions JSON NULL");

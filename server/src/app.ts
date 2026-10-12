@@ -12,6 +12,7 @@ import { dashboardRouter } from "./routes/dashboard.js";
 import { loanRouter } from "./routes/loans.js";
 import { paymentRouter } from "./routes/payments.js";
 import { reportsRouter } from "./routes/reports.js";
+import { activityRouter } from "./routes/activity.js";
 import { staffRouter } from "./routes/staff.js";
 import { errorResponse } from "./services/access.js";
 import "./config/env.js";
@@ -39,6 +40,7 @@ app.use("/api/collections", collectionRouter);
 app.use("/api/collection-history", collectionHistoryRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/activity", activityRouter);
 
 // Docker serves the built UI and API from the same origin.
 if (process.env.SERVE_CLIENT === "true") {

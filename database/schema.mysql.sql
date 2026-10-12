@@ -116,3 +116,14 @@ CREATE TABLE IF NOT EXISTS remark_attachments (
   PRIMARY KEY (id),
   UNIQUE KEY uq_remark_attachment (remark_kind, remark_id)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS user_activity_daily (
+  user_id INT UNSIGNED NOT NULL,
+  day DATE NOT NULL,
+  logins INT UNSIGNED NOT NULL DEFAULT 0,
+  visits INT UNSIGNED NOT NULL DEFAULT 0,
+  screen_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+  last_seen_at DATETIME NULL,
+  PRIMARY KEY (user_id, day), KEY idx_user_activity_day (day),
+  CONSTRAINT fk_user_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

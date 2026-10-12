@@ -46,6 +46,13 @@
 
 
 
+  /* Keep the page locked until every modal (including portaled dialogs) closes. */
+  html:has(.modal-shell, dialog[open], [aria-modal="true"]:not(dialog)),
+  body:has(.modal-shell, dialog[open], [aria-modal="true"]:not(dialog)) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   h1,
   h2,
   h3 {
@@ -345,6 +352,7 @@
 
   .modal-shell {
     @apply fixed inset-0 z-[100] overflow-y-auto bg-slate-900/50 p-4;
+    overscroll-behavior: contain;
     backdrop-filter: blur(3px);
     animation: fade-in 220ms ease both;
   }
@@ -533,7 +541,6 @@
 @media (min-width: 1024px) {
   .app-grid {
     grid-template-columns: 84px minmax(0, 1fr);
-    transition: grid-template-columns 200ms ease;
   }
 
   .app-grid:has(> .side-panel:hover),
@@ -542,13 +549,26 @@
   }
 
   .side-panel {
+    width: 100%;
     min-width: 0;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
   .side-panel .sidebar-shell {
+    width: 298px;
     padding: 20px 12px;
+  }
+
+  .side-panel .sidebar-nav-link {
+    width: 58px;
+    overflow: hidden;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  .side-panel:hover .sidebar-nav-link,
+  .side-panel:has(:focus-visible) .sidebar-nav-link {
+    width: 274px;
   }
 
   .side-panel .sidebar-icon,
@@ -556,35 +576,48 @@
     flex-shrink: 0;
   }
 
-  .side-panel .sidebar-text {
+  .side-panel .sidebar-text,
+  .side-panel .sidebar-brand-text {
     white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 120ms ease-out, visibility 0s linear 120ms;
   }
 
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-text,
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-text {
-    display: none;
+  .side-panel:hover .sidebar-text,
+  .side-panel:hover .sidebar-brand-text,
+  .side-panel:has(:focus-visible) .sidebar-text,
+  .side-panel:has(:focus-visible) .sidebar-brand-text {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 40ms, 0s;
   }
 
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-nav-link,
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-link > div {
-    justify-content: center;
-    gap: 0;
+  .side-panel .sidebar-brand-link {
+    padding-left: 8px;
   }
 
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-brand-link,
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-user-card {
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .side-panel:not(:hover):not(:has(:focus-visible)) .sidebar-signout-btn {
+  .side-panel .sidebar-signout-btn {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
+    width: 34px;
+    padding-left: 6px;
+    overflow: hidden;
+    transition: background-color 150ms ease;
+  }
+
+  .side-panel:hover .sidebar-signout-btn,
+  .side-panel:has(:focus-visible) .sidebar-signout-btn {
     width: 100%;
-    gap: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-grid { transition: none; }
+  .side-panel,
+  .side-panel .sidebar-nav-link,
+  .side-panel .sidebar-signout-btn,
+  .side-panel .sidebar-text,
+  .side-panel .sidebar-brand-text {
+    transition: none;
+  }
 }
