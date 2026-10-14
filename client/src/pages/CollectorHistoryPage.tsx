@@ -63,6 +63,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   if (user?.role !== "staff") requestParams.delete("collectorId");
   if (user?.role === "staff") requestParams.set("collectorId", String(user.id));
   if (activeTab !== "all") requestParams.set("type", activeTab);
+  // The date inputs default to this month before the URL has dates, so totals must follow the inputs.
+  if (exportFrom) requestParams.set("from", exportFrom); else requestParams.delete("from");
+  if (exportTo) requestParams.set("to", exportTo); else requestParams.delete("to");
   const query = requestParams.toString();
 
   useEffect(() => {

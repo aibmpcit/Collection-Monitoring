@@ -1,6 +1,6 @@
 import { RemarkImport } from "../components/RemarkImport";
 import { hasPermission } from "../services/permissions";
-import { MoreVertical, Search, Upload } from "lucide-react";
+import { Download, MoreVertical, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -128,6 +128,25 @@ function describeLoanImportSkip(item: LoanImportSkipRow): string {
   const identity = item.loanAccountNo || item.cifKey || (item.loanId > 0 ? `loan ${item.loanId}` : `member ${item.memberId}`);
   return `Row ${item.row}${identity ? ` (${identity})` : ""}: ${formatLoanImportSkipReason(item.reason)}`;
 }
+
+// [header, guidance, example]; headers match what handleLoanFileUpload reads.
+const LOAN_IMPORT_TEMPLATE: [string, string, string][] = [
+  ["Member Code", "Member's CIF / member code", "CIF-000123"],
+  ["Member Name", "Full name of the member", "Juan Dela Cruz"],
+  ["Address", "Member's address", "Brgy. Poblacion, Altavas"],
+  ["Contact No.", "Mobile or phone number", "09171234567"],
+  ["Loan Account Number", "Unique loan account number", "LN-2026-0001"],
+  ["Loan Product", "Loan type or product name", "Salary Loan"],
+  ["Release Date", "Date released (YYYY-MM-DD or MM/DD/YYYY)", "2026-01-15"],
+  ["Maturity", "Maturity date (YYYY-MM-DD or MM/DD/YYYY)", "2027-01-15"],
+  ["Loan Amount", "Original loan amount, numbers only", "50000"],
+  ["Loan Balance", "Remaining balance, numbers only", "32000"],
+  ["Principal Arrears", "Principal past due, numbers only", "2500"],
+  ["Interest", "Interest due, numbers only", "350"],
+  ["Fines", "Penalty / fines due, numbers only", "120"],
+  ["Total", "Total amount due, numbers only", "2970"],
+  ["PAR Age", "Days past due as a whole number; above 0 marks the loan overdue", "15"]
+];
 
 function normalizeDate(value: unknown): string {
   const raw = String(value ?? "").trim();
@@ -757,6 +776,26 @@ export function LoansPage() {
     setLoanImportFile(file);
     setError("");
     setImportMessage("");
+  }
+
+  async function downloadLoanTemplate() {
+    try {
+      const XLSX = await loadXlsx();
+      const workbook = XLSX.utils.book_new();
+      // The importer reads only the first sheet, so the blank loan sheet must come first.
+      const loans = XLSX.utils.aoa_to_sheet([LOAN_IMPORT_TEMPLATE.map(([header]) => header)]);
+      loans["!cols"] = LOAN_IMPORT_TEMPLATE.map(([header]) => ({ wch: Math.max(14, header.length + 2) }));
+      XLSX.utils.book_append_sheet(workbook, loans, "Loans");
+      const guide = XLSX.utils.aoa_to_sheet([
+        ["Column", "What to enter", "Example"],
+        ...LOAN_IMPORT_TEMPLATE
+      ]);
+      guide["!cols"] = [{ wch: 22 }, { wch: 60 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(workbook, guide, "Instructions");
+      XLSX.writeFile(workbook, "loan-import-template.xlsx");
+    } catch {
+      setImportBranchError("Unable to download the template.");
+    }
   }
 
   async function handleLoanFileUpload() {
@@ -1403,6 +1442,13 @@ export function LoansPage() {
                     <p>Uploading loan records and refreshing the list. Please keep this window open.</p>
                   </div>
                 )}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/10 pt-3">
+                  <p className="text-xs text-black/70">Not sure about the format? Start from the template.</p>
+                  <button type="button" className="btn-muted h-9 gap-1.5 px-3 text-sm" onClick={() => void downloadLoanTemplate()} disabled={isImportPending}>
+                    <Download size={15} />
+                    <span>Download Template</span>
+                  </button>
+                </div>
                 <p className="text-xs text-black/60">Bulk upload CSV/Excel columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age, with remark columns ignored.</p>
               </div>
             </div>
