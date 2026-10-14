@@ -2,7 +2,10 @@
   "name": "collection-monitoring-system",
   "private": true,
   "type": "module",
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c cyan,magenta \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
     "dev:client": "npm run dev --workspace client",
@@ -17,7 +20,7 @@
     "@types/pg": "8.20.0",
     "concurrently": "^9.2.1",
     "dotenv": "16.4.7",
-    "mysql2": "3.15.3",
+    "mysql2": "3.24.6",
     "pg": "8.20.0",
     "tsx": "^4.19.2"
   }

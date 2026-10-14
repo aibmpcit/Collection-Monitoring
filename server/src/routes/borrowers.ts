@@ -1,15 +1,17 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
-import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
+import { query, withTransaction } from "../config/db.js";
+import { authenticate, authorize, authorizePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   assertBranchAccess,
+  canManageRemark,
   getRequestUser,
   isSuperAdmin,
   normalizeRemarkCategory,
   userBranchId
 } from "../services/access.js";
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
+import { identifierKey, identifierKeySql } from "../services/identifiers.js";
 
 const router = Router();
 
@@ -25,7 +27,8 @@ const borrowerImportSchema = z.object({
   cifKey: z.string().trim().min(2),
   memberName: z.string().trim().min(2),
   contactInfo: z.string().trim().default(""),
-  address: z.string().trim().min(1).default("NA"),
+  // Blank keeps an existing member's address; new members get "NA".
+  address: z.string().trim().default(""),
   branchId: z.coerce.number().int().positive().optional()
 });
 
@@ -270,34 +273,59 @@ router.post("/bulk", authenticate, authorize(["super_admin", "branch_admin"]), a
       return res.status(400).json({ message: "No valid member rows provided" });
     }
 
+    // Last row wins when the same member appears twice in one file.
     const uniqueRows = Array.from(
       normalizedRows.reduce((map: Map<string, NormalizedBorrowerImportRow>, row: NormalizedBorrowerImportRow) => {
-        map.set(row.cifKey.toLowerCase(), row);
+        map.set(identifierKey(row.cifKey), row);
         return map;
       }, new Map<string, NormalizedBorrowerImportRow>()).values()
     );
 
-    const existingResult = await query<{ cif_key: string }>(
-      "SELECT cif_key FROM borrowers WHERE cif_key = ANY($1::text[])",
-      [uniqueRows.map((row) => row.cifKey)]
-    );
-    const existingCifKeys = new Set(existingResult.rows.map((row) => row.cif_key.toLowerCase()));
+    const [existingResult, branchResult] = await Promise.all([
+      query<{ id: number; cif_key: string; branch_id: number | null; contact_info: string | null; address: string | null }>(
+        `SELECT id, cif_key, branch_id, contact_info, address FROM borrowers WHERE ${identifierKeySql("cif_key")} IN ($1)`,
+        [uniqueRows.map((row) => identifierKey(row.cifKey))]
+      ),
+      query<{ id: number; code: string; name: string }>("SELECT id, code, name FROM branches")
+    ]);
+    const existingByKey = new Map(existingResult.rows.map((row) => [identifierKey(row.cif_key), row]));
+    const branchLabel = (branchId: number) => {
+      const branch = branchResult.rows.find((item) => Number(item.id) === branchId);
+      return branch ? `${branch.code} - ${branch.name}` : "another branch";
+    };
 
-    const inserted = uniqueRows.filter((row) => !existingCifKeys.has(row.cifKey.toLowerCase())).length;
-    const updated = uniqueRows.length - inserted;
+    let inserted = 0;
+    let updated = 0;
+    const skippedRows: Array<{ cifKey: string; reason: string }> = [];
+    for (const row of uniqueRows) {
+      const existing = existingByKey.get(identifierKey(row.cifKey));
+      if (!existing) {
+        await query(
+          `INSERT INTO borrowers (cif_key, branch_id, member_name, contact_info, address, name, phone, email)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [row.cifKey, row.branchId, row.memberName, row.contactInfo, row.address || "NA", row.memberName, row.contactInfo, row.email]
+        );
+        inserted += 1;
+        continue;
+      }
+      // An import never moves a member between branches; that would bypass branch access.
+      if (existing.branch_id && Number(existing.branch_id) !== row.branchId) {
+        skippedRows.push({ cifKey: row.cifKey, reason: `Member ${existing.cif_key} belongs to ${branchLabel(Number(existing.branch_id))}; import it under that branch` });
+        continue;
+      }
+      // Blank cells keep what is stored; the code is rewritten so "123" becomes the file's "000123".
+      const contactInfo = row.contactInfo || existing.contact_info || "";
+      const address = row.address || existing.address || "NA";
+      await query(
+        `UPDATE borrowers
+         SET cif_key = $1, branch_id = $2, member_name = $3, contact_info = $4, address = $5, name = $6, phone = $7, email = $8
+         WHERE id = $9`,
+        [row.cifKey, row.branchId, row.memberName, contactInfo, address, row.memberName, contactInfo, row.email, existing.id]
+      );
+      updated += 1;
+    }
 
-    await Promise.all(uniqueRows.map((row) => query(
-      `INSERT INTO borrowers (cif_key, branch_id, member_name, contact_info, address, name, phone, email)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON DUPLICATE KEY UPDATE
-         branch_id = VALUES(branch_id), member_name = VALUES(member_name),
-         contact_info = VALUES(contact_info), address = VALUES(address),
-         name = VALUES(name), phone = VALUES(phone), email = VALUES(email)`,
-      [row.cifKey, row.branchId, row.memberName, row.contactInfo, row.address,
-        row.memberName, row.contactInfo, row.email]
-    )));
-
-    return res.json({ inserted, updated });
+    return res.json({ inserted, updated, skipped: skippedRows.length, skippedRows });
   } catch (error) {
     return next(error);
   }
@@ -444,9 +472,11 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
       created_at: string;
       username: string | null;
       attachment_name: string | null;
+      author_id: number | null;
     }>(
       `SELECT
          br.id,
+         br.created_by AS author_id,
          br.borrower_id,
          br.remark_text,
          br.remark_category,
@@ -470,6 +500,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
         remarkCategory: row.remark_category,
         createdAt: row.created_at,
         createdBy: row.username ?? "System",
+        canEdit: canManageRemark(user, row.author_id),
         attachmentName: row.attachment_name
       }))
     );
@@ -478,7 +509,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
   }
 });
 
-router.post("/:borrowerId/remarks", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.post("/:borrowerId/remarks", authenticate, authorizePermission("add_remarks"), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const borrowerId = Number(req.params.borrowerId);
@@ -517,7 +548,7 @@ router.post("/:borrowerId/remarks", authenticate, authorize(["super_admin", "bra
   }
 });
 
-router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff", "las"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const borrowerId = Number(req.params.borrowerId);
@@ -536,7 +567,7 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
     assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
-    if (user.role === "staff" && Number(existingRemark.created_by) !== user.id) {
+    if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only edit your own remarks" });
     }
 
@@ -548,6 +579,38 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     await query("UPDATE borrower_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
     await saveRemarkAttachment("member", remarkId, attachment);
     return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category, attachmentName: attachment?.name });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff", "las"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const borrowerId = Number(req.params.borrowerId);
+    const remarkId = Number(req.params.remarkId);
+    if (!Number.isInteger(borrowerId) || borrowerId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
+      return res.status(400).json({ message: "Invalid member or remark id" });
+    }
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT br.created_by, b.branch_id
+       FROM borrower_remarks br
+       INNER JOIN borrowers b ON b.id = br.borrower_id
+       WHERE br.id = $1 AND br.borrower_id = $2
+       LIMIT 1`,
+      [remarkId, borrowerId]
+    );
+    const existingRemark = existing.rows[0];
+    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    if (!canManageRemark(user, existingRemark.created_by)) {
+      return res.status(403).json({ message: "You can only delete your own remarks" });
+    }
+    await withTransaction(async client => {
+      await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'member' AND remark_id = $1", [remarkId]);
+      await client.query("DELETE FROM borrower_remarks WHERE id = $1", [remarkId]);
+    });
+    return res.json({ message: "Remark deleted" });
   } catch (error) {
     return next(error);
   }

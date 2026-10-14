@@ -126,3 +126,31 @@ describe("reports summary collector and PAR age", () => {
     expect(bucketSql).toContain("WHEN l.par_age >= 366 THEN 'over-365'");
   });
 });
+
+describe("open-ended report dates", () => {
+  it("treats blank dates as no limit and reports them as null", async () => {
+    const response = await fetch(`${base}/summary`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ from: null, to: null });
+    expect(mocks.query.mock.calls[0][1]).toEqual(["1000-01-01", "9999-12-30", 2]);
+  });
+
+  it("keeps the date that was entered when the other is blank", async () => {
+    await fetch(`${base}/summary?from=2026-10-01`);
+    expect(mocks.query.mock.calls[0][1]).toEqual(["2026-10-01", "9999-12-30", 2]);
+    mocks.query.mockClear();
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    await fetch(`${base}/users?to=2026-10-14`);
+    expect(mocks.query.mock.calls[0][1]).toEqual(["1000-01-01", "2026-10-14"]);
+  });
+});
+
+describe("due monitoring", () => {
+  it("counts days overdue with DATEDIFF rather than subtracting dates as numbers", async () => {
+    await fetch(`${base}/overdue`);
+    const sql = mocks.query.mock.calls[0][0] as string;
+    expect(sql).toContain("DATEDIFF(CURRENT_DATE, COALESCE(l.maturity_date, l.due_date))");
+    expect(sql).not.toMatch(/CURRENT_DATE\s*-/);
+  });
+});

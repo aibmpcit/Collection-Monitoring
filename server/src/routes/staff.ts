@@ -208,6 +208,8 @@ router.patch("/:userId", authenticate, authorize(["super_admin"]), async (req, r
       const passwordHash = await hashPassword(parsed.data.password);
       params.push(passwordHash);
       updates.push(`password_hash = $${params.length}`);
+      // Signs the account out everywhere it is still logged in with the old password.
+      updates.push("token_version = token_version + 1");
     }
 
     params.push(targetUserId);

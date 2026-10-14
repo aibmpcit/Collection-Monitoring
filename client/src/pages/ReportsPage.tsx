@@ -7,8 +7,8 @@ import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
 
 interface ReportSummary {
-  from: string;
-  to: string;
+  from: string | null;
+  to: string | null;
   branchId: number | null;
   collectorId: number | null;
   summary: {
@@ -60,6 +60,24 @@ function rankUsers(users: UserActivity[], rankBy: RankBy) {
 const lastSeen = (value: string | null) => value ? value.replace("T", " ").slice(0, 16) : "Never";
 
 const money = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
+
+function periodLabel(from: string | null, to: string | null) {
+  if (from && to) return `${from} to ${to}`;
+  if (from) return `From ${from}`;
+  if (to) return `Up to ${to}`;
+  return "All dates";
+}
+
+function periodFileName(from: string | null, to: string | null) {
+  return `${from ?? "start"}-to-${to ?? "latest"}`;
+}
+
+function rangeParams(from: string, to: string) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  return params;
+}
 
 function localDateValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -122,11 +140,12 @@ export function ReportsPage() {
   }, [branchId, accounts]);
 
   useEffect(() => {
-    if (!from || !to || from > to) return;
+    // Never leave numbers on screen that belong to a different date range.
+    if (from && to && from > to) { setData(null); setLoading(false); return; }
     let active = true;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ from, to });
+    const params = rangeParams(from, to);
     if (isSuperAdmin && branchId) params.set("branchId", branchId);
     if (collectorId) params.set("collectorId", collectorId);
     apiRequest<ReportSummary>(`/reports/summary?${params}`)
@@ -137,9 +156,10 @@ export function ReportsPage() {
   }, [from, to, branchId, collectorId, isSuperAdmin, refresh]);
 
   useEffect(() => {
-    if (!isSuperAdmin || !from || !to || from > to) return;
+    if (!isSuperAdmin) return;
+    if (from && to && from > to) { setUserReport(null); return; }
     let active = true;
-    const params = new URLSearchParams({ from, to });
+    const params = rangeParams(from, to);
     if (branchId) params.set("branchId", branchId);
     apiRequest<UserActivityReport>(`/reports/users?${params}`)
       .then(result => { if (active) setUserReport(result); })
@@ -157,7 +177,7 @@ export function ReportsPage() {
       const workbook = XLSX.utils.book_new();
       const s = data.summary;
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([
-        { Metric: "Period", Value: `${data.from} to ${data.to}` },
+        { Metric: "Period", Value: periodLabel(data.from, data.to) },
         { Metric: "Collector", Value: collectorLabel },
         { Metric: "Total collected", Value: s.collected },
         { Metric: "Payments", Value: s.payments },
@@ -196,7 +216,7 @@ export function ReportsPage() {
           "Last seen": lastSeen(row.lastSeenAt)
         }))), "User Activity");
       }
-      XLSX.writeFile(workbook, `collection-report-${data.from}-to-${data.to}.xlsx`);
+      XLSX.writeFile(workbook, `collection-report-${periodFileName(data.from, data.to)}.xlsx`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to export report.");
     } finally {
@@ -279,7 +299,7 @@ export function ReportsPage() {
       y += 6;
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.text(`Period: ${data.from} to ${data.to}    Branch: ${branchLabel}    Collector: ${collectorLabel}`, left, y);
+      pdf.text(`Period: ${periodLabel(data.from, data.to)}    Branch: ${branchLabel}    Collector: ${collectorLabel}`, left, y);
       y += 4.5;
       pdf.text(`Generated: ${new Date().toLocaleString("en-PH")} by ${user?.username ?? ""}`, left, y);
       y += 7;
@@ -332,7 +352,7 @@ export function ReportsPage() {
         pdf.setTextColor(110, 120, 135);
         pdf.text(`Page ${page} of ${pageCount}`, pageWidth - left, 292, { align: "right" });
       }
-      pdf.save(`collection-report-${data.from}-to-${data.to}.pdf`);
+      pdf.save(`collection-report-${periodFileName(data.from, data.to)}.pdf`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to export report.");
     } finally {
@@ -378,12 +398,12 @@ export function ReportsPage() {
     </section>
 
     <ExportChoiceDialog open={exportChoiceOpen} title="Export report"
-      description={`${from} to ${to} · uses your current filters`}
+      description={`${periodLabel(from || null, to || null)} · uses your current filters`}
       onExcel={() => void exportExcel()} onPdf={() => void exportPdf()} onClose={() => setExportChoiceOpen(false)} />
 
     {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
 
-    <div aria-busy={loading} className="grid gap-4">
+    <div aria-busy={loading} className={`grid gap-4 transition-opacity ${loading && data ? "opacity-50" : ""}`}>
       {loading && !data ? <p className="panel p-4" role="status">Loading reports...</p> : data && <>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           {cards.map(([label, value, note]) => <section className="panel p-4" key={label}>
@@ -474,7 +494,7 @@ export function ReportsPage() {
           </button>}
         </section>}
 
-        <p className="text-xs text-slate-500">Overdue figures, PAR age groups and open loans reflect current loan data; collections and remarks cover {data.from} to {data.to}. A member with loans in more than one PAR age group is counted in each.</p>
+        <p className="text-xs text-slate-500">Overdue figures, PAR age groups and open loans reflect current loan data; collections and remarks cover {periodLabel(data.from, data.to).replace(/^[A-Z]/, letter => letter.toLowerCase())}. A member with loans in more than one PAR age group is counted in each.</p>
       </>}
     </div>
   </main>;

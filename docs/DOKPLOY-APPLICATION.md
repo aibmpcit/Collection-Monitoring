@@ -35,8 +35,11 @@ SERVE_CLIENT=true
 API_BODY_LIMIT=25mb
 DATABASE_URL=mysql://collection_app:URL_ENCODED_PASSWORD@ACTUAL_INTERNAL_MYSQL_HOST:3306/collection_monitoring
 JWT_SECRET=REPLACE_WITH_YOUR_SECRET
+TRUST_PROXY=1
 RUN_DATA_RESET_MIGRATION=false
 ```
+
+`TRUST_PROXY=1` tells the app it sits behind Dokploy's Traefik proxy, so sign-in attempt limits can see each visitor's real address. Without it, failed sign-ins are still limited per username, but not per address. Optional: `APP_TIME_OFFSET` (default `+08:00`, Philippine time) sets the timezone for stored dates and "today".
 
 Use the real internal connection URL supplied by the MySQL service, including its actual user and password. URL-encode special characters in credentials. The Application reads `DATABASE_URL` and `JWT_SECRET`; the three-variable Compose environment file is not sufficient for this deployment mode.
 

@@ -6,7 +6,11 @@ Super admins can create or edit accounts in **Accounts**, choose Collector, Bran
 - Add loan remarks
 - Add loan payments
 
-LAS accounts can read branch loan data by default. Enabling **Import collections** lets that specific LAS account import loan data for its assigned branch. It does not grant account administration, loan deletion, manual loan creation, or bulk remarks import. Remarks import remains super-admin only.
+LAS accounts can read branch loan data by default. Enabling **Import collections** lets that specific LAS account import loan data for its assigned branch. It does not grant account administration, loan deletion, or manual loan creation.
+
+Each upload is checked first and saved only after confirming. Loans missing from the file are listed; ticking **Close loans that are not in this file** closes them (their payments and remarks stay in history), and closed loans that reappear are reopened.
+
+Remark columns: during testing (`REMARK_IMPORT_ONCE=false`) every import brings them in and skips remarks already stored. At go-live set `REMARK_IMPORT_ONCE=true`: remarks are then imported only once per branch, on its first import by a super admin, after which the branch is locked and remarks are added by users. Branch admins can edit or delete any remark in their branch; collectors and LAS can edit or delete only their own.
 
 Collectors retain their existing defaults (adding remarks and payments). Branch admins retain all three permissions by default. A super admin can override these defaults for an individual account or use **Use role defaults** to clear overrides. Other existing permissions still follow the selected role.
 

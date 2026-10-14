@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   role ENUM('super_admin', 'branch_admin', 'staff', 'las') NOT NULL,
   permissions JSON NULL,
+  token_version INT UNSIGNED NOT NULL DEFAULT 0,
   branch_id INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), UNIQUE KEY uq_users_username (username), KEY idx_users_branch (branch_id),
@@ -59,7 +60,7 @@ CREATE TABLE IF NOT EXISTS loans (
   due_date DATE NOT NULL,
   status ENUM('active', 'closed', 'overdue') NOT NULL DEFAULT 'active',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id), UNIQUE KEY uq_loans_account (loan_account_no), KEY idx_loans_borrower (borrower_id),
+  PRIMARY KEY (id), UNIQUE KEY uq_loans_account (loan_account_no), KEY idx_loans_borrower (borrower_id), KEY idx_loans_status (status),
   CONSTRAINT fk_loans_borrower FOREIGN KEY (borrower_id) REFERENCES borrowers(id)
 ) ENGINE=InnoDB;
 
@@ -76,7 +77,7 @@ CREATE TABLE IF NOT EXISTS collections (
   or_no VARCHAR(80) NULL,
   collected_at DATETIME NOT NULL,
   created_by INT UNSIGNED NULL,
-  PRIMARY KEY (id), KEY idx_collections_loan (loan_id), KEY idx_collections_user (created_by),
+  PRIMARY KEY (id), KEY idx_collections_loan (loan_id), KEY idx_collections_user (created_by), KEY idx_collections_collected_at (collected_at),
   CONSTRAINT fk_collections_loan FOREIGN KEY (loan_id) REFERENCES loans(id),
   CONSTRAINT fk_collections_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS loan_remarks (
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), KEY idx_loan_remarks_loan (loan_id),
+  KEY idx_loan_remarks_loan_created (loan_id, created_at, id), KEY idx_loan_remarks_created (created_at),
   CONSTRAINT fk_loan_remarks_loan FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE,
   CONSTRAINT fk_loan_remarks_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -100,7 +102,7 @@ CREATE TABLE IF NOT EXISTS borrower_remarks (
   remark_category VARCHAR(64) NOT NULL DEFAULT 'follow_up_collection',
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id), KEY idx_borrower_remarks_borrower (borrower_id),
+  PRIMARY KEY (id), KEY idx_borrower_remarks_borrower (borrower_id), KEY idx_borrower_remarks_created (created_at),
   CONSTRAINT fk_borrower_remarks_borrower FOREIGN KEY (borrower_id) REFERENCES borrowers(id) ON DELETE CASCADE,
   CONSTRAINT fk_borrower_remarks_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -126,4 +128,32 @@ CREATE TABLE IF NOT EXISTS user_activity_daily (
   last_seen_at DATETIME NULL,
   PRIMARY KEY (user_id, day), KEY idx_user_activity_day (day),
   CONSTRAINT fk_user_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS branch_remark_imports (
+  branch_id INT UNSIGNED NOT NULL,
+  imported_by INT UNSIGNED NULL,
+  imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  remarks_imported INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (branch_id),
+  CONSTRAINT fk_branch_remark_imports_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_branch_remark_imports_user FOREIGN KEY (imported_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS loan_import_runs (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  branch_id INT UNSIGNED NOT NULL,
+  uploaded_by INT UNSIGNED NULL,
+  uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  file_name VARCHAR(255) NULL,
+  rows_in_file INT UNSIGNED NOT NULL DEFAULT 0,
+  inserted INT UNSIGNED NOT NULL DEFAULT 0,
+  updated INT UNSIGNED NOT NULL DEFAULT 0,
+  reopened INT UNSIGNED NOT NULL DEFAULT 0,
+  closed INT UNSIGNED NOT NULL DEFAULT 0,
+  skipped INT UNSIGNED NOT NULL DEFAULT 0,
+  remarks_imported INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (id), KEY idx_loan_import_runs_branch (branch_id, uploaded_at),
+  CONSTRAINT fk_loan_import_runs_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_loan_import_runs_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

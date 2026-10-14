@@ -1,11 +1,14 @@
-import { remarkImportRouter } from "./remarkImport.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query, withTransaction } from "../config/db.js";
+import { toBusinessDateTime } from "../config/time.js";
+import { remarkImportOnce } from "../config/env.js";
 import { authenticate, authorize, authorizePermission, type AuthedRequest } from "../middleware/auth.js";
 import {
   assertBranchAccess,
+  canManageRemark,
   formatPaymentId,
+  IMPORT_REMARK_CATEGORIES,
   getRequestUser,
   isSuperAdmin,
   nextLoanAccountNo,
@@ -14,9 +17,13 @@ import {
   userBranchId
 } from "../services/access.js";
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
+import { identifierKey, identifierKeySql } from "../services/identifiers.js";
+import { mapLoanRow } from "../services/loanRows.js";
+import { loanListRouter } from "./loanLists.js";
 
 const router = Router();
-router.use(remarkImportRouter);
+// List endpoints (GET /, /due-soon, /remarked) come before "/:loanId" so their paths match first.
+router.use(loanListRouter);
 
 function normalizeImportedWholeNumber(value: unknown): number {
   if (value === null || value === undefined || value === "") {
@@ -172,7 +179,45 @@ type LoanImportMatchRecord = {
   branch_id: number | null;
   loan_account_no: string | null;
   cif_key: string | null;
+  status?: string;
 };
+
+const IMPORT_FIELD_LABELS: Record<string, string> = {
+  cifKey: "Member code", memberName: "Member name", loanAccountNo: "Loan account number", loanType: "Loan product",
+  dateRelease: "Release date", maturityDate: "Maturity date", loanAmount: "Loan amount", loanBalance: "Loan balance",
+  principalDue: "Principal arrears", penaltyDue: "Fines", interest: "Interest", otherCharges: "Other charges",
+  total: "Total", parAge: "PAR age", status: "Status", address: "Address", contactInfo: "Contact no."
+};
+
+const IMPORT_SKIP_MESSAGES: Record<string, string> = {
+  missing_loan_id_and_member_id_or_cif_key_and_loan_account_no: "Missing member code or loan account number",
+  matched_borrower_not_found: "The member for this loan could not be found",
+  matched_branch_forbidden: "You can't change loans in another branch",
+  borrower_upsert_failed: "The member could not be saved",
+  borrower_branch_forbidden: "You can't add members to another branch",
+  missing_branch: "No branch chosen for this import",
+  duplicate_loan_account_no: "This loan account number is already used by another loan",
+  Forbidden: "You can't change records in another branch"
+};
+
+/** Turns internal skip codes and validation errors into a sentence for the person importing. */
+function readableSkipReason(reason: string): string {
+  const validation = reason.match(/^invalid_(?:update|insert)_payload: ([\w.]+): (.*)$/);
+  if (validation) {
+    const field = IMPORT_FIELD_LABELS[validation[1]] ?? validation[1];
+    const detail = validation[2];
+    if (/invalid date/i.test(detail)) return `${field} is missing or not a valid date`;
+    if (/invalid enum/i.test(detail)) return `${field} is not one of: active, overdue, closed`;
+    if (/at least|too_small|String must/i.test(detail)) return `${field} is missing or too short`;
+    return `${field}: ${detail}`;
+  }
+  return IMPORT_SKIP_MESSAGES[reason] ?? reason;
+}
+
+const importRemarkSchema = z.object({
+  category: z.string().refine(value => IMPORT_REMARK_CATEGORIES.has(value)),
+  description: z.string().trim().min(1).max(2000)
+});
 
 function summarizeZodError(error: z.ZodError) {
   const firstIssue = error.issues[0];
@@ -208,18 +253,16 @@ function normalizeImportedLoanStatus(value: unknown): "active" | "closed" | "ove
   return raw;
 }
 
-function normalizeImportedAddress(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  return raw || "NA";
-}
-
 function normalizedCifKey(value: string) {
-  return value.trim().toLowerCase();
+  return identifierKey(value);
 }
 
 function normalizedLoanAccountKey(value: string) {
-  return value.trim().toLowerCase();
+  return identifierKey(value);
 }
+
+/** Thrown inside the import loop to skip a row with a reason written for the person importing. */
+class ImportSkip extends Error {}
 
 function loanIdBorrowerKey(loanId: number, borrowerId: number) {
   return `${loanId}:${borrowerId}`;
@@ -292,117 +335,6 @@ async function loanContext(loanId: number) {
   return result.rows[0] ?? null;
 }
 
-function mapLoanRow(row: Record<string, unknown>) {
-  return {
-    id: Number(row.id),
-    borrowerId: Number(row.borrower_id),
-    loanAccountNo: String(row.loan_account_no ?? ""),
-    loanType: String(row.loan_type ?? ""),
-    dateRelease: String(row.date_release ?? row.due_date ?? ""),
-    maturityDate: String(row.maturity_date ?? row.due_date ?? ""),
-    loanAmount: toNumber(row.loan_amount ?? row.principal ?? 0),
-    loanBalance: toNumber(row.loan_balance ?? 0),
-    principalDue: toNumber(row.principal_due ?? row.principal ?? 0),
-    penaltyDue: toNumber(row.penalty_due ?? row.penalty ?? 0),
-    otherCharges: toNumber(row.other_charges ?? 0),
-    total: toNumber(row.total ?? 0),
-    parAge: Number(row.par_age ?? 0),
-    notes: String(row.notes ?? ""),
-    principal: toNumber(row.principal_due ?? row.principal ?? 0),
-    interest: toNumber(row.interest ?? 0),
-    penalty: toNumber(row.penalty_due ?? row.penalty ?? 0),
-    dueDate: String(row.due_date ?? row.maturity_date ?? ""),
-    status: String(row.status ?? "active"),
-    importedAt: String(row.imported_at ?? row.created_at ?? "")
-  };
-}
-
-router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
-  try {
-    const user = getRequestUser(req);
-    const params: unknown[] = [];
-    const where = user.role === "super_admin" ? "" : "WHERE b.branch_id = $1";
-    if (user.role !== "super_admin") {
-      params.push(Number(user.branchId ?? 0));
-    }
-
-    const result = await query(
-       `SELECT
-         l.id,
-         l.borrower_id,
-         b.branch_id,
-         l.loan_account_no,
-         l.loan_type,
-         l.date_release,
-         l.maturity_date,
-         l.loan_amount,
-         l.loan_balance,
-         l.principal_due,
-         l.penalty_due,
-         l.other_charges,
-         l.total,
-         l.par_age,
-         l.notes,
-         l.principal,
-         l.interest,
-         l.penalty,
-         l.due_date,
-         l.status,
-         DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
-         (SELECT lr.remark_text
-          FROM loan_remarks lr
-          WHERE lr.loan_id = l.id
-          ORDER BY lr.created_at DESC, lr.id DESC
-          LIMIT 1) AS latest_remark_1,
-         (SELECT lr.remark_category
-          FROM loan_remarks lr
-          WHERE lr.loan_id = l.id
-          ORDER BY lr.created_at DESC, lr.id DESC
-          LIMIT 1) AS latest_remark_category_1,
-         (SELECT lr.remark_text
-          FROM loan_remarks lr
-          WHERE lr.loan_id = l.id
-          ORDER BY lr.created_at DESC, lr.id DESC
-          LIMIT 1 OFFSET 1) AS latest_remark_2,
-         (SELECT lr.remark_category
-          FROM loan_remarks lr
-          WHERE lr.loan_id = l.id
-          ORDER BY lr.created_at DESC, lr.id DESC
-          LIMIT 1 OFFSET 1) AS latest_remark_category_2,
-         b.cif_key,
-         b.member_name,
-         b.contact_info,
-         b.address
-       FROM loans l
-       INNER JOIN borrowers b ON b.id = l.borrower_id
-       ${where}
-       ORDER BY l.id DESC`,
-      params
-    );
-
-    return res.json(
-      result.rows.map((row) => ({
-        ...mapLoanRow(row),
-        branchId: Number(row.branch_id ?? 0),
-        cifKey: String(row.cif_key ?? ""),
-        memberName: String(row.member_name ?? ""),
-        contactInfo: String(row.contact_info ?? ""),
-        address: String(row.address ?? ""),
-        latestRemarks: [
-          { remark: row.latest_remark_1, remarkCategory: row.latest_remark_category_1 },
-          { remark: row.latest_remark_2, remarkCategory: row.latest_remark_category_2 }
-        ]
-          .filter((item) => item.remark != null && String(item.remark).trim() !== "")
-          .map((item) => ({
-            remark: String(item.remark),
-            remarkCategory: String(item.remarkCategory ?? "others")
-          }))
-      }))
-    );
-  } catch (error) {
-    return next(error);
-  }
-});
 
 router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
@@ -487,11 +419,32 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
       return res.status(400).json({ message: "No valid loan rows found in file" });
     }
     const importRows = rows as Array<Record<string, unknown>>;
+    // One file per branch: the whole upload belongs to the chosen branch.
+    const importBranchId = isSuperAdmin(user) ? Number(req.body?.branchId ?? 0) : userBranchId(user);
+    if (!Number.isInteger(importBranchId) || importBranchId <= 0) {
+      return res.status(400).json({ message: "Choose the branch this file belongs to" });
+    }
+    const preview = req.body?.preview === true;
+    // Closing loans missing from the file is opt-in per upload while the system is being tested.
+    const closeMissing = req.body?.closeMissing === true;
+    const fileName = String(req.body?.fileName ?? "").trim().slice(0, 255);
+    const rowsInFile = Math.max(importRows.length, Number(req.body?.rowsInFile ?? 0) || 0);
 
     let inserted = 0;
     let updated = 0;
+    let reopened = 0;
+    let closed = 0;
+    let notInFile = 0;
+    let remarksDuplicate = 0;
+    let openBefore = 0;
     let skipped = 0;
+    let remarksImported = 0;
+    let remarksInFile = 0;
+    let remarksNote = "";
+    const closedLoans: Array<{ loanAccountNo: string; memberName: string }> = [];
     const skippedRows: LoanBulkSkip[] = [];
+    // Thrown to roll back a preview after every count has been worked out.
+    const previewDone = new Error("preview");
     const explicitLoanIds = Array.from(
       new Set(
         importRows.map((row) => Number(row?.loanId ?? 0)).filter((loanId) => Number.isInteger(loanId) && loanId > 0)
@@ -519,7 +472,64 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
       )
     );
 
+    try {
     await withTransaction(async (client) => {
+      const branchLabels = new Map<number, string>();
+      const branchRows = await client.query<{ id: number; code: string; name: string }>("SELECT id, code, name FROM branches");
+      branchRows.rows.forEach(branch => branchLabels.set(Number(branch.id), `${branch.code} - ${branch.name}`));
+      const branchLabel = (branchId: number | null | undefined) => branchLabels.get(Number(branchId ?? 0)) ?? "another branch";
+      // Records already in a branch stay there; a file for a different branch must not claim them.
+      const assertSameBranch = (existingBranchId: number | null | undefined, importBranchId: number, what: string) => {
+        if (existingBranchId && importBranchId > 0 && Number(existingBranchId) !== importBranchId) {
+          throw new ImportSkip(`${what} belongs to ${branchLabel(existingBranchId)}; import it under that branch`);
+        }
+      };
+
+      // With REMARK_IMPORT_ONCE, remarks come in only on a branch's first import, by a super admin.
+      // Otherwise (testing) every import brings them in, skipping ones already stored.
+      const importOnce = remarkImportOnce();
+      const remarkLock = importOnce
+        ? await client.query<{ imported_at: string; username: string | null }>(
+          `SELECT r.imported_at, u.username FROM branch_remark_imports r LEFT JOIN users u ON u.id = r.imported_by
+           WHERE r.branch_id = $1 LIMIT 1`,
+          [importBranchId]
+        )
+        : { rows: [] as Array<{ imported_at: string; username: string | null }> };
+      const lockedAt = remarkLock.rows[0];
+      const remarksAllowed = importOnce ? isSuperAdmin(user) && !lockedAt : true;
+      const touchedLoanIds = new Set<number>();
+      const fileAccountKeys = new Set(importRows.map((row) => identifierKey(String(row?.loanAccountNo ?? ""))).filter(Boolean));
+      const openBeforeResult = await client.query<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM loans l JOIN borrowers b ON b.id = l.borrower_id WHERE b.branch_id = $1 AND l.status != 'closed'`,
+        [importBranchId]
+      );
+      openBefore = Number(openBeforeResult.rows[0]?.total ?? 0);
+
+      const importRemarksFor = async (loanId: number, row: Record<string, unknown>) => {
+        const remarks = Array.isArray(row?.remarks) ? row.remarks : [];
+        if (!remarks.length) return;
+        // Re-importing the same file must not duplicate remarks the loan already has.
+        const stored = remarksAllowed && !importOnce
+          ? await client.query<{ remark_category: string; remark_text: string }>(
+            "SELECT remark_category, remark_text FROM loan_remarks WHERE loan_id = $1", [loanId])
+          : { rows: [] as Array<{ remark_category: string; remark_text: string }> };
+        const storedKeys = new Set(stored.rows.map(item => `${item.remark_category}\u0000${String(item.remark_text).trim()}`));
+        for (const candidate of remarks) {
+          const remark = importRemarkSchema.safeParse(candidate);
+          if (!remark.success) continue;
+          remarksInFile += 1;
+          if (!remarksAllowed) continue;
+          const key = `${remark.data.category}\u0000${remark.data.description}`;
+          if (storedKeys.has(key)) { remarksDuplicate += 1; continue; }
+          storedKeys.add(key);
+          await client.query(
+            "INSERT INTO loan_remarks (loan_id, remark_text, remark_category, created_by) VALUES ($1, $2, $3, $4)",
+            [loanId, remark.data.description, remark.data.category, user.id]
+          );
+          remarksImported += 1;
+        }
+      };
+
       const borrowersById = new Map<number, BorrowerImportRecord>();
       const borrowersByCif = new Map<string, BorrowerImportRecord>();
       const loansById = new Map<number, LoanImportMatchRecord>();
@@ -606,14 +616,18 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
           null;
 
         if (borrower) {
+          assertSameBranch(borrower.branch_id, params.branchId, `Member ${borrower.cif_key ?? params.cifKey}`);
           assertBranchAccess(user, Number(borrower.branch_id ?? params.branchId));
           const nextBranchId = borrower.branch_id ?? params.branchId;
+          // A blank cell means "not provided", so keep what is already stored.
+          const contactInfo = params.contactInfo || borrower.contact_info || "";
+          const address = params.address || borrower.address || "NA";
           const isUnchanged =
             (borrower.cif_key ?? "") === params.cifKey &&
             Number(nextBranchId ?? 0) === Number(borrower.branch_id ?? 0) &&
             (borrower.member_name ?? "") === params.memberName &&
-            (borrower.contact_info ?? "") === params.contactInfo &&
-            (borrower.address ?? "") === params.address;
+            (borrower.contact_info ?? "") === contactInfo &&
+            (borrower.address ?? "") === address;
 
           if (isUnchanged) {
             return borrower;
@@ -635,10 +649,10 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
               params.cifKey,
               nextBranchId,
               params.memberName,
-              params.contactInfo,
-              params.address,
+              contactInfo,
+              address,
               params.memberName,
-              params.contactInfo,
+              contactInfo,
               borrowerEmail(params.cifKey),
               borrower.id
             ]
@@ -649,8 +663,8 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             branch_id: nextBranchId,
             cif_key: params.cifKey,
             member_name: params.memberName,
-            contact_info: params.contactInfo,
-            address: params.address
+            contact_info: contactInfo,
+            address
           } : null;
           if (borrower) {
             cacheBorrower(borrower);
@@ -668,7 +682,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             params.branchId,
             params.memberName,
             params.contactInfo,
-            params.address,
+            params.address || "NA",
             params.memberName,
             params.contactInfo,
             borrowerEmail(params.cifKey)
@@ -681,7 +695,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
           cif_key: params.cifKey,
           member_name: params.memberName,
           contact_info: params.contactInfo,
-          address: params.address
+          address: params.address || "NA"
         } : null;
         if (borrower) {
           cacheBorrower(borrower);
@@ -694,19 +708,19 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
         const borrowerResult = await client.query<BorrowerImportRecord>(
           `SELECT id, branch_id, cif_key, member_name, contact_info, address
            FROM borrowers
-           WHERE id = ANY($1::int[]) OR cif_key = ANY($2::text[])`,
-          [importedBorrowerIds, importedCifKeys]
+           WHERE id IN ($1) OR ${identifierKeySql("cif_key")} IN ($2)`,
+          [importedBorrowerIds, importedCifKeys.map(identifierKey)]
         );
         borrowerResult.rows.forEach(cacheBorrower);
       }
 
       if (explicitLoanIds.length > 0 || importedLoanAccountNos.length > 0) {
         const loanResult = await client.query<LoanImportMatchRecord>(
-          `SELECT l.id, l.borrower_id, b.branch_id, l.loan_account_no, b.cif_key
+          `SELECT l.id, l.borrower_id, b.branch_id, l.loan_account_no, b.cif_key, l.status
            FROM loans l
            INNER JOIN borrowers b ON b.id = l.borrower_id
-           WHERE l.id = ANY($1::int[]) OR l.loan_account_no = ANY($2::text[])`,
-          [explicitLoanIds, importedLoanAccountNos]
+           WHERE l.id IN ($1) OR ${identifierKeySql("l.loan_account_no")} IN ($2)`,
+          [explicitLoanIds, importedLoanAccountNos.map(identifierKey)]
         );
         loanResult.rows.forEach(cacheLoan);
 
@@ -730,19 +744,20 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
       }
 
       for (const [index, row] of importRows.entries()) {
-        const rowNumber = index + 2;
+        // The spreadsheet row the browser read this from; falls back to position for older clients.
+        const rowNumber = Number(row?.row ?? 0) > 0 ? Number(row.row) : index + 2;
         const explicitLoanId = Number(row?.loanId ?? 0);
         const borrowerId = Number(row?.memberId ?? row?.borrowerId ?? 0);
         const cifKey = String(row?.cifKey ?? "").trim();
         const loanAccountNo = String(row?.loanAccountNo ?? "").trim();
         const memberName = String(row?.memberName ?? "").trim();
         const contactInfo = String(row?.contactInfo ?? "").trim();
-        const address = normalizeImportedAddress(row?.address);
+        const address = String(row?.address ?? "").trim();
         const importedParAge = Number(row?.parAge ?? 0);
         const normalizedStatus = String(row?.status ?? "").trim()
           ? normalizeImportedLoanStatus(row?.status)
           : importedParAge > 0 ? "overdue" : "active";
-        const resolvedBranchId = isSuperAdmin(user) ? Number(row?.branchId ?? 0) : userBranchId(user);
+        const resolvedBranchId = importBranchId;
         const hasLoanAndBorrowerIds = explicitLoanId > 0 && borrowerId > 0;
         const hasCifAndAccountNo = Boolean(cifKey && loanAccountNo);
         const pushSkip = (reason: string) => {
@@ -753,7 +768,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             memberId: borrowerId,
             loanAccountNo,
             cifKey,
-            reason
+            reason: readableSkipReason(reason)
           });
         };
 
@@ -775,6 +790,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
               continue;
             }
 
+            assertSameBranch(matchedLoan.branch_id ?? borrower.branch_id, resolvedBranchId, `Loan ${matchedLoan.loan_account_no ?? loanAccountNo}`);
             try {
               assertBranchAccess(user, Number(matchedLoan.branch_id ?? borrower.branch_id ?? 0));
             } catch {
@@ -860,14 +876,18 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             );
 
 
+            if (matchedLoan.status === "closed" && parsed.data.status !== "closed") reopened += 1;
             matchedLoan = {
               id: matchedLoan.id,
               borrower_id: borrower.id,
               branch_id: borrower.branch_id,
               loan_account_no: loanAccountNo,
-              cif_key: borrower.cif_key ?? cifKey
+              cif_key: borrower.cif_key ?? cifKey,
+              status: parsed.data.status
             };
             cacheLoan(matchedLoan);
+            touchedLoanIds.add(matchedLoan.id);
+            await importRemarksFor(matchedLoan.id, row);
             updated += 1;
             continue;
           }
@@ -889,7 +909,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             parAge: Number(row?.parAge ?? 0),
             status: normalizedStatus,
             contactInfo,
-            address,
+            address: address || "NA",
             notes: ""
           });
 
@@ -908,7 +928,7 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             cifKey: insertPayload.data.cifKey,
             memberName: insertPayload.data.memberName,
             contactInfo: insertPayload.data.contactInfo,
-            address: insertPayload.data.address,
+            address,
             branchId: resolvedBranchId
           });
 
@@ -926,7 +946,10 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
 
           const duplicateLoan = loansByAccountNo.get(normalizedLoanAccountKey(insertPayload.data.loanAccountNo));
           if (duplicateLoan) {
-            pushSkip("duplicate_loan_account_no");
+            const owner = borrowersById.get(duplicateLoan.borrower_id);
+            pushSkip(owner?.cif_key && identifierKey(owner.cif_key) !== identifierKey(cifKey)
+              ? `Loan ${duplicateLoan.loan_account_no} already belongs to member ${owner.cif_key}`
+              : "duplicate_loan_account_no");
             continue;
           }
 
@@ -967,16 +990,67 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
             borrower_id: borrower.id,
             branch_id: borrower.branch_id,
             loan_account_no: insertPayload.data.loanAccountNo,
-            cif_key: borrower.cif_key ?? insertPayload.data.cifKey
+            cif_key: borrower.cif_key ?? insertPayload.data.cifKey,
+            status: insertPayload.data.status
           });
+          touchedLoanIds.add(insertedLoan.rows[0].id);
+          await importRemarksFor(insertedLoan.rows[0].id, row);
           inserted += 1;
         } catch (error) {
           pushSkip(error instanceof Error ? error.message : "unexpected_error");
         }
       }
-    });
 
-    return res.json({ inserted, updated, skipped, skippedRows });
+      // The file is the branch's complete overdue list: open loans missing from it were paid or
+      // settled. They are listed always and closed (history kept) only when the uploader asks.
+      // Loans present in the file are never closed, even if their row was skipped, and nothing
+      // closes when no row could be saved.
+      if (inserted + updated > 0) {
+        const stillOpen = await client.query<{ id: number; loan_account_no: string | null; member_name: string | null }>(
+          `SELECT l.id, l.loan_account_no, COALESCE(b.member_name, b.name) AS member_name
+           FROM loans l JOIN borrowers b ON b.id = l.borrower_id
+           WHERE b.branch_id = $1 AND l.status != 'closed'`,
+          [importBranchId]
+        );
+        const missing = stillOpen.rows.filter((loan) => !touchedLoanIds.has(Number(loan.id)) && !fileAccountKeys.has(identifierKey(loan.loan_account_no)));
+        if (closeMissing && missing.length) {
+          await client.query("UPDATE loans SET status = 'closed' WHERE id IN ($1)", [missing.map((loan) => Number(loan.id))]);
+        }
+        notInFile = missing.length;
+        closed = closeMissing ? missing.length : 0;
+        closedLoans.push(...missing.map((loan) => ({ loanAccountNo: loan.loan_account_no ?? "", memberName: loan.member_name ?? "" })));
+      }
+
+      if (remarksInFile > 0 && !remarksAllowed) {
+        remarksNote = lockedAt
+          ? `Remarks for this branch were already imported on ${String(lockedAt.imported_at).slice(0, 10)}${lockedAt.username ? ` by ${lockedAt.username}` : ""}; remark columns were ignored.`
+          : "Only a super admin can import remarks, on a branch's first import; remark columns were ignored.";
+      }
+      if (remarksDuplicate > 0) {
+        remarksNote = `${remarksDuplicate} remark(s) were already in the system and were skipped.`;
+      }
+      if (importOnce && remarksImported > 0) {
+        await client.query(
+          "INSERT INTO branch_remark_imports (branch_id, imported_by, remarks_imported) VALUES ($1, $2, $3)",
+          [importBranchId, user.id, remarksImported]
+        );
+      }
+
+      if (preview) throw previewDone;
+      await client.query(
+        `INSERT INTO loan_import_runs (branch_id, uploaded_by, file_name, rows_in_file, inserted, updated, reopened, closed, skipped, remarks_imported)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [importBranchId, user.id, fileName || null, rowsInFile, inserted, updated, reopened, closed, skipped, remarksImported]
+      );
+    });
+    } catch (error) {
+      if (error !== previewDone) throw error;
+    }
+
+    return res.json({
+      preview, closeMissing, inserted, updated, reopened, closed, notInFile, openBefore, skipped, skippedRows,
+      closedLoans: closedLoans.slice(0, 200), remarksImported, remarksDuplicate, remarksInFile, remarksNote
+    });
   } catch (error) {
     return next(error);
   }
@@ -1254,20 +1328,14 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
       return res.status(400).json({ message: "OR No is too long" });
     }
 
-    let collectedAt = new Date().toISOString();
-    if (collectedAtRaw) {
-      const parsedDate = new Date(collectedAtRaw);
-      if (Number.isNaN(parsedDate.getTime())) {
-        return res.status(400).json({ message: "Invalid payment date/time" });
-      }
-      collectedAt = parsedDate.toISOString();
+    // Blank means now; stored as business wall-clock time like every other timestamp.
+    const collectedAt = toBusinessDateTime(collectedAtRaw);
+    if (!collectedAt) {
+      return res.status(400).json({ message: "Invalid payment date/time" });
     }
-
-    // MySQL DATETIME expects a timezone-free SQL value; retain the ISO timestamp's UTC time.
-    const collectedAtSql = collectedAt.slice(0, 19).replace("T", " ");
     const created = await query<{ id: number }>(
       "INSERT INTO collections (loan_id, amount, or_no, collected_at, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-      [loanId, amount, orNo || null, collectedAtSql, user.id]
+      [loanId, amount, orNo || null, collectedAt, user.id]
     );
 
     return res.status(201).json({
@@ -1314,12 +1382,10 @@ router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_adm
     const collectedAtRaw = String(req.body?.collectedAt ?? "").trim();
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Payment amount must be greater than 0" });
     if (orNo.length > 80) return res.status(400).json({ message: "OR No is too long" });
-    const parsedDate = new Date(collectedAtRaw);
-    if (!collectedAtRaw || Number.isNaN(parsedDate.getTime())) return res.status(400).json({ message: "Invalid payment date/time" });
-    const collectedAt = parsedDate.toISOString();
-    const collectedAtSql = collectedAt.slice(0, 19).replace("T", " ");
+    const collectedAt = collectedAtRaw ? toBusinessDateTime(collectedAtRaw) : null;
+    if (!collectedAt) return res.status(400).json({ message: "Invalid payment date/time" });
 
-    await query("UPDATE collections SET amount = $1, or_no = $2, collected_at = $3 WHERE id = $4", [amount, orNo || null, collectedAtSql, paymentId]);
+    await query("UPDATE collections SET amount = $1, or_no = $2, collected_at = $3 WHERE id = $4", [amount, orNo || null, collectedAt, paymentId]);
     return res.json({ id: paymentId, paymentId: formatPaymentId(paymentId), loanId, amount, orNo, collectedAt });
   } catch (error) {
     return next(error);
@@ -1389,7 +1455,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
-        canEdit: user.role !== "las" && (user.role !== "staff" || Number(row.author_id) === user.id),
+        canEdit: canManageRemark(user, row.author_id),
         loanId: row.loan_id,
         remark: row.remark_text,
         remarkCategory: row.remark_category,
@@ -1443,7 +1509,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
   }
 });
 
-router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff", "las"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const loanId = Number(req.params.loanId);
@@ -1463,7 +1529,7 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
     assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
-    if (user.role === "staff" && Number(existingRemark.created_by) !== user.id) {
+    if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only edit your own remarks" });
     }
 
@@ -1475,6 +1541,39 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     await query("UPDATE loan_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
     await saveRemarkAttachment("loan", remarkId, attachment);
     return res.json({ id: remarkId, loanId, remark, remarkCategory: category, attachmentName: attachment?.name });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin", "branch_admin", "staff", "las"]), async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const loanId = Number(req.params.loanId);
+    const remarkId = Number(req.params.remarkId);
+    if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
+      return res.status(400).json({ message: "Invalid loan or remark id" });
+    }
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT lr.created_by, b.branch_id
+       FROM loan_remarks lr
+       INNER JOIN loans l ON l.id = lr.loan_id
+       INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE lr.id = $1 AND lr.loan_id = $2
+       LIMIT 1`,
+      [remarkId, loanId]
+    );
+    const existingRemark = existing.rows[0];
+    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    if (!canManageRemark(user, existingRemark.created_by)) {
+      return res.status(403).json({ message: "You can only delete your own remarks" });
+    }
+    await withTransaction(async client => {
+      await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [remarkId]);
+      await client.query("DELETE FROM loan_remarks WHERE id = $1", [remarkId]);
+    });
+    return res.json({ message: "Remark deleted" });
   } catch (error) {
     return next(error);
   }

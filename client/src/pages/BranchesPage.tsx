@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { PaginationControls } from "../components/PaginationControls";
 import { ToastNotification } from "../components/ToastNotification";
 import { apiRequest } from "../services/api";
 import type { Branch } from "../types/models";
@@ -25,54 +26,6 @@ function computeRowsPerPage(viewportHeight: number): number {
   const rowHeight = 42;
   const rawRows = Math.floor((viewportHeight - reservedHeight) / rowHeight);
   return Math.max(8, Math.min(22, rawRows));
-}
-
-function PaginationControls({
-  currentPage,
-  totalPages,
-  totalItems,
-  pageSize,
-  onPageChange
-}: {
-  currentPage: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalItems === 0) return null;
-
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(totalItems, currentPage * pageSize);
-
-  return (
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-      <p className="text-xs text-slate-600">
-        Showing {startItem}-{endItem} of {totalItems}
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <p className="text-xs font-semibold text-slate-700">
-          Page {currentPage} of {totalPages}
-        </p>
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function BranchField({ label, value }: { label: string; value: string }) {
@@ -393,6 +346,7 @@ export function BranchesPage() {
           {filteredBranches.length === 0 && <p className="p-3 text-sm text-slate-600">No branches yet.</p>}
         </div>
         <PaginationControls
+          className="mt-3 flex flex-wrap items-center justify-between gap-2"
           currentPage={page}
           totalPages={totalPages}
           totalItems={filteredBranches.length}

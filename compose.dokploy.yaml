@@ -11,6 +11,7 @@ services:
       DATABASE_URL: "mysql://collection_app:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in Dokploy Environment}@db:3306/collection_monitoring"
       JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in Dokploy Environment}"
       API_BODY_LIMIT: 25mb
+      TRUST_PROXY: "1"
     depends_on:
       db:
         condition: service_healthy

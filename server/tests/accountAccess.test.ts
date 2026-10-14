@@ -53,6 +53,11 @@ it("lets a super admin change a managed role and grant per-account import permis
   expect(writes[0].sql).toContain("role = $1, permissions = $2");
   expect(writes[0].params).toEqual(["las", '{"import_collections":true}', 2]);
 });
+it("signs an account out everywhere when its password is changed", async () => {
+  const response = await request("/staff/2", "PATCH", { password: "new-password-123" });
+  expect(response.status).toBe(200);
+  expect(writes[0].sql).toMatch(/password_hash = \$1, token_version = token_version \+ 1 WHERE id = \$2/);
+});
 it("creates LAS accounts with selected permissions", async () => {
   const response = await request("/staff", "POST", { username: "specialist", password: "example-password", branchId: 2, role: "las", permissions: { import_collections: true } });
   expect(response.status).toBe(201);
@@ -95,6 +100,9 @@ it("guards collection imports and loan additions independently", async () => {
 it("does not let an import-enabled LAS modify an existing loan in another branch", async () => {
   current = { id: 1, username: "specialist", role: "las", branchId: 2, permissions: { import_collections: true } };
   const transactionQuery = vi.fn().mockImplementation(async (sql: string) => {
+    if (sql.includes("FROM branches")) return { rows: [{ id: 2, code: "BR-2", name: "North" }, { id: 3, code: "BR-3", name: "South" }] };
+    if (sql.includes("branch_remark_imports")) return { rows: [] };
+    if (sql.includes("INSERT INTO loan_import_runs")) return { rows: [] };
     if (sql.includes("FROM borrowers")) return { rows: [{ id: 5, branch_id: 3, cif_key: "MC-005" }] };
     if (sql.includes("FROM loans")) return { rows: [{ id: 9, borrower_id: 5, branch_id: 3, cif_key: "MC-005", loan_account_no: "LN-009" }] };
     throw new Error("Unexpected write to another branch");
@@ -105,6 +113,7 @@ it("does not let an import-enabled LAS modify an existing loan in another branch
   const result = await response.json();
   expect(result.updated).toBe(0);
   expect(result.inserted).toBe(0);
-  expect(result.skippedRows[0].reason).toBe("matched_branch_forbidden");
-  expect(transactionQuery.mock.calls.every(([sql]) => sql.trim().startsWith("SELECT"))).toBe(true);
+  expect(result.skippedRows[0].reason).toBe("Loan LN-009 belongs to BR-3 - South; import it under that branch");
+  // Only reads, plus the upload log entry; nothing in branch 3 is changed.
+  expect(transactionQuery.mock.calls.every(([sql]) => sql.trim().startsWith("SELECT") || sql.includes("INSERT INTO loan_import_runs"))).toBe(true);
 });

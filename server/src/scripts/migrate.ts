@@ -1,54 +1,11 @@
 import { closeDatabase, query, withTransaction } from "../config/db.js";
+import { ensureSchema } from "../services/schema.js";
 
 const RESET_MIGRATION = "20260925_reset_collection_data_for_revised_loan_schema";
 const PAR_STATUS_MIGRATION = "20260925_derive_overdue_status_from_par_age";
 
-async function columnExists(tableName: string, columnName: string) {
-  const result = await query<{ present: number }>(
-    `SELECT COUNT(*) AS present FROM information_schema.columns
-     WHERE table_schema = DATABASE() AND table_name = $1 AND column_name = $2`,
-    [tableName, columnName]
-  );
-  return Number(result.rows[0]?.present ?? 0) > 0;
-}
-
-async function ensureLoanColumns() {
-  if (!(await columnExists("loans", "loan_balance"))) {
-    await query("ALTER TABLE loans ADD COLUMN loan_balance DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER loan_amount");
-  }
-  if (!(await columnExists("loans", "total"))) {
-    await query("ALTER TABLE loans ADD COLUMN total DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER other_charges");
-  }
-}
-
 async function run() {
-  await query(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    id VARCHAR(190) NOT NULL,
-    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
-  ) ENGINE=InnoDB`);
-
-  await ensureLoanColumns();
-  await query(`CREATE TABLE IF NOT EXISTS user_activity_daily (
-  user_id INT UNSIGNED NOT NULL,
-  day DATE NOT NULL,
-  logins INT UNSIGNED NOT NULL DEFAULT 0,
-  visits INT UNSIGNED NOT NULL DEFAULT 0,
-  screen_seconds INT UNSIGNED NOT NULL DEFAULT 0,
-  last_seen_at DATETIME NULL,
-  PRIMARY KEY (user_id, day), KEY idx_user_activity_day (day),
-  CONSTRAINT fk_user_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB`);
-
-  if (!(await columnExists("users", "permissions"))) {
-    await query("ALTER TABLE users ADD COLUMN permissions JSON NULL");
-  }
-  const roleColumn = await query<{ COLUMN_TYPE: string }>(
-    "SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'role'"
-  );
-  if (!roleColumn.rows[0]?.COLUMN_TYPE.includes("'las'")) {
-    await query("ALTER TABLE users MODIFY COLUMN role ENUM('super_admin', 'branch_admin', 'staff', 'las') NOT NULL");
-  }
+  await ensureSchema();
 
   const parStatusApplied = await query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1 LIMIT 1", [PAR_STATUS_MIGRATION]);
   if (parStatusApplied.rowCount === 0) {

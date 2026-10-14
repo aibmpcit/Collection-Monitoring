@@ -57,20 +57,17 @@ export function normalizeRemarkCategory(category: string | undefined): string {
   return REMARK_CATEGORIES.has(candidate) ? candidate : "follow_up_collection";
 }
 
-export function branchAdminPassword(branchCode: string, branchId: number): string {
-  let base = branchCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  if (!base) base = "BRANCH";
-  return `${base.slice(0, 8)}@${String(branchId).padStart(4, "0")}!`;
-}
-
-export function staffPassword(username: string, userId: number): string {
-  let base = username.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  if (!base) base = "STAFF";
-  return `${base.slice(0, 8)}@${String(userId).padStart(4, "0")}!`;
-}
-
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
+}
+
+/**
+ * Who may edit or delete a remark: super admins and branch admins may manage any remark in a
+ * branch they can access (checked separately); collectors and LAS only the remarks they wrote.
+ */
+export function canManageRemark(user: JwtUser, authorId: number | null | undefined): boolean {
+  if (user.role === "super_admin" || user.role === "branch_admin") return true;
+  return authorId != null && Number(authorId) === user.id;
 }
 
 export function isSuperAdmin(user: JwtUser): boolean {
@@ -103,22 +100,6 @@ export function getRequestUser(req: AuthedRequest): JwtUser {
   return req.user;
 }
 
-export async function uniqueBranchAdminUsername(client: QueryClient, branchCode: string, branchId: number): Promise<string> {
-  let base = branchCode.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-  if (!base) base = `branch${branchId}`;
-  let candidate = `${base}_admin`;
-  let suffix = 1;
-
-  while (true) {
-    const existing = await client.query<{ id: number }>("SELECT id FROM users WHERE username = $1 LIMIT 1", [candidate]);
-    if (existing.rowCount === 0) {
-      return candidate;
-    }
-    candidate = `${base}_admin${suffix}`;
-    suffix += 1;
-  }
-}
-
 export async function nextLoanAccountNo(client: QueryClient): Promise<string> {
   const latest = await client.query<{ loan_account_no: string }>(
     "SELECT loan_account_no FROM loans WHERE loan_account_no LIKE 'LAN-%' ORDER BY id DESC LIMIT 1"
@@ -129,17 +110,23 @@ export async function nextLoanAccountNo(client: QueryClient): Promise<string> {
   return `LAN-${String(next).padStart(4, "0")}`;
 }
 
-export function errorResponse(error: unknown) {
-  if (error instanceof Error) {
-    const status = (error as Error & { status?: number }).status ?? 500;
-    return {
-      status,
-      message: error.message || "Internal server error"
-    };
-  }
+const DUPLICATE_MESSAGES: Record<string, string> = {
+  uq_users_username: "That username is already taken",
+  uq_branches_code: "That branch code already exists",
+  uq_loans_account: "That loan account number already exists",
+  uq_borrowers_cif: "That member code already exists"
+};
 
-  return {
-    status: 500,
-    message: "Internal server error"
-  };
+export function errorResponse(error: unknown) {
+  const details = error as (Error & { status?: number; code?: string; sqlMessage?: string }) | undefined;
+  if (details?.code === "ER_DUP_ENTRY") {
+    const key = Object.keys(DUPLICATE_MESSAGES).find(name => details.sqlMessage?.includes(name));
+    return { status: 409, message: key ? DUPLICATE_MESSAGES[key] : "That record already exists" };
+  }
+  const status = error instanceof Error ? details?.status ?? 500 : 500;
+  // Server faults are logged, never shown: they can include SQL and schema details.
+  if (status >= 500 || !(error instanceof Error)) {
+    return { status, message: "Internal server error" };
+  }
+  return { status, message: error.message || "Request failed" };
 }

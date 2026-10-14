@@ -1,5 +1,6 @@
 import mysql, { type Pool, type PoolConnection, type RowDataPacket, type ResultSetHeader } from "mysql2/promise";
 import "./env.js";
+import { APP_TIME_OFFSET } from "./time.js";
 
 export interface QueryResult<T> {
   rows: T[];
@@ -57,6 +58,10 @@ function getDb() {
   }
 
   db = mysql.createPool({ uri: connectionString, connectionLimit: 10, dateStrings: true, decimalNumbers: true });
+  // Queued ahead of any other query on each new connection.
+  db.on("connection", connection => {
+    connection.query("SET time_zone = ?", [APP_TIME_OFFSET]);
+  });
 
   return db;
 }

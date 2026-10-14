@@ -90,6 +90,7 @@ export function LoanDetailsPage() {
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [confirmingRemarkDelete, setConfirmingRemarkDelete] = useState(false);
   const [summaryPayment, setSummaryPayment] = useState<LoanPayment | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const remarkDialogRef = useRef<HTMLDialogElement>(null);
@@ -236,6 +237,24 @@ export function LoanDetailsPage() {
       }
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to add remark.");
+    } finally {
+      setRemarksSubmitting(false);
+    }
+  }
+
+  async function handleDeleteRemark() {
+    if (!loan || !editingRemarkId || remarksSubmitting) return;
+    setRemarksSubmitting(true);
+    setRemarkError("");
+    try {
+      await apiRequest(`/loans/${loan.id}/remarks/${editingRemarkId}`, "DELETE");
+      setEditingRemarkId(null);
+      setConfirmingRemarkDelete(false);
+      setRemarkModalOpen(false);
+      setMessage("Remark deleted.");
+      await loadRemarks(loan.id).catch(() => setError("Remark was deleted, but the list could not be refreshed. Reload the page."));
+    } catch (e) {
+      setRemarkError(e instanceof Error ? e.message : "Unable to delete remark.");
     } finally {
       setRemarksSubmitting(false);
     }
@@ -421,7 +440,16 @@ export function LoanDetailsPage() {
                   Attachment (optional, max 5 MB)
                   <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
                 </label>
-                <div className="flex justify-stretch sm:justify-end">
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                  {editingRemarkId && (confirmingRemarkDelete ? (
+                    <div className="flex flex-wrap items-center gap-2 sm:mr-auto" role="group" aria-label="Confirm remark deletion">
+                      <span className="text-sm text-red-700">Delete this remark?</span>
+                      <button type="button" className="btn-danger h-9 px-3" disabled={remarksSubmitting} onClick={() => void handleDeleteRemark()}>Yes, delete</button>
+                      <button type="button" className="btn-muted h-9 px-3" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(false)}>Keep</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="btn-muted w-full text-red-700 sm:mr-auto sm:w-auto" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(true)}>Delete Remark</button>
+                  ))}
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
                     {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Save Remark"}
                   </button>
@@ -619,6 +647,7 @@ export function LoanDetailsPage() {
                         {item.canEdit !== false && <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
                           event.stopPropagation();
                           setEditingRemarkId(item.id);
+                          setConfirmingRemarkDelete(false);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarkError("");

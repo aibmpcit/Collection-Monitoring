@@ -3,9 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { PaginationControls } from "../components/PaginationControls";
 import { ToastNotification } from "../components/ToastNotification";
 import { apiRequest } from "../services/api";
-import type { OverdueAccount } from "../types/models";
+import type { OverdueAccount, Paged } from "../types/models";
 
 interface DashboardLoan {
   id: number;
@@ -44,28 +45,6 @@ function formatCurrency(value: number | null | undefined): string {
   }
 
   return pesoFormatter.format(value);
-}
-
-function loanOutstanding(loan: DashboardLoan): number {
-  return (
-    (loan.principalDue ?? 0) +
-    (loan.interest ?? 0) +
-    (loan.penaltyDue ?? 0) +
-    (loan.otherCharges ?? 0)
-  );
-}
-
-function daysUntil(dateText: string): number | null {
-  const due = new Date(dateText);
-  if (Number.isNaN(due.getTime())) {
-    return null;
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-
-  return Math.round((due.getTime() - today.getTime()) / 86400000);
 }
 
 function dueLabel(daysUntilDue: number): string {
@@ -125,49 +104,11 @@ function OverdueField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PaginationControls({
-  currentPage,
-  totalPages,
-  totalItems,
-  pageSize,
-  onPageChange
-}: {
-  currentPage: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalItems === 0) return null;
-
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(totalItems, currentPage * pageSize);
-
-  return (
-    <div className="pagination-bar mt-3">
-      <p className="text-xs text-slate-600">
-        Showing {startItem}-{endItem} of {totalItems}
-      </p>
-      <div className="flex items-center gap-2">
-        <button type="button" className="btn-muted btn-page" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage <= 1}>
-          Previous
-        </button>
-        <p className="text-xs font-semibold text-slate-700">
-          Page {currentPage} of {totalPages}
-        </p>
-        <button type="button" className="btn-muted btn-page" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage >= totalPages}>
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function OverdueReportPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [rows, setRows] = useState<OverdueAccount[]>([]);
-  const [loans, setLoans] = useState<DashboardLoan[]>([]);
+  const [dueSoon, setDueSoon] = useState<Paged<DueSoonLoan> | null>(null);
   const [error, setError] = useState("");
   const [dueSoonPage, setDueSoonPage] = useState(1);
   const [overduePage, setOverduePage] = useState(1);
@@ -178,9 +119,8 @@ export function OverdueReportPage() {
     let active = true;
 
     async function load() {
-      const [overdueResult, loansResult] = await Promise.allSettled([
-        apiRequest<OverdueAccount[]>("/reports/overdue"),
-        apiRequest<DashboardLoan[]>("/loans")
+      const [overdueResult] = await Promise.allSettled([
+        apiRequest<OverdueAccount[]>("/reports/overdue")
       ]);
 
       if (!active) return;
@@ -191,19 +131,8 @@ export function OverdueReportPage() {
         setRows([]);
       }
 
-      if (loansResult.status === "fulfilled") {
-        setLoans(loansResult.value);
-      } else {
-        setLoans([]);
-      }
-
       if (overdueResult.status === "rejected") {
         setError(overdueResult.reason instanceof Error ? overdueResult.reason.message : "Unable to load overdue report.");
-        return;
-      }
-
-      if (loansResult.status === "rejected") {
-        setError(loansResult.reason instanceof Error ? loansResult.reason.message : "Unable to load upcoming due accounts.");
         return;
       }
 
@@ -223,43 +152,38 @@ export function OverdueReportPage() {
     return { count, totalOutstanding, highest };
   }, [rows]);
 
-  const dueSoonRows = useMemo<DueSoonLoan[]>(
-    () =>
-      loans
-        .filter((loan) => loan.status !== "closed")
-        .map((loan) => {
-          const daysUntilDue = daysUntil(loan.maturityDate);
-          return {
-            ...loan,
-            daysUntilDue: daysUntilDue ?? Number.MAX_SAFE_INTEGER,
-            outstanding: loanOutstanding(loan)
-          };
-        })
-        .filter((loan) => loan.daysUntilDue !== Number.MAX_SAFE_INTEGER && loan.daysUntilDue >= 0)
-        .sort((a, b) => a.daysUntilDue - b.daysUntilDue || b.outstanding - a.outstanding),
-    [loans]
-  );
+  // Upcoming accounts are paged by the server, soonest first.
+  useEffect(() => {
+    let active = true;
+    apiRequest<Paged<DueSoonLoan>>(`/loans/due-soon?page=${dueSoonPage}&pageSize=${TABLE_PAGE_SIZE}`)
+      .then(result => {
+        if (!active) return;
+        setDueSoon(result);
+        if (result.page !== dueSoonPage) setDueSoonPage(result.page);
+      })
+      .catch(e => {
+        if (!active) return;
+        setDueSoon(null);
+        setError(e instanceof Error ? e.message : "Unable to load upcoming due accounts.");
+      });
+    return () => { active = false; };
+  }, [dueSoonPage]);
+
+  const dueSoonTotal = dueSoon?.total ?? 0;
 
   const overdueRows = useMemo(
     () => [...rows].sort((a, b) => b.daysOverdue - a.daysOverdue || b.totalOutstanding - a.totalOutstanding),
     [rows]
   );
 
-  const totalDueSoonPages = Math.max(1, Math.ceil(dueSoonRows.length / TABLE_PAGE_SIZE));
+  const totalDueSoonPages = Math.max(1, Math.ceil(dueSoonTotal / TABLE_PAGE_SIZE));
   const totalOverduePages = Math.max(1, Math.ceil(overdueRows.length / TABLE_PAGE_SIZE));
-
-  useEffect(() => {
-    setDueSoonPage((current) => Math.min(current, totalDueSoonPages));
-  }, [totalDueSoonPages]);
 
   useEffect(() => {
     setOverduePage((current) => Math.min(current, totalOverduePages));
   }, [totalOverduePages]);
 
-  const paginatedDueSoonRows = useMemo(() => {
-    const start = (dueSoonPage - 1) * TABLE_PAGE_SIZE;
-    return dueSoonRows.slice(start, start + TABLE_PAGE_SIZE);
-  }, [dueSoonPage, dueSoonRows]);
+  const paginatedDueSoonRows = dueSoon?.items ?? [];
 
   const paginatedOverdueRows = useMemo(() => {
     const start = (overduePage - 1) * TABLE_PAGE_SIZE;
@@ -407,6 +331,7 @@ export function OverdueReportPage() {
         </div>
 
         <PaginationControls
+          className="pagination-bar mt-3"
           currentPage={overduePage}
           totalPages={totalOverduePages}
           totalItems={overdueRows.length}
@@ -420,7 +345,7 @@ export function OverdueReportPage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Upcoming Due Accounts</h2>
           </div>
-          <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+          <span className="glass-pill">{dueSoonTotal} upcoming account(s)</span>
         </div>
 
         <div className="mobile-record-list md:hidden">
@@ -451,7 +376,7 @@ export function OverdueReportPage() {
               </div>
             </article>
           ))}
-          {dueSoonRows.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No upcoming due accounts found.</p>}
+          {dueSoonTotal === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No upcoming due accounts found.</p>}
         </div>
 
         <div className="table-shell hidden md:block">
@@ -488,7 +413,7 @@ export function OverdueReportPage() {
                   <td>{formatCurrency(loan.outstanding)}</td>
                 </tr>
               ))}
-              {dueSoonRows.length === 0 && (
+              {dueSoonTotal === 0 && (
                 <tr>
                   <td colSpan={5} className="py-4 text-sm text-slate-600">
                     No upcoming due accounts found.
@@ -500,9 +425,10 @@ export function OverdueReportPage() {
         </div>
 
         <PaginationControls
+          className="pagination-bar mt-3"
           currentPage={dueSoonPage}
           totalPages={totalDueSoonPages}
-          totalItems={dueSoonRows.length}
+          totalItems={dueSoonTotal}
           pageSize={TABLE_PAGE_SIZE}
           onPageChange={setDueSoonPage}
         />

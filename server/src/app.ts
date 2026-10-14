@@ -19,7 +19,20 @@ import "./config/env.js";
 
 const app = express();
 
-app.use(cors());
+// Behind a reverse proxy (Dokploy/Traefik), TRUST_PROXY=1 makes req.ip the real client address
+// so login limits apply per visitor rather than to the proxy.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set("trust proxy", Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+}
+
+// Production serves the UI from the same origin, so cross-origin access is off unless CORS_ORIGIN lists sites.
+const corsOrigins = (process.env.CORS_ORIGIN ?? "").split(",").map(origin => origin.trim()).filter(Boolean);
+if (corsOrigins.length) {
+  app.use(cors({ origin: corsOrigins }));
+} else if (process.env.NODE_ENV !== "production") {
+  app.use(cors());
+}
 const bodyLimit = process.env.API_BODY_LIMIT ?? "25mb";
 
 app.use(express.json({ limit: bodyLimit }));

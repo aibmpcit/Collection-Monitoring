@@ -1,7 +1,6 @@
-import { RemarkImport } from "../components/RemarkImport";
 import { hasPermission } from "../services/permissions";
-import { Download, MoreVertical, Search, Upload } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { MoreVertical, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -13,298 +12,17 @@ import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
-import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark } from "../types/models";
+import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark, Paged } from "../types/models";
+import { PaginationControls } from "../components/PaginationControls";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { computeRowsPerPage, EMPTY_FORM, formatCurrency, formatDate, formatDateTime, loanStatusClass } from "./loans/format";
+import { LoanImportDialog } from "./loans/LoanImportDialog";
+import { LoanRecordField } from "./loans/LoanRecordField";
+import { PaymentRecordsPanel } from "./loans/PaymentRecordsPanel";
+import { RemarkRecordsPanel } from "./loans/RemarkRecordsPanel";
+import type { LoanListPage, LoanQuickRef, LoanRow, PaymentRecordRow, RemarkGroupRow, RemarkRecordRow } from "./loans/types";
 
-interface LoanRow extends LoanPayload {
-  id: number;
-  branchId?: number;
-  cifKey: string;
-  memberName: string;
-  contactInfo: string;
-  address: string;
-  importedAt: string;
-  latestRemarks: Array<{ remark: string; remarkCategory: string }>;
-}
-
-interface PaymentRecordRow {
-  id: number;
-  paymentId: string;
-  loanId: number;
-  branchId?: number;
-  loanAccountNo: string;
-  cifKey: string;
-  memberName: string;
-  amount: number;
-  orNo: string;
-  collectedBy: string;
-  collectedAt: string;
-}
-
-interface RemarkRecordRow {
-  id: number;
-  kind: "loan_remark" | "member_remark";
-  branch_id?: number;
-  branch_name?: string | null;
-  loan_id?: number | null;
-  loan_account_no?: string | null;
-  loan_type?: string | null;
-  loan_status?: string | null;
-  maturity_date?: string | null;
-  member_id: number;
-  member_name: string;
-  cif_key?: string | null;
-  contact_info?: string | null;
-  address?: string | null;
-  category?: string | null;
-  remark: string;
-  collector_name?: string | null;
-  occurred_at: string;
-  attachment_name?: string | null;
-}
-
-interface LoanQuickRef {
-  id: number;
-  loanAccountNo: string;
-  memberName: string;
-}
-
-interface LoanImportSkipRow {
-  row: number;
-  loanId: number;
-  memberId: number;
-  loanAccountNo: string;
-  cifKey: string;
-  reason: string;
-}
-
-let xlsxLoader: Promise<typeof import("xlsx")> | null = null;
-
-function loadXlsx() {
-  xlsxLoader ??= import("xlsx");
-  return xlsxLoader;
-}
-
-function parseMoney(value: unknown): number {
-  const raw = String(value ?? "").trim();
-  if (!raw) return 0;
-  const cleaned = raw.replace(/,/g, "");
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function parseInteger(value: unknown): number {
-  const raw = String(value ?? "").trim();
-  if (!raw) return 0;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function parseWholeNumber(value: unknown): number {
-  const raw = String(value ?? "").trim();
-  if (!raw) return 0;
-  const cleaned = raw.replace(/,/g, "");
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
-}
-
-function normalizeImportedLoanStatus(value: unknown): string {
-  const raw = String(value ?? "")
-    .trim()
-    .toLowerCase();
-
-  if (!raw) return "active";
-  if (["active", "current", "open"].includes(raw)) return "active";
-  if (["closed", "paid", "fully paid", "complete", "completed", "settled"].includes(raw)) return "closed";
-  if (["overdue", "past due", "pastdue", "delinquent"].includes(raw)) return "overdue";
-  return raw;
-}
-
-function formatLoanImportSkipReason(reason: string): string {
-  if (reason.includes(":")) return reason;
-  return reason.replace(/_/g, " ");
-}
-
-function describeLoanImportSkip(item: LoanImportSkipRow): string {
-  const identity = item.loanAccountNo || item.cifKey || (item.loanId > 0 ? `loan ${item.loanId}` : `member ${item.memberId}`);
-  return `Row ${item.row}${identity ? ` (${identity})` : ""}: ${formatLoanImportSkipReason(item.reason)}`;
-}
-
-// [header, guidance, example]; headers match what handleLoanFileUpload reads.
-const LOAN_IMPORT_TEMPLATE: [string, string, string][] = [
-  ["Member Code", "Member's CIF / member code", "CIF-000123"],
-  ["Member Name", "Full name of the member", "Juan Dela Cruz"],
-  ["Address", "Member's address", "Brgy. Poblacion, Altavas"],
-  ["Contact No.", "Mobile or phone number", "09171234567"],
-  ["Loan Account Number", "Unique loan account number", "LN-2026-0001"],
-  ["Loan Product", "Loan type or product name", "Salary Loan"],
-  ["Release Date", "Date released (YYYY-MM-DD or MM/DD/YYYY)", "2026-01-15"],
-  ["Maturity", "Maturity date (YYYY-MM-DD or MM/DD/YYYY)", "2027-01-15"],
-  ["Loan Amount", "Original loan amount, numbers only", "50000"],
-  ["Loan Balance", "Remaining balance, numbers only", "32000"],
-  ["Principal Arrears", "Principal past due, numbers only", "2500"],
-  ["Interest", "Interest due, numbers only", "350"],
-  ["Fines", "Penalty / fines due, numbers only", "120"],
-  ["Total", "Total amount due, numbers only", "2970"],
-  ["PAR Age", "Days past due as a whole number; above 0 marks the loan overdue", "15"]
-];
-
-function normalizeDate(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-
-  if (/^\d+(\.\d+)?$/.test(raw)) {
-    const serial = Number(raw);
-    if (Number.isFinite(serial) && serial > 0) {
-      const utcDays = Math.floor(serial - 25569);
-      const utcValue = utcDays * 86400 * 1000;
-      const parsed = new Date(utcValue);
-      if (!Number.isNaN(parsed.getTime())) {
-        const y = parsed.getUTCFullYear();
-        const m = String(parsed.getUTCMonth() + 1).padStart(2, "0");
-        const d = String(parsed.getUTCDate()).padStart(2, "0");
-        return `${y}-${m}-${d}`;
-      }
-    }
-  }
-
-  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (isoMatch) {
-    const [, y, first, second] = isoMatch;
-    const firstNumber = Number(first);
-    const secondNumber = Number(second);
-    const month = firstNumber > 12 && secondNumber <= 12 ? second : first;
-    const day = firstNumber > 12 && secondNumber <= 12 ? first : second;
-    return `${y}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  const slashMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-  if (slashMatch) {
-    const [, first, second, y] = slashMatch;
-    const firstNumber = Number(first);
-    const secondNumber = Number(second);
-    const month = firstNumber > 12 && secondNumber <= 12 ? second : first;
-    const day = firstNumber > 12 && secondNumber <= 12 ? first : second;
-    return `${y}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) {
-    const y = parsed.getFullYear();
-    const m = String(parsed.getMonth() + 1).padStart(2, "0");
-    const d = String(parsed.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
-
-  return "";
-}
-
-const pesoFormatter = new Intl.NumberFormat("en-PH", {
-  style: "currency",
-  currency: "PHP",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-});
-
-function formatCurrency(value: number): string {
-  return pesoFormatter.format(value || 0);
-}
-
-function formatDate(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
-}
-
-function formatDateTime(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString();
-}
-
-const EMPTY_FORM: LoanPayload = {
-  borrowerId: 0,
-  loanAccountNo: "",
-  loanType: "",
-  dateRelease: "",
-  maturityDate: "",
-  loanAmount: 0,
-  loanBalance: 0,
-  principalDue: 0,
-  penaltyDue: 0,
-  interest: 0,
-  otherCharges: 0,
-  total: 0,
-  parAge: 0,
-  status: "active",
-  notes: ""
-};
-
-function computeRowsPerPage(viewportHeight: number): number {
-  // Keep pagination consistent across screen sizes.
-  void viewportHeight;
-  return 15;
-}
-
-function PaginationControls({
-  currentPage,
-  totalPages,
-  totalItems,
-  pageSize,
-  onPageChange
-}: {
-  currentPage: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalItems === 0) return null;
-
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(totalItems, currentPage * pageSize);
-
-  return (
-    <div className="pagination-bar">
-      <p className="text-xs text-slate-600">
-        Showing {startItem}-{endItem} of {totalItems}
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <p className="text-xs font-semibold text-slate-700">
-          Page {currentPage} of {totalPages}
-        </p>
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function loanStatusClass(status: string): string {
-  if (status === "overdue") return "status-danger";
-  if (status === "closed") return "status-warning";
-  return "status-success";
-}
-
-function LoanRecordField({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="mobile-record-field">
-      <p className="mobile-record-label">{label}</p>
-      <div className="mobile-record-value">{value}</div>
-    </div>
-  );
-}
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function LoansPage() {
   const { user } = useAuth();
@@ -320,7 +38,16 @@ export function LoansPage() {
   const canUseLoanActions = canEditLoans;
   const [members, setMembers] = useState<Borrower[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  // Loans and payments hold only the current page; the server filters, sorts and counts.
   const [loans, setLoans] = useState<LoanRow[]>([]);
+  const [loanTotal, setLoanTotal] = useState(0);
+  const [loanTypeOptions, setLoanTypeOptions] = useState<string[]>([]);
+  const [latestImportedAt, setLatestImportedAt] = useState("");
+  const [lastImport, setLastImport] = useState<LoanListPage["lastImport"]>(null);
+  const [paymentTotal, setPaymentTotal] = useState(0);
+  const [listRefresh, setListRefresh] = useState(0);
+  const loanRequestRef = useRef(0);
+  const paymentRequestRef = useRef(0);
   const [form, setForm] = useState<LoanPayload>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -330,9 +57,6 @@ export function LoansPage() {
   const [error, setError] = useState("");
   const [importMessage, setImportMessage] = useState("");
   const [importBranchError, setImportBranchError] = useState("");
-  const [loanImportFile, setLoanImportFile] = useState<File | null>(null);
-  const [loanImportInputKey, setLoanImportInputKey] = useState(0);
-  const [isImportPending, setIsImportPending] = useState(false);
   const [remarkLoan, setRemarkLoan] = useState<Pick<LoanRow, "id" | "loanAccountNo" | "memberName"> | null>(null);
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
@@ -351,7 +75,9 @@ export function LoansPage() {
   );
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentQuery, setPaymentQuery] = useState("");
-  const [remarkRecords, setRemarkRecords] = useState<RemarkRecordRow[]>([]);
+  const [remarkRecords, setRemarkRecords] = useState<RemarkGroupRow[]>([]);
+  const [remarkTotal, setRemarkTotal] = useState(0);
+  const remarkRequestRef = useRef(0);
   const canDeleteRemarks = canDeletePayments;
   const [selectedRemarkLoans, setSelectedRemarkLoans] = useState<number[]>([]);
   const [remarkDeleteIds, setRemarkDeleteIds] = useState<number[]>([]);
@@ -407,120 +133,15 @@ export function LoansPage() {
     [members, form.borrowerId]
   );
 
-  const filteredLoans = useMemo(() => {
-    const q = loanQuery.trim().toLowerCase();
-    const matches = loans.filter((loan) => {
-      if (loan.status === "closed") return false;
-      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId;
-      if (!matchesBranch) return false;
-      if (loanTypeFilter && loan.loanType !== loanTypeFilter) return false;
-      if (parAgeFilter) {
-        const parAge = Number(loan.parAge ?? 0);
-        const matchesParAge =
-          parAgeFilter === "1-30" ? parAge >= 1 && parAge <= 30 :
-          parAgeFilter === "31-60" ? parAge >= 31 && parAge <= 60 :
-          parAgeFilter === "61-90" ? parAge >= 61 && parAge <= 90 :
-          parAgeFilter === "91-180" ? parAge >= 91 && parAge <= 180 :
-          parAgeFilter === "181-365" ? parAge >= 181 && parAge <= 365 :
-          parAgeFilter === "over-365" ? parAge > 365 : true;
-        if (!matchesParAge) return false;
-      }
-      if (!q) return true;
+  const debouncedLoanQuery = useDebouncedValue(loanQuery.trim(), SEARCH_DEBOUNCE_MS);
+  const debouncedPaymentQuery = useDebouncedValue(paymentQuery.trim(), SEARCH_DEBOUNCE_MS);
+  const branchFilterId = user?.role === "super_admin" && selectedBranchId > 0 ? selectedBranchId : 0;
 
-      return [
-        loan.cifKey,
-        loan.loanAccountNo,
-        loan.memberName,
-        loan.loanType,
-        loan.status,
-        loan.contactInfo,
-        loan.address,
-        loan.notes ?? ""
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
-    });
-
-    return [...matches].sort(
-      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.loanAccountNo.localeCompare(b.loanAccountNo, undefined, { sensitivity: "base" })
-    );
-  }, [loanQuery, loanTypeFilter, loans, parAgeFilter, selectedBranchId, user?.role]);
-
-  const loanTypeOptions = useMemo(() => {
-    const types = loans
-      .filter((loan) => user?.role !== "super_admin" || selectedBranchId <= 0 || Number(loan.branchId ?? 0) === selectedBranchId)
-      .map((loan) => loan.loanType.trim())
-      .filter(Boolean);
-    return [...new Set(types)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [loans, selectedBranchId, user?.role]);
-
-  const latestImportedAt = useMemo(() => {
-    return loans.reduce<string>((latest, loan) => {
-      const currentTime = new Date(loan.importedAt).getTime();
-      const latestTime = latest ? new Date(latest).getTime() : Number.NEGATIVE_INFINITY;
-      return Number.isNaN(currentTime) || currentTime <= latestTime ? latest : loan.importedAt;
-    }, "");
-  }, [loans]);
-
-  const filteredPaymentRecords = useMemo(() => {
-    const q = paymentQuery.trim().toLowerCase();
-    const matches = paymentRecords.filter((row) => {
-      const matchesBranch = user?.role !== "super_admin" || selectedBranchId <= 0 || Number(row.branchId ?? 0) === selectedBranchId;
-      if (!matchesBranch) return false;
-      if (!q) return true;
-
-      return [
-        row.paymentId,
-        row.orNo ?? "",
-        row.collectedBy ?? "",
-        row.loanAccountNo,
-        row.cifKey,
-        row.memberName,
-        String(row.amount),
-        row.collectedAt
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
-    });
-
-    return [...matches].sort(
-      (a, b) => a.memberName.localeCompare(b.memberName, undefined, { sensitivity: "base" }) || a.paymentId.localeCompare(b.paymentId, undefined, { sensitivity: "base" })
-    );
-  }, [paymentQuery, paymentRecords, selectedBranchId, user?.role]);
-
-  const filteredRemarkRecords = useMemo(() => {
-    const q = remarkQuery.trim().toLowerCase();
-    const grouped = new Map<number, { latest: RemarkRecordRow; recent: RemarkRecordRow[]; matchesQuery: boolean }>();
-    for (const row of remarkRecords) {
-      if (row.kind !== "loan_remark" || !row.loan_id || !row.remark.trim()) continue;
-      // Deleted loans are archived as closed; their history stays available in Collector History.
-      if (row.loan_status === "closed") continue;
-      if (user?.role === "super_admin" && selectedBranchId > 0 && Number(row.branch_id ?? 0) !== selectedBranchId) continue;
-      const matchesQuery = !q || [row.member_name, row.loan_account_no ?? "", row.loan_type ?? "", getRemarkCategoryLabel(row.category), row.remark, row.collector_name ?? ""].join(" ").toLowerCase().includes(q);
-      const group = grouped.get(row.loan_id);
-      if (!group) {
-        grouped.set(row.loan_id, { latest: row, recent: [row], matchesQuery });
-      } else {
-        group.recent = [...group.recent, row]
-          .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime() || b.id - a.id)
-          .slice(0, 2);
-        group.matchesQuery ||= matchesQuery;
-        if (new Date(row.occurred_at).getTime() > new Date(group.latest.occurred_at).getTime() ||
-            (row.occurred_at === group.latest.occurred_at && row.id > group.latest.id)) group.latest = row;
-      }
-    }
-    return [...grouped.values()]
-      .filter(group => group.matchesQuery)
-      .map(group => ({ ...group.latest, recentRemarks: group.recent }))
-      .sort((a, b) => a.member_name.localeCompare(b.member_name, undefined, { sensitivity: "base" }) ||
-        (a.loan_account_no ?? "").localeCompare(b.loan_account_no ?? "", undefined, { sensitivity: "base" }));
-  }, [remarkQuery, remarkRecords, selectedBranchId, user?.role]);
+  const debouncedRemarkQuery = useDebouncedValue(remarkQuery.trim(), SEARCH_DEBOUNCE_MS);
 
   useEffect(() => {
     setSelectedRemarkLoans([]);
-  }, [selectedBranchId, remarkRecords]);
+  }, [branchFilterId, listRefresh]);
 
   function toggleRemarkLoan(id: number, checked: boolean) {
     setSelectedRemarkLoans(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
@@ -546,9 +167,9 @@ export function LoansPage() {
     navigate(`/loan-details/${row.loan_id}?tab=remarks&from=remarks&remarkId=${row.id}`);
   }
 
-  const totalLoanPages = Math.max(1, Math.ceil(filteredLoans.length / rowsPerPage));
-  const totalPaymentPages = Math.max(1, Math.ceil(filteredPaymentRecords.length / rowsPerPage));
-  const totalRemarkPages = Math.max(1, Math.ceil(filteredRemarkRecords.length / rowsPerPage));
+  const totalLoanPages = Math.max(1, Math.ceil(loanTotal / rowsPerPage));
+  const totalPaymentPages = Math.max(1, Math.ceil(paymentTotal / rowsPerPage));
+  const totalRemarkPages = Math.max(1, Math.ceil(remarkTotal / rowsPerPage));
 
   useEffect(() => {
     function handleResize() {
@@ -562,15 +183,15 @@ export function LoansPage() {
 
   useEffect(() => {
     setLoanPage(1);
-  }, [loanQuery, loanTypeFilter, parAgeFilter]);
+  }, [debouncedLoanQuery, loanTypeFilter, parAgeFilter, branchFilterId]);
 
   useEffect(() => {
     setPaymentPage(1);
-  }, [paymentQuery]);
+  }, [debouncedPaymentQuery, branchFilterId]);
 
   useEffect(() => {
     setRemarkRecordsPage(1);
-  }, [remarkQuery]);
+  }, [debouncedRemarkQuery, branchFilterId]);
 
   useEffect(() => {
     setLoanPage((current) => Math.min(current, totalLoanPages));
@@ -651,32 +272,16 @@ export function LoansPage() {
     }
   }, [availableLoanMembers, form.borrowerId]);
 
-  const paginatedLoans = useMemo(() => {
-    const start = (loanPage - 1) * rowsPerPage;
-    return filteredLoans.slice(start, start + rowsPerPage);
-  }, [filteredLoans, loanPage, rowsPerPage]);
+  const paginatedLoans = loans;
+  const paginatedPaymentRecords = paymentRecords;
 
-  const paginatedPaymentRecords = useMemo(() => {
-    const start = (paymentPage - 1) * rowsPerPage;
-    return filteredPaymentRecords.slice(start, start + rowsPerPage);
-  }, [filteredPaymentRecords, paymentPage, rowsPerPage]);
-
-  const paginatedRemarkRecords = useMemo(() => {
-    const start = (remarkRecordsPage - 1) * rowsPerPage;
-    return filteredRemarkRecords.slice(start, start + rowsPerPage);
-  }, [filteredRemarkRecords, remarkRecordsPage, rowsPerPage]);
+  const paginatedRemarkRecords = remarkRecords;
   const selectedLoanIdSet = useMemo(() => new Set(selectedLoanIds), [selectedLoanIds]);
-  const selectedPaymentIdSet = useMemo(() => new Set(selectedPaymentIds), [selectedPaymentIds]);
   const paginatedLoanIds = useMemo(() => paginatedLoans.map((loan) => loan.id), [paginatedLoans]);
   const paginatedPaymentIds = useMemo(() => paginatedPaymentRecords.map((row) => row.id), [paginatedPaymentRecords]);
-  const filteredLoanIds = useMemo(() => filteredLoans.map((loan) => loan.id), [filteredLoans]);
-  const filteredPaymentIds = useMemo(() => filteredPaymentRecords.map((row) => row.id), [filteredPaymentRecords]);
   const hasAnyLoanSelection = selectedLoanIds.length > 0;
-  const hasAnyPaymentSelection = selectedPaymentIds.length > 0;
   const hasLoanPageRows = paginatedLoanIds.length > 0;
-  const hasPaymentPageRows = paginatedPaymentIds.length > 0;
   const allLoanPageSelected = hasLoanPageRows && paginatedLoanIds.every((id) => selectedLoanIdSet.has(id));
-  const allPaymentPageSelected = hasPaymentPageRows && paginatedPaymentIds.every((id) => selectedPaymentIdSet.has(id));
 
   const activeMenuLoan = useMemo(
     () => (openMenuLoan ? loans.find((loan) => loan.id === openMenuLoan.loanId) ?? null : null),
@@ -710,43 +315,163 @@ export function LoansPage() {
     setMembersNeedRefresh(false);
   }
 
-  async function loadLoans() {
-    const loanData = await apiRequest<LoanRow[]>("/loans");
-    setLoans(loanData);
+  function loanFilterParams() {
+    const params = new URLSearchParams();
+    if (debouncedLoanQuery) params.set("search", debouncedLoanQuery);
+    if (loanTypeFilter) params.set("loanType", loanTypeFilter);
+    if (parAgeFilter) params.set("parAge", parAgeFilter);
+    if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
+    return params;
   }
 
-  async function loadData() {
-    const [memberData, loanData, paymentsData, branchData, remarksData] = await Promise.all([
+  function paymentFilterParams() {
+    const params = new URLSearchParams();
+    if (debouncedPaymentQuery) params.set("search", debouncedPaymentQuery);
+    if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
+    return params;
+  }
+
+  // Only the newest request may update the list, so fast typing never shows stale results.
+  async function loadLoanPage() {
+    const request = ++loanRequestRef.current;
+    const params = loanFilterParams();
+    params.set("page", String(loanPage));
+    params.set("pageSize", String(rowsPerPage));
+    try {
+      const result = await apiRequest<LoanListPage>(`/loans?${params}`);
+      if (request !== loanRequestRef.current) return;
+      setLoans(result.items);
+      setLoanTotal(result.total);
+      setLoanTypeOptions(result.loanTypes);
+      setLatestImportedAt(result.latestImportedAt);
+      setLastImport(result.lastImport ?? null);
+      if (result.page !== loanPage) setLoanPage(result.page);
+    } catch (e) {
+      if (request === loanRequestRef.current) setError(e instanceof Error ? e.message : "Unable to load loans");
+    }
+  }
+
+  async function loadPaymentPage() {
+    const request = ++paymentRequestRef.current;
+    const params = paymentFilterParams();
+    params.set("page", String(paymentPage));
+    params.set("pageSize", String(rowsPerPage));
+    try {
+      const result = await apiRequest<Paged<PaymentRecordRow>>(`/payments?${params}`);
+      if (request !== paymentRequestRef.current) return;
+      setPaymentRecords(result.items);
+      setPaymentTotal(result.total);
+      if (result.page !== paymentPage) setPaymentPage(result.page);
+    } catch {
+      if (request === paymentRequestRef.current) { setPaymentRecords([]); setPaymentTotal(0); }
+    }
+  }
+
+  function remarkFilterParams() {
+    const params = new URLSearchParams();
+    if (debouncedRemarkQuery) {
+      params.set("search", debouncedRemarkQuery);
+      // Category labels are client-side, so send the keys whose label matches the search.
+      const query = debouncedRemarkQuery.toLowerCase();
+      const categories = REMARK_CATEGORIES.filter(category => category.label.toLowerCase().includes(query)).map(category => category.value);
+      if (categories.length) params.set("categories", categories.join(","));
+    }
+    if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
+    return params;
+  }
+
+  async function loadRemarkPage() {
+    const request = ++remarkRequestRef.current;
+    const params = remarkFilterParams();
+    params.set("page", String(remarkRecordsPage));
+    params.set("pageSize", String(rowsPerPage));
+    try {
+      const result = await apiRequest<Paged<RemarkGroupRow>>(`/loans/remarked?${params}`);
+      if (request !== remarkRequestRef.current) return;
+      setRemarkRecords(result.items);
+      setRemarkTotal(result.total);
+      if (result.page !== remarkRecordsPage) setRemarkRecordsPage(result.page);
+    } catch {
+      if (request === remarkRequestRef.current) { setRemarkRecords([]); setRemarkTotal(0); }
+    }
+  }
+
+  async function selectAllMatchingRemarkLoans() {
+    const params = remarkFilterParams();
+    params.set("idsOnly", "true");
+    try {
+      const result = await apiRequest<{ ids: number[] }>(`/loans/remarked?${params}`);
+      setSelectedRemarkLoans(result.ids);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to select remarks");
+    }
+  }
+
+  // Deleting covers every remark on the selected loans, including ones not shown in the list.
+  async function requestRemarkDelete() {
+    try {
+      const result = await apiRequest<{ ids: number[] }>("/loans/remarked/remark-ids", "POST", { loanIds: selectedRemarkLoans });
+      setRemarkDeleteIds(result.ids);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to prepare remark deletion");
+    }
+  }
+
+  async function selectAllMatchingLoans() {
+    const params = loanFilterParams();
+    params.set("idsOnly", "true");
+    try {
+      const result = await apiRequest<{ ids: number[] }>(`/loans?${params}`);
+      setSelectedLoanIds(result.ids);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to select loans");
+    }
+  }
+
+  async function selectAllMatchingPayments() {
+    const params = paymentFilterParams();
+    params.set("idsOnly", "true");
+    try {
+      const result = await apiRequest<{ ids: number[] }>(`/payments?${params}`);
+      setSelectedPaymentIds(result.ids);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to select payments");
+    }
+  }
+
+  useEffect(() => {
+    void loadLoanPage();
+  }, [loanPage, rowsPerPage, debouncedLoanQuery, loanTypeFilter, parAgeFilter, branchFilterId, listRefresh]);
+
+  useEffect(() => {
+    void loadPaymentPage();
+  }, [paymentPage, rowsPerPage, debouncedPaymentQuery, branchFilterId, listRefresh]);
+
+  useEffect(() => {
+    if (isCollector) return;
+    void loadRemarkPage();
+  }, [remarkRecordsPage, rowsPerPage, debouncedRemarkQuery, branchFilterId, listRefresh, isCollector]);
+
+  // The list effects already load on first render, so only later reloads ask them to refresh.
+  async function loadData(refreshLists = true) {
+    const [memberData, branchData] = await Promise.all([
       apiRequest<Borrower[]>("/borrowers"),
-      apiRequest<LoanRow[]>("/loans"),
-      apiRequest<PaymentRecordRow[]>("/payments").catch(() => []),
-      apiRequest<Branch[]>("/branches").catch(() => []),
-      apiRequest<{ items: RemarkRecordRow[] }>("/collection-history?type=remarks&export=true").catch(() => ({ items: [] }))
+      apiRequest<Branch[]>("/branches").catch(() => [])
     ]);
     setMembers(memberData);
     setMembersNeedRefresh(false);
-    setLoans(loanData);
-    setPaymentRecords(paymentsData);
     setBranches(branchData);
-    setRemarkRecords(remarksData.items);
+    if (refreshLists) setListRefresh((value) => value + 1);
   }
 
   async function refreshLoanImportData() {
-    await loadLoans();
+    setListRefresh((value) => value + 1);
     setMembersNeedRefresh(true);
   }
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, []);
-
-  useEffect(() => {
-    setSelectedLoanIds((current) => current.filter((id) => loans.some((loan) => loan.id === id)));
-  }, [loans]);
-
-  useEffect(() => {
-    setSelectedPaymentIds((current) => current.filter((id) => paymentRecords.some((row) => row.id === id)));
-  }, [paymentRecords]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -771,119 +496,6 @@ export function LoansPage() {
     }
   }
 
-  function handleLoanFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    setLoanImportFile(file);
-    setError("");
-    setImportMessage("");
-  }
-
-  async function downloadLoanTemplate() {
-    try {
-      const XLSX = await loadXlsx();
-      const workbook = XLSX.utils.book_new();
-      // The importer reads only the first sheet, so the blank loan sheet must come first.
-      const loans = XLSX.utils.aoa_to_sheet([LOAN_IMPORT_TEMPLATE.map(([header]) => header)]);
-      loans["!cols"] = LOAN_IMPORT_TEMPLATE.map(([header]) => ({ wch: Math.max(14, header.length + 2) }));
-      XLSX.utils.book_append_sheet(workbook, loans, "Loans");
-      const guide = XLSX.utils.aoa_to_sheet([
-        ["Column", "What to enter", "Example"],
-        ...LOAN_IMPORT_TEMPLATE
-      ]);
-      guide["!cols"] = [{ wch: 22 }, { wch: 60 }, { wch: 22 }];
-      XLSX.utils.book_append_sheet(workbook, guide, "Instructions");
-      XLSX.writeFile(workbook, "loan-import-template.xlsx");
-    } catch {
-      setImportBranchError("Unable to download the template.");
-    }
-  }
-
-  async function handleLoanFileUpload() {
-    const file = loanImportFile;
-    if (!file) return;
-
-    setError("");
-    setImportMessage("");
-    setIsImportPending(true);
-
-    try {
-      const buffer = await file.arrayBuffer();
-      const XLSX = await loadXlsx();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const firstSheet = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheet];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-
-      const mappedRows = rows
-        .map((row) => {
-          const normalized = Object.fromEntries(
-            Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), String(value).trim()])
-          );
-
-          return {
-            loanId: parseInteger(normalized["loan id"] || normalized["loanid"] || 0),
-            memberId: parseInteger(normalized["member id"] || normalized["memberid"] || normalized["borrower id"] || normalized["borrowerid"] || 0),
-            cifKey: normalized["member code"] || normalized["membercode"] || normalized["cif key"] || normalized["cifkey"] || "",
-            loanAccountNo: normalized["loan acct. no."] || normalized["loan acct no"] || normalized["loan account number"] || normalized["loanaccountnumber"] || normalized["loan account no"] || normalized["loanaccountno"] || "",
-            memberName: normalized["member name"] || normalized["membername"] || "",
-            contactInfo: normalized["contact no."] || normalized["contact no"] || normalized["contactno"] || normalized["contact info"] || normalized["contactinfo"] || "",
-            address: normalized["address"] || "",
-            loanType: normalized["loan product"] || normalized["loanproduct"] || normalized["loan type"] || normalized["loantype"] || "",
-            dateRelease: normalizeDate(normalized["release date"] || normalized["releasedate"] || normalized["date release"] || normalized["daterelease"] || ""),
-            maturityDate: normalizeDate(normalized["maturity"] || normalized["maturity date"] || normalized["maturitydate"] || ""),
-            loanAmount: parseMoney(normalized["loan amount"] || normalized["loanamount"] || 0),
-            loanBalance: parseMoney(normalized["loan balance"] || normalized["loanbalance"] || 0),
-            principalDue: parseMoney(normalized["principal arears"] || normalized["principal arrears"] || normalized["principalarrears"] || normalized["principal due"] || normalized["principaldue"] || 0),
-            penaltyDue: parseMoney(normalized["fines"] || normalized["penalty due"] || normalized["penaltydue"] || 0),
-            interest: parseMoney(normalized["interest"] || 0),
-            otherCharges: parseMoney(normalized["other charges"] || normalized["othercharges"] || 0),
-            total: parseMoney(normalized["total"] || 0),
-            parAge: parseWholeNumber(normalized["par age"] || normalized["parage"] || 0),
-            status: normalized["status"]
-              ? normalizeImportedLoanStatus(normalized["status"])
-              : parseWholeNumber(normalized["par age"] || normalized["parage"] || 0) > 0 ? "overdue" : "active",
-            notes: "",
-            ...(user?.role === "super_admin"
-              ? {
-                  branchId: parseInteger(normalized["branch id"] || normalized["branchid"] || importBranchId)
-                }
-              : {})
-          };
-        })
-        .filter((row) => (row.cifKey || row.memberId > 0) && row.loanType && row.dateRelease && row.maturityDate);
-
-      if (mappedRows.length === 0) {
-        throw new Error("No valid loan rows found in file");
-      }
-
-      const result = await apiRequest<{ inserted: number; updated: number; skipped: number; skippedRows?: LoanImportSkipRow[] }>(
-        "/loans/bulk",
-        "POST",
-        {
-        rows: mappedRows
-        }
-      );
-
-      setImportMessage(`Loan import complete: ${result.inserted} inserted, ${result.updated} updated, ${result.skipped} skipped.`);
-      if ((result.skippedRows?.length ?? 0) > 0) {
-        const preview = result.skippedRows!.slice(0, 3).map(describeLoanImportSkip).join("; ");
-        const hidden = result.skippedRows!.length > 3 ? ` and ${result.skippedRows!.length - 3} more.` : "";
-        setError(`Skipped ${result.skippedRows!.length} row(s): ${preview}${hidden}`);
-      }
-      setLoanImportFile(null);
-      setLoanImportInputKey((current) => current + 1);
-      setIsImportOpen(false);
-      setIsImportPending(false);
-      void refreshLoanImportData().catch((refreshError) => {
-        setError(refreshError instanceof Error ? refreshError.message : "Import finished but list refresh failed");
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to import loan file");
-    } finally {
-      setIsImportPending(false);
-    }
-  }
-
   async function openCreateModal() {
     setError("");
     setMessage("");
@@ -901,9 +513,6 @@ export function LoansPage() {
     setError("");
     setMessage("");
     setImportBranchError("");
-    setLoanImportFile(null);
-    setLoanImportInputKey((current) => current + 1);
-    void loadXlsx();
     if (user?.role === "super_admin") {
       try {
         const latestBranches = await apiRequest<Branch[]>("/branches");
@@ -921,10 +530,14 @@ export function LoansPage() {
   }
 
   function closeImportModal() {
-    if (isImportPending) return;
-    setLoanImportFile(null);
-    setLoanImportInputKey((current) => current + 1);
     setIsImportOpen(false);
+  }
+
+  function handleImported(summary: string) {
+    setImportMessage(summary);
+    void refreshLoanImportData().catch((refreshError) => {
+      setError(refreshError instanceof Error ? refreshError.message : "Import finished but list refresh failed");
+    });
   }
 
   async function startEdit(loan: LoanRow) {
@@ -1026,6 +639,7 @@ export function LoansPage() {
     setIsDeletePending(true);
     try {
       await apiRequest(`/loans/${loan.id}`, "DELETE");
+      setSelectedLoanIds((current) => current.filter((id) => id !== loan.id));
       setMessage("Loan removed from Collections. Its payments and remarks remain in history.");
       if (editingId === loan.id) {
         closeFormModal();
@@ -1379,83 +993,17 @@ export function LoansPage() {
       : null;
 
   const loanImportModal =
-    canImportLoans && isImportOpen
-      ? createPortal(
-          <section className="modal-shell">
-            <div className="modal-card max-w-xl">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold">Import Loans</h3>
-                <button type="button" className="btn-muted" onClick={closeImportModal} disabled={isImportPending}>
-                  Close
-                </button>
-              </div>
-
-              <div className="surface-soft grid gap-3 border-dashed border-black/20 p-3" aria-busy={isImportPending}>
-                <Upload size={16} className="text-black/60" />
-                <div className="flex flex-wrap items-center gap-2">
-                  {user?.role === "super_admin" && (
-                    <select
-                      className="field w-56"
-                      value={importBranchId}
-                      onChange={(event) => setImportBranchId(Number(event.target.value))}
-                      aria-label="Select branch for loan import"
-                      disabled={isImportPending}
-                    >
-                      <option value={0}>Select import branch</option>
-                      {branches.map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.code} - {branch.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <input
-                    key={loanImportInputKey}
-                    type="file"
-                    accept=".csv,.xls,.xlsx"
-                    onChange={handleLoanFileSelect}
-                    className="text-sm"
-                    disabled={isImportPending}
-                  />
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => void handleLoanFileUpload()}
-                    disabled={isImportPending || !loanImportFile || (user?.role === "super_admin" && importBranchId <= 0)}
-                  >
-                    {isImportPending ? "Importing..." : "Import Loans"}
-                  </button>
-                </div>
-                <p className="text-xs text-black/70">
-                  {loanImportFile ? `Selected file: ${loanImportFile.name}` : "Choose a CSV or Excel file, then click Import Loans."}
-                </p>
-                {importBranchError && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{importBranchError}</p>}
-                {isImportPending && (
-                  <div className="grid gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">Import in progress</span>
-                      <span className="text-xs uppercase tracking-wide text-amber-700/80">Working</span>
-                    </div>
-                    <div className="import-progress-track" role="progressbar" aria-label="Loan import in progress" aria-valuetext="Importing loan records">
-                      <div className="import-progress-bar" />
-                    </div>
-                    <p>Uploading loan records and refreshing the list. Please keep this window open.</p>
-                  </div>
-                )}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/10 pt-3">
-                  <p className="text-xs text-black/70">Not sure about the format? Start from the template.</p>
-                  <button type="button" className="btn-muted h-9 gap-1.5 px-3 text-sm" onClick={() => void downloadLoanTemplate()} disabled={isImportPending}>
-                    <Download size={15} />
-                    <span>Download Template</span>
-                  </button>
-                </div>
-                <p className="text-xs text-black/60">Bulk upload CSV/Excel columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age, with remark columns ignored.</p>
-              </div>
-            </div>
-          </section>,
-          document.body
-        )
-      : null;
+    canImportLoans && isImportOpen ? (
+      <LoanImportDialog
+        isSuperAdmin={user?.role === "super_admin"}
+        branches={branches}
+        importBranchId={importBranchId}
+        setImportBranchId={setImportBranchId}
+        branchError={importBranchError}
+        onClose={closeImportModal}
+        onImported={handleImported}
+      />
+    ) : null;
 
   const remarksModal =
     isRemarksOpen && remarkLoan
@@ -1793,7 +1341,12 @@ export function LoansPage() {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Collection Records</h2>
-            {latestImportedAt && <p className="mt-1 text-xs text-slate-500">As of: {formatDate(latestImportedAt)}</p>}
+            {lastImport ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Data as of {formatDateTime(lastImport.uploadedAt)}{lastImport.uploadedBy ? ` · uploaded by ${lastImport.uploadedBy}` : ""}
+                {lastImport.branch && branchFilterId <= 0 && user?.role === "super_admin" ? ` (${lastImport.branch})` : ""}
+              </p>
+            ) : latestImportedAt && <p className="mt-1 text-xs text-slate-500">As of: {formatDate(latestImportedAt)}</p>}
           </div>
           {(canAddLoans || canImportLoans) && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1902,8 +1455,8 @@ export function LoansPage() {
                   <button
                     type="button"
                     className="btn-muted w-full sm:w-auto"
-                    onClick={() => setSelectedLoanIds(filteredLoanIds)}
-                    disabled={filteredLoanIds.length === 0}
+                    onClick={() => void selectAllMatchingLoans()}
+                    disabled={loanTotal === 0}
                   >
                     Select All Results
                   </button>
@@ -1946,7 +1499,7 @@ export function LoansPage() {
                     </div>
                   </button>
                 ))}
-                {filteredLoans.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
+                {loanTotal === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
               </div>
             ) : (
               <div className="mobile-record-list mt-3">
@@ -2018,7 +1571,7 @@ export function LoansPage() {
                     </div>
                   </article>
                 ))}
-                {filteredLoans.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
+                {loanTotal === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans found.</p>}
               </div>
             )}
 
@@ -2045,7 +1598,7 @@ export function LoansPage() {
                   </tr>)}
                 </tbody>
               </table>
-              {filteredLoans.length === 0 && <p className="p-3 text-sm text-slate-600">No loans found.</p>}
+              {loanTotal === 0 && <p className="p-3 text-sm text-slate-600">No loans found.</p>}
             </div>}
 
             <div className={isCollector ? "hidden" : "table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block"}>
@@ -2176,303 +1729,53 @@ export function LoansPage() {
                   ))}
                 </tbody>
               </table>
-              {filteredLoans.length === 0 && <p className="p-3 text-sm text-slate-600">No loans found.</p>}
+              {loanTotal === 0 && <p className="p-3 text-sm text-slate-600">No loans found.</p>}
             </div>
             <PaginationControls
               currentPage={loanPage}
               totalPages={totalLoanPages}
-              totalItems={filteredLoans.length}
+              totalItems={loanTotal}
               pageSize={rowsPerPage}
               onPageChange={setLoanPage}
             />
           </>
         ) : activeRecordsTab === "payments" ? (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="relative w-full max-w-sm">
-                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  className="field pl-9"
-                  value={paymentQuery}
-                  onChange={(event) => setPaymentQuery(event.target.value)}
-                  placeholder="Search payments"
-                />
-              </div>
-              {canDeletePayments && (
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-                  <button
-                    type="button"
-                    className="btn-muted w-full sm:w-auto"
-                    onClick={() => setSelectedPaymentIds(filteredPaymentIds)}
-                    disabled={filteredPaymentIds.length === 0}
-                  >
-                    Select All Results
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-muted w-full sm:w-auto"
-                    onClick={() => setSelectedPaymentIds([])}
-                    disabled={!hasAnyPaymentSelection}
-                  >
-                    Clear Selection
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-danger w-full sm:w-auto"
-                    onClick={handleRequestBulkPaymentDelete}
-                    disabled={!hasAnyPaymentSelection}
-                  >
-                    Delete Selected ({selectedPaymentIds.length})
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="mobile-record-list mt-3">
-              {paginatedPaymentRecords.map((row) => (
-                <article key={row.id} className="mobile-record-card cursor-pointer transition hover:bg-slate-50" tabIndex={0}
-                      onClick={() => navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`)}
-                      onKeyDown={event => {
-                        if (event.target !== event.currentTarget) return;
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`);
-                        }
-                      }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-slate-900">{row.memberName}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {row.paymentId} | {row.loanAccountNo}
-                      </p>
-                    </div>
-                    {canDeletePayments && (
-                      <input
-                        type="checkbox"
-                        aria-label={`Select payment ${row.paymentId}`}
-                        onClick={event => event.stopPropagation()}
-                        checked={selectedPaymentIdSet.has(row.id)}
-                        onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
-                        className="mt-1 h-4 w-4 shrink-0 accent-brand-600"
-                      />
-                    )}
-                  </div>
-
-                  <div className="mobile-record-grid">
-                    <LoanRecordField label="OR No" value={row.orNo || "-"} />
-                    <LoanRecordField label="Collected By" value={row.collectedBy || "System"} />
-                    <LoanRecordField label="Amount" value={formatCurrency(row.amount)} />
-                    <LoanRecordField label="Collected At" value={formatDateTime(row.collectedAt)} />
-                  </div>
-                </article>
-              ))}
-              {filteredPaymentRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No payments found.</p>}
-            </div>
-
-            <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
-              <table className="table-clean w-[1050px] text-xs">
-                <thead className="sticky top-0 z-10 bg-c1">
-                  <tr>
-                    {canDeletePayments && (
-                      <th>
-                        <input
-                          type="checkbox"
-                          aria-label="Select all payments on current page"
-                          checked={allPaymentPageSelected}
-                          onChange={(event) => togglePaymentPageSelection(event.target.checked)}
-                          disabled={!hasPaymentPageRows}
-                          className="h-4 w-4 accent-brand-600"
-                        />
-                      </th>
-                    )}
-                    <th>Payment ID</th>
-                    <th>OR No</th>
-                    <th>Collected By</th>
-                    <th>Loan Account No</th>
-                    <th>Member Name</th>
-                    <th>Amount</th>
-                    <th>Collected At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedPaymentRecords.map((row) => (
-                    <tr key={row.id} className="cursor-pointer transition hover:bg-slate-50" tabIndex={0}
-                      onClick={() => navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`)}
-                      onKeyDown={event => {
-                        if (event.target !== event.currentTarget) return;
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          navigate(`/loan-details/${row.loanId}?tab=payments&from=payments&paymentId=${row.id}`);
-                        }
-                      }}>
-                      {canDeletePayments && (
-                        <td>
-                          <input
-                            type="checkbox"
-                            aria-label={`Select payment ${row.paymentId}`}
-                        onClick={event => event.stopPropagation()}
-                            checked={selectedPaymentIdSet.has(row.id)}
-                            onChange={(event) => togglePaymentSelection(row.id, event.target.checked)}
-                            className="h-4 w-4 accent-brand-600"
-                          />
-                        </td>
-                      )}
-                      <td>{row.paymentId}</td>
-                      <td>{row.orNo || "-"}</td>
-                      <td>{row.collectedBy || "System"}</td>
-                      <td>{row.loanAccountNo}</td>
-                      <td>{row.memberName}</td>
-                      <td>{formatCurrency(row.amount)}</td>
-                      <td>{formatDateTime(row.collectedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredPaymentRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No payments found.</p>}
-            </div>
-            <PaginationControls
-              currentPage={paymentPage}
-              totalPages={totalPaymentPages}
-              totalItems={filteredPaymentRecords.length}
-              pageSize={rowsPerPage}
-              onPageChange={setPaymentPage}
-            />
-          </>
+          <PaymentRecordsPanel
+            paymentQuery={paymentQuery}
+            setPaymentQuery={setPaymentQuery}
+            paginatedPaymentRecords={paginatedPaymentRecords}
+            paymentTotal={paymentTotal}
+            paymentPage={paymentPage}
+            totalPaymentPages={totalPaymentPages}
+            rowsPerPage={rowsPerPage}
+            setPaymentPage={setPaymentPage}
+            canDeletePayments={canDeletePayments}
+            selectedPaymentIds={selectedPaymentIds}
+            setSelectedPaymentIds={setSelectedPaymentIds}
+            togglePaymentSelection={togglePaymentSelection}
+            togglePaymentPageSelection={togglePaymentPageSelection}
+            selectAllMatchingPayments={selectAllMatchingPayments}
+            handleRequestBulkPaymentDelete={handleRequestBulkPaymentDelete}
+          />
         ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-            {user?.role === "super_admin" && <RemarkImport branches={branches} onImported={loadData} />}
-            <div className="relative w-full max-w-sm">
-              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                className="field pl-9"
-                value={remarkQuery}
-                onChange={(event) => setRemarkQuery(event.target.value)}
-                placeholder="Search remarks"
-              />
-            </div>
-
-            {canDeleteRemarks && <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="btn-muted" disabled={!filteredRemarkRecords.length} onClick={() => setSelectedRemarkLoans(filteredRemarkRecords.map(row => Number(row.loan_id)))}>Select All Results</button>
-              <button type="button" className="btn-muted" disabled={!selectedRemarkLoans.length} onClick={() => setSelectedRemarkLoans([])}>Clear Selection</button>
-              <button type="button" className="btn-danger" disabled={!selectedRemarkLoans.length || remarkDeletePending} onClick={() => setRemarkDeleteIds(remarkRecords.filter(row => row.kind === "loan_remark" && selectedRemarkLoans.includes(Number(row.loan_id))).map(row => row.id))}>Delete Selected ({selectedRemarkLoans.length})</button>
-            </div>}
-            </div>
-
-            <div className="mobile-record-list mt-3">
-              {paginatedRemarkRecords.map((row) => (
-                <article
-                  key={`${row.kind}-${row.id}`}
-                  className="mobile-record-card cursor-pointer transition hover:bg-white"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openLoanRemarks(row)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openLoanRemarks(row);
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-slate-900">{row.member_name}</p>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        {row.loan_type || "-"}
-                      </p>
-                    </div>
-                  </div>
-                  <ul className="mt-3 flex items-center gap-2 overflow-x-auto text-xs text-slate-800">
-                    {row.recentRemarks.map(remark => (
-                      <li key={remark.id} className="shrink-0">
-                        <button
-                          type="button"
-                          className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-                          aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
-                          onClick={event => {
-                            event.stopPropagation();
-                            openLoanRemarks(remark);
-                          }}
-                        >
-                          {getRemarkCategoryLabel(remark.category)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mobile-record-grid">
-                    <LoanRecordField label="Loan Account No" value={row.loan_account_no || "-"} />
-                    <LoanRecordField label="Added By" value={row.collector_name || "System"} />
-                  </div>
-                </article>
-              ))}
-              {filteredRemarkRecords.length === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans with remarks found.</p>}
-            </div>
-
-            <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
-              <table className="table-clean w-full min-w-[900px] text-xs">
-                <thead className="sticky top-0 z-10 bg-c1">
-                  <tr>
-                    {canDeleteRemarks && <th><input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label="Select all remarks on current page" disabled={!paginatedRemarkRecords.length} checked={paginatedRemarkRecords.length > 0 && paginatedRemarkRecords.every(row => selectedRemarkLoans.includes(Number(row.loan_id)))} onChange={event => { const ids = paginatedRemarkRecords.map(row => Number(row.loan_id)); setSelectedRemarkLoans(current => event.target.checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }} /></th>}
-                    <th>Member Name</th>
-                    <th>Loan Account No</th>
-                    <th>Loan Type</th>
-                    <th>Remarks</th>
-                    <th>Added By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedRemarkRecords.map((row) => (
-                    <tr
-                      key={`${row.kind}-${row.id}`}
-                      className="cursor-pointer transition hover:bg-slate-50"
-                      tabIndex={0}
-                      onClick={() => openLoanRemarks(row)}
-                      onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          openLoanRemarks(row);
-                        }
-                      }}
-                    >
-                      {canDeleteRemarks && <td>{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}</td>}
-                      <td>{row.member_name}</td>
-                      <td>{row.loan_account_no || "-"}</td>
-                      <td>{row.loan_type || "-"}</td>
-                      <td className="whitespace-nowrap">
-                        <ul className="flex items-center justify-center gap-2">
-                          {row.recentRemarks.map(remark => (
-                            <li key={remark.id} className="shrink-0">
-                        <button
-                          type="button"
-                          className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-                          aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
-                          onClick={event => {
-                            event.stopPropagation();
-                            openLoanRemarks(remark);
-                          }}
-                        >
-                          {getRemarkCategoryLabel(remark.category)}
-                        </button>
-                      </li>
-                          ))}
-                        </ul>
-                      </td>
-                      <td>{row.collector_name || "System"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredRemarkRecords.length === 0 && <p className="p-3 text-sm text-slate-600">No loans with remarks found.</p>}
-            </div>
-            <PaginationControls
-              currentPage={remarkRecordsPage}
-              totalPages={totalRemarkPages}
-              totalItems={filteredRemarkRecords.length}
-              pageSize={rowsPerPage}
-              onPageChange={setRemarkRecordsPage}
-            />
-          </>
+          <RemarkRecordsPanel
+            remarkQuery={remarkQuery}
+            setRemarkQuery={setRemarkQuery}
+            paginatedRemarkRecords={paginatedRemarkRecords}
+            remarkTotal={remarkTotal}
+            remarkRecordsPage={remarkRecordsPage}
+            totalRemarkPages={totalRemarkPages}
+            rowsPerPage={rowsPerPage}
+            setRemarkRecordsPage={setRemarkRecordsPage}
+            canDeleteRemarks={canDeleteRemarks}
+            selectedRemarkLoans={selectedRemarkLoans}
+            setSelectedRemarkLoans={setSelectedRemarkLoans}
+            toggleRemarkLoan={toggleRemarkLoan}
+            selectAllMatchingRemarkLoans={selectAllMatchingRemarkLoans}
+            requestRemarkDelete={requestRemarkDelete}
+            remarkDeletePending={remarkDeletePending}
+            openLoanRemarks={openLoanRemarks}
+          />
         )}
       </section>
     </main>

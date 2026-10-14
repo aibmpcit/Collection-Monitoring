@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
 import { assertBranchAccess, formatPaymentId, getRequestUser, isSuperAdmin, toNumber, userBranchId } from "../services/access.js";
@@ -18,17 +19,68 @@ async function paymentBranchId(paymentId: number) {
   return result.rows[0]?.branch_id ?? null;
 }
 
+const paymentListFilters = z.object({
+  page: z.coerce.number().int().min(1).max(100000).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).default(25),
+  search: z.string().trim().max(120).optional(),
+  branchId: z.coerce.number().int().positive().optional(),
+  borrowerId: z.coerce.number().int().positive().optional(),
+  sort: z.enum(["member", "recent"]).default("member"),
+  openLoansOnly: z.literal("true").optional(),
+  idsOnly: z.literal("true").optional()
+});
+
+/**
+ * Lists payments visible to the user (collectors see only their own).
+ * - With `page`: one page of matches plus the total.
+ * - With `idsOnly=true`: every matching id, for "select all matching" actions.
+ * - Otherwise: every match (used for a single member's history).
+ */
 router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
+    const parsed = paymentListFilters.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid payment filters" });
+    const filter = parsed.data;
+
     const params: unknown[] = [];
-    let where = isSuperAdmin(user) ? "" : "WHERE b.branch_id = $1";
-    if (!isSuperAdmin(user)) {
-      params.push(userBranchId(user));
+    const conditions: string[] = [];
+    const add = (expression: string, value: unknown) => {
+      params.push(value);
+      conditions.push(expression.replace("?", `$${params.length}`));
+    };
+    if (!isSuperAdmin(user)) add("b.branch_id = ?", userBranchId(user));
+    if (isSuperAdmin(user) && filter.branchId) add("b.branch_id = ?", filter.branchId);
+    if (user.role === "staff") add("c.created_by = ?", user.id);
+    if (filter.borrowerId) add("l.borrower_id = ?", filter.borrowerId);
+    if (filter.openLoansOnly === "true") conditions.push("l.status != 'closed'");
+    if (filter.search) {
+      add(`LOCATE(?, CONCAT_WS(' ', CONCAT('PAY-', LPAD(c.id, 6, '0')), c.or_no, u.username, l.loan_account_no,
+        b.cif_key, b.member_name, c.amount, c.collected_at)) > 0`, filter.search);
     }
-    if (user.role === "staff") {
-      params.push(user.id);
-      where += " AND c.created_by = $2";
+    const source = `FROM collections c
+       INNER JOIN loans l ON l.id = c.loan_id
+       INNER JOIN borrowers b ON b.id = l.borrower_id
+       LEFT JOIN users u ON u.id = c.created_by
+       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
+    const order = filter.sort === "recent"
+      ? "ORDER BY c.collected_at DESC, c.id DESC"
+      : "ORDER BY COALESCE(b.member_name, ''), c.id";
+
+    if (filter.idsOnly === "true") {
+      const ids = await query<{ id: number }>(`SELECT c.id ${source} ${order}`, params);
+      return res.json({ ids: ids.rows.map(row => Number(row.id)) });
+    }
+
+    const pageSize = filter.pageSize;
+    let page = 1;
+    let total = 0;
+    let limit = "";
+    if (filter.page !== undefined) {
+      const counted = await query<{ total: number }>(`SELECT COUNT(*) AS total ${source}`, params);
+      total = Number(counted.rows[0]?.total ?? 0);
+      page = Math.min(filter.page, Math.max(1, Math.ceil(total / pageSize)));
+      limit = `LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
     }
 
     const result = await query<{
@@ -54,30 +106,25 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          l.loan_account_no,
          b.cif_key,
          b.member_name
-       FROM collections c
-       INNER JOIN loans l ON l.id = c.loan_id
-       INNER JOIN borrowers b ON b.id = l.borrower_id
-       LEFT JOIN users u ON u.id = c.created_by
-       ${where}
-       ORDER BY c.collected_at DESC, c.id DESC`,
+       ${source}
+       ${order} ${limit}`,
       params
     );
 
-    return res.json(
-      result.rows.map((row) => ({
-        id: row.id,
-        paymentId: formatPaymentId(row.id),
-        loanId: row.loan_id,
-        branchId: Number(row.branch_id ?? 0),
-        loanAccountNo: row.loan_account_no,
-        cifKey: row.cif_key ?? "",
-        memberName: row.member_name ?? "",
-        amount: toNumber(row.amount),
-        orNo: row.or_no ?? "",
-        collectedBy: row.collected_by ?? "System",
-        collectedAt: row.collected_at
-      }))
-    );
+    const items = result.rows.map((row) => ({
+      id: row.id,
+      paymentId: formatPaymentId(row.id),
+      loanId: row.loan_id,
+      branchId: Number(row.branch_id ?? 0),
+      loanAccountNo: row.loan_account_no,
+      cifKey: row.cif_key ?? "",
+      memberName: row.member_name ?? "",
+      amount: toNumber(row.amount),
+      orNo: row.or_no ?? "",
+      collectedBy: row.collected_by ?? "System",
+      collectedAt: row.collected_at
+    }));
+    return res.json(filter.page !== undefined ? { items, total, page, pageSize } : items);
   } catch (error) {
     return next(error);
   }

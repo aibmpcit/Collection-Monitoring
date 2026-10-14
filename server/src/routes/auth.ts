@@ -8,6 +8,7 @@ import type { Role } from "../types/models.js";
 import { authenticate, type AuthedRequest } from "../middleware/auth.js";
 import { parsePermissions } from "../services/permissions.js";
 import { recordActivity } from "../services/activity.js";
+import { loginRetryAfter, recordLoginFailure, recordLoginSuccess } from "../services/loginLimiter.js";
 
 const router = Router();
 
@@ -23,6 +24,15 @@ router.post("/login", async (req, res, next) => {
       return res.status(400).json({ message: "Invalid login payload" });
     }
 
+    const username = parsed.data.username.trim();
+    // req.ip is only a real visitor address when the proxy in front is trusted (TRUST_PROXY).
+    const ip = req.app.get("trust proxy") ? req.ip : undefined;
+    const retryAfter = loginRetryAfter(username, ip);
+    if (retryAfter > 0) {
+      res.setHeader("Retry-After", String(retryAfter));
+      return res.status(429).json({ message: `Too many failed sign-in attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).` });
+    }
+
     const result = await query<{
       id: number;
       username: string;
@@ -31,6 +41,7 @@ router.post("/login", async (req, res, next) => {
       branch_id: number | null;
       branch_name: string | null;
       permissions: unknown;
+      token_version: number | null;
     }>(
       `SELECT
          u.id,
@@ -38,31 +49,31 @@ router.post("/login", async (req, res, next) => {
          u.password_hash,
          u.role,
          u.permissions,
+         u.token_version,
          u.branch_id,
          b.name AS branch_name
        FROM users u
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.username = $1
        LIMIT 1`,
-      [parsed.data.username.trim()]
+      [username]
     );
 
     const user = result.rows[0];
-    if (!user) {
+    const matches = user ? await verifyPassword(parsed.data.password, user.password_hash) : false;
+    if (!user || !matches) {
+      recordLoginFailure(username, ip);
       return res.status(401).json({ message: "Invalid credentials" });
     }
-
-    const matches = await verifyPassword(parsed.data.password, user.password_hash);
-    if (!matches) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    recordLoginSuccess(username);
 
     const token = jwt.sign(
       {
         id: user.id,
         username: user.username,
         role: user.role,
-        branchId: user.branch_id
+        branchId: user.branch_id,
+        tokenVersion: Number(user.token_version ?? 0)
       },
       requiredEnv("JWT_SECRET"),
       { expiresIn: "8h" }

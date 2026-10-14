@@ -99,6 +99,16 @@ export interface DashboardMetrics {
   totalPortfolio: number;
   totalOverdue: number;
   collectionsToday: number;
+  activeLoans: number;
+  overdueLoans: number;
+}
+
+/** One page of a server-side list. */
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface LoanRemark {

@@ -14,8 +14,10 @@ router.get("/metrics", authenticate, async (req: AuthedRequest, res, next) => {
       params.push(userBranchId(user));
     }
 
-    const loans = await query<{ total_portfolio: string | number; total_overdue: string | number }>(
+    const loans = await query<{ total_portfolio: string | number; total_overdue: string | number; active_loans: number; overdue_loans: number }>(
       `SELECT
+         COALESCE(SUM(l.status = 'active'), 0) AS active_loans,
+         COALESCE(SUM(l.status = 'overdue'), 0) AS overdue_loans,
          COALESCE(SUM(COALESCE(l.principal_due, l.principal) + l.interest + COALESCE(l.penalty_due, l.penalty) + COALESCE(l.other_charges, 0)), 0) AS total_portfolio,
          COALESCE(SUM(
            CASE WHEN l.status = 'overdue'
@@ -43,6 +45,8 @@ router.get("/metrics", authenticate, async (req: AuthedRequest, res, next) => {
     return res.json({
       totalPortfolio: toNumber(loans.rows[0]?.total_portfolio ?? 0),
       totalOverdue: toNumber(loans.rows[0]?.total_overdue ?? 0),
+      activeLoans: toNumber(loans.rows[0]?.active_loans ?? 0),
+      overdueLoans: toNumber(loans.rows[0]?.overdue_loans ?? 0),
       collectionsToday: toNumber(collections.rows[0]?.total ?? 0)
     });
   } catch (error) {

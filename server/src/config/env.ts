@@ -21,6 +21,14 @@ function resolveEnvPath() {
 
 dotenv.config({ path: resolveEnvPath() });
 
+/**
+ * Production rule: remarks are imported once per branch (its first import, by a super admin),
+ * then locked. Off while the system is being tested, so every import may bring in remarks.
+ */
+export function remarkImportOnce() {
+  return process.env.REMARK_IMPORT_ONCE === "true";
+}
+
 export function requiredEnv(name: string) {
   const value = process.env[name];
 

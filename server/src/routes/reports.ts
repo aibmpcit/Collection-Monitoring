@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
 import { getRequestUser, isSuperAdmin, toNumber, userBranchId } from "../services/access.js";
+import { PAR_BUCKETS, parBucketSql } from "../services/parBuckets.js";
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.get("/overdue", authenticate, async (req: AuthedRequest, res, next) => {
          l.other_charges,
          l.maturity_date,
          l.due_date,
-         GREATEST(0, CURRENT_DATE - COALESCE(l.maturity_date, l.due_date)) AS days_overdue
+         GREATEST(0, DATEDIFF(CURRENT_DATE, COALESCE(l.maturity_date, l.due_date))) AS days_overdue
        FROM loans l
        INNER JOIN borrowers b ON b.id = l.borrower_id
        WHERE l.status = 'overdue' ${branchFilter}
@@ -92,31 +93,24 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
 });
 const summaryFilters = z.object({
-  from: date, to: date,
+  from: date.optional(), to: date.optional(),
   branchId: z.coerce.number().int().positive().optional(),
   collectorId: z.coerce.number().int().positive().optional()
-}).refine(value => value.from <= value.to);
+}).refine(value => !value.from || !value.to || value.from <= value.to);
 
-// Same groupings as the PAR age filter on the Collections page.
-export const PAR_BUCKETS = [
-  { key: "current", label: "Current (0)", min: 0, max: 0 },
-  { key: "1-30", label: "PAR 1-30", min: 1, max: 30 },
-  { key: "31-60", label: "PAR 31-60", min: 31, max: 60 },
-  { key: "61-90", label: "PAR 61-90", min: 61, max: 90 },
-  { key: "91-180", label: "PAR 91-180", min: 91, max: 180 },
-  { key: "181-365", label: "PAR 181-365", min: 181, max: 365 },
-  { key: "over-365", label: "PAR over 365", min: 366, max: null }
-] as const;
-const parBucketSql = `CASE ${PAR_BUCKETS.map(bucket => bucket.max === null
-  ? `WHEN l.par_age >= ${bucket.min} THEN '${bucket.key}'`
-  : `WHEN l.par_age BETWEEN ${bucket.min} AND ${bucket.max} THEN '${bucket.key}'`).join(" ")} ELSE 'current' END`;
+// A blank date leaves that side of the range open, matching Collection History.
+// The upper bound stays one day short of MySQL's maximum so DATE_ADD(..., 1 DAY) is valid.
+const OPEN_FROM = "1000-01-01";
+const OPEN_TO = "9999-12-30";
 
 router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const parsed = summaryFilters.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ message: "Invalid report filters or date range" });
-    const { from, to, collectorId } = parsed.data;
+    const { collectorId } = parsed.data;
+    const from = parsed.data.from ?? OPEN_FROM;
+    const to = parsed.data.to ?? OPEN_TO;
     const branchId = isSuperAdmin(user) ? parsed.data.branchId : userBranchId(user);
 
     // $1/$2 are the date range, followed by the branch and collector when present.
@@ -188,7 +182,7 @@ router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]),
     const total = totals.rows[0];
     const remarks = remarkTotals.rows[0];
     return res.json({
-      from, to, branchId: branchId ?? null, collectorId: collectorId ?? null,
+      from: parsed.data.from ?? null, to: parsed.data.to ?? null, branchId: branchId ?? null, collectorId: collectorId ?? null,
       summary: {
         collected: toNumber(total?.amount ?? 0),
         payments: toNumber(total?.payments ?? 0),
@@ -233,8 +227,8 @@ router.get("/users", authenticate, authorize(["super_admin"]), async (req: Authe
   try {
     const parsed = summaryFilters.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ message: "Invalid report filters or date range" });
-    const { from, to, branchId } = parsed.data;
-    const params: unknown[] = [from, to];
+    const { branchId } = parsed.data;
+    const params: unknown[] = [parsed.data.from ?? OPEN_FROM, parsed.data.to ?? OPEN_TO];
     if (branchId) params.push(branchId);
     const inRange = (column: string) => `${column} >= $1 AND ${column} < DATE_ADD($2, INTERVAL 1 DAY)`;
 

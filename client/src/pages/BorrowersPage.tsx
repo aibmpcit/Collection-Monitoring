@@ -10,6 +10,7 @@ import { ToastNotification } from "../components/ToastNotification";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
+import { gridToRecords, loadXlsx, readSpreadsheet } from "../services/spreadsheet";
 import { fileToAttachment } from "../services/attachments";
 import type { Borrower, BorrowerPayload, Branch } from "../types/models";
 
@@ -53,6 +54,8 @@ interface MemberRemarkRow {
   remarkCategory: string;
   createdAt: string;
   createdBy: string;
+  /** Set by the server: admins may manage any remark, others only their own. */
+  canEdit?: boolean;
   attachmentName?: string | null;
 }
 
@@ -63,12 +66,6 @@ const pesoFormatter = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 2
 });
 
-let xlsxLoader: Promise<typeof import("xlsx")> | null = null;
-
-function loadXlsx() {
-  xlsxLoader ??= import("xlsx");
-  return xlsxLoader;
-}
 
 function formatCurrency(value: number): string {
   return pesoFormatter.format(value || 0);
@@ -123,6 +120,7 @@ export function BorrowersPage() {
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
   const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
+  const [confirmDeleteRemarkId, setConfirmDeleteRemarkId] = useState<number | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<MemberRemarkRow | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarksSubmitting, setRemarksSubmitting] = useState(false);
@@ -321,17 +319,15 @@ export function BorrowersPage() {
     setHistoryLoading(true);
 
     try {
-      const [allLoans, allPayments] = await Promise.all([
-        apiRequest<MemberLoanHistoryRow[]>("/loans"),
-        apiRequest<MemberPaymentHistoryRow[]>("/payments")
+      // Ask only for this member's records instead of downloading every loan and payment.
+      const [loansForMember, paymentsForMember] = await Promise.all([
+        apiRequest<MemberLoanHistoryRow[]>(`/loans?borrowerId=${borrower.id}`),
+        apiRequest<MemberPaymentHistoryRow[]>(`/payments?borrowerId=${borrower.id}`)
       ]);
 
-      const memberLoans = allLoans
-        .filter((loan) => loan.borrowerId === borrower.id)
+      const memberLoans = [...loansForMember]
         .sort((a, b) => new Date(b.dateRelease).getTime() - new Date(a.dateRelease).getTime());
-      const loanIds = new Set(memberLoans.map((loan) => loan.id));
-      const memberPayments = allPayments
-        .filter((payment) => loanIds.has(payment.loanId))
+      const memberPayments = [...paymentsForMember]
         .sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime());
 
       setHistoryLoans(memberLoans);
@@ -415,6 +411,26 @@ export function BorrowersPage() {
     }
   }
 
+  async function handleDeleteMemberRemark(remarkId: number) {
+    if (!remarksBorrower) return;
+    setRemarksSubmitting(true);
+    setRemarksError("");
+    try {
+      await apiRequest(`/borrowers/${remarksBorrower.id}/remarks/${remarkId}`, "DELETE");
+      if (editingRemarkId === remarkId) {
+        setEditingRemarkId(null);
+        setRemarkInput("");
+        setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+      }
+      setConfirmDeleteRemarkId(null);
+      await loadMemberRemarks(remarksBorrower.id);
+    } catch (e) {
+      setRemarksError(e instanceof Error ? e.message : "Unable to delete member remark");
+    } finally {
+      setRemarksSubmitting(false);
+    }
+  }
+
   async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -428,12 +444,8 @@ export function BorrowersPage() {
         throw new Error("Select a branch for member import.");
       }
 
-      const buffer = await file.arrayBuffer();
-      const XLSX = await loadXlsx();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const firstSheet = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheet];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const { grid } = await readSpreadsheet(file);
+      const rows = gridToRecords(grid);
 
       const mappedRows: BorrowerPayload[] = rows
         .map((row) => {
@@ -455,11 +467,16 @@ export function BorrowersPage() {
         throw new Error("No valid member rows found in file");
       }
 
-      const result = await apiRequest<{ inserted: number; updated: number }>("/borrowers/bulk", "POST", {
+      const result = await apiRequest<{ inserted: number; updated: number; skipped?: number; skippedRows?: Array<{ cifKey: string; reason: string }> }>("/borrowers/bulk", "POST", {
         rows: mappedRows
       });
 
-      setImportMessage(`Imported members: ${result.inserted} new, ${result.updated} updated.`);
+      setImportMessage(`Imported members: ${result.inserted} new, ${result.updated} updated${result.skipped ? `, ${result.skipped} skipped` : ""}.`);
+      if (result.skippedRows?.length) {
+        const preview = result.skippedRows.slice(0, 3).map((row) => row.reason).join("; ");
+        const hidden = result.skippedRows.length > 3 ? ` and ${result.skippedRows.length - 3} more.` : "";
+        setError(`Skipped ${result.skippedRows.length} member(s): ${preview}${hidden}`);
+      }
       setIsImportOpen(false);
       void loadBorrowers().catch((refreshError) => {
         setError(refreshError instanceof Error ? refreshError.message : "Import finished but member list refresh failed");
@@ -834,14 +851,21 @@ export function BorrowersPage() {
                       <p className="mt-1 text-xs text-black/60">
                         {formatDateTime(item.createdAt)} | By: {item.createdBy}
                       </p>
-                      <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={event => {
-                        event.stopPropagation();
-                        setEditingRemarkId(item.id);
-                        setRemarkInput(item.remark);
-                        setRemarkCategory(item.remarkCategory as RemarkCategory);
-                        setRemarksError("");
-                        setRemarkAttachment(null);
-                      }}>Edit</button>
+                      {item.canEdit !== false && <div className="mt-2 flex flex-wrap items-center gap-2" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+                        <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
+                          setEditingRemarkId(item.id);
+                          setConfirmDeleteRemarkId(null);
+                          setRemarkInput(item.remark);
+                          setRemarkCategory(item.remarkCategory as RemarkCategory);
+                          setRemarksError("");
+                          setRemarkAttachment(null);
+                        }}>Edit</button>
+                        {confirmDeleteRemarkId === item.id ? <>
+                          <span className="text-xs text-red-700">Delete this remark?</span>
+                          <button type="button" className="btn-danger h-8 px-3 text-xs" disabled={remarksSubmitting} onClick={() => void handleDeleteMemberRemark(item.id)}>Yes, delete</button>
+                          <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => setConfirmDeleteRemarkId(null)}>Keep</button>
+                        </> : <button type="button" className="btn-muted h-8 px-3 text-xs text-red-700" onClick={() => setConfirmDeleteRemarkId(item.id)}>Delete</button>}
+                      </div>}
                     </li>
                   ))}
                 </ul>

@@ -9,4 +9,6 @@ export interface JwtUser {
   role: Role;
   branchId?: number | null;
   permissions?: Partial<Record<Permission, boolean>>;
+  /** Matches users.token_version; tokens issued before a password change no longer match. */
+  tokenVersion?: number;
 }

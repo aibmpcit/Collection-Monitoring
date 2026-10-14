@@ -3,11 +3,12 @@ import { Activity, AlertTriangle, BarChart3, TrendingUp, Users, WalletCards } fr
 import { useEffect, useMemo, useState } from "react";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
+import { PaginationControls } from "../components/PaginationControls";
 import { ToastNotification } from "../components/ToastNotification";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { apiRequest } from "../services/api";
-import type { DashboardMetrics, OverdueAccount } from "../types/models";
+import type { DashboardMetrics, OverdueAccount, Paged } from "../types/models";
 
 interface AnalyticsOverview {
   overdueRate: number;
@@ -77,28 +78,6 @@ function formatDate(value: string, includeTime = false): string {
   }
 
   return includeTime ? parsed.toLocaleString() : parsed.toLocaleDateString();
-}
-
-function loanOutstanding(loan: DashboardLoan): number {
-  return (
-    (loan.principalDue ?? 0) +
-    (loan.interest ?? 0) +
-    (loan.penaltyDue ?? 0) +
-    (loan.otherCharges ?? 0)
-  );
-}
-
-function daysUntil(dateText: string): number | null {
-  const due = new Date(dateText);
-  if (Number.isNaN(due.getTime())) {
-    return null;
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-
-  return Math.round((due.getTime() - today.getTime()) / 86400000);
 }
 
 function dueLabel(daysUntilDue: number): string {
@@ -187,54 +166,6 @@ function KpiCard({
   );
 }
 
-function PaginationControls({
-  currentPage,
-  totalPages,
-  totalItems,
-  pageSize,
-  onPageChange
-}: {
-  currentPage: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalItems === 0) return null;
-
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(totalItems, currentPage * pageSize);
-
-  return (
-    <div className="pagination-bar">
-      <p className="text-xs text-slate-600">
-        Showing {startItem}-{endItem} of {totalItems}
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <p className="text-xs font-semibold text-slate-700">
-          Page {currentPage} of {totalPages}
-        </p>
-        <button
-          type="button"
-          className="btn-muted btn-page"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -245,7 +176,7 @@ export function DashboardPage() {
   const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
   const [overdueRows, setOverdueRows] = useState<OverdueAccount[]>([]);
   const [payments, setPayments] = useState<DashboardPayment[]>([]);
-  const [loans, setLoans] = useState<DashboardLoan[]>([]);
+  const [dueSoon, setDueSoon] = useState<Paged<DueSoonLoan> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dueSoonPage, setDueSoonPage] = useState(1);
@@ -262,12 +193,11 @@ export function DashboardPage() {
         ? apiRequest<AnalyticsOverview>("/analytics/overview")
         : Promise.resolve(null);
 
-      const [metricsResult, analyticsResult, overdueResult, paymentsResult, loansResult] = await Promise.allSettled([
+      const [metricsResult, analyticsResult, overdueResult, paymentsResult] = await Promise.allSettled([
         apiRequest<DashboardMetrics>("/dashboard/metrics"),
         analyticsRequest,
         apiRequest<OverdueAccount[]>("/reports/overdue"),
-        apiRequest<DashboardPayment[]>("/payments"),
-        apiRequest<DashboardLoan[]>("/loans")
+        apiRequest<Paged<DashboardPayment>>("/payments?page=1&pageSize=7&sort=recent&openLoansOnly=true")
       ]);
 
       if (!active) return;
@@ -281,8 +211,7 @@ export function DashboardPage() {
 
       setAnalytics(analyticsResult.status === "fulfilled" ? analyticsResult.value : null);
       setOverdueRows(overdueResult.status === "fulfilled" ? overdueResult.value : []);
-      setPayments(paymentsResult.status === "fulfilled" ? paymentsResult.value : []);
-      setLoans(loansResult.status === "fulfilled" ? loansResult.value : []);
+      setPayments(paymentsResult.status === "fulfilled" ? paymentsResult.value.items : []);
       setLoading(false);
     }
 
@@ -293,36 +222,26 @@ export function DashboardPage() {
     };
   }, [canViewAnalytics]);
 
-  const statusCounts = useMemo(
-    () =>
-      loans.reduce(
-        (totals, loan) => {
-          if (loan.status === "active") totals.active += 1;
-          if (loan.status === "overdue") totals.overdue += 1;
-          if (loan.status !== "closed") totals.total += 1;
-          return totals;
-        },
-        { active: 0, overdue: 0, total: 0 }
-      ),
-    [loans]
-  );
+  // Counts come from the server so the dashboard never downloads every loan.
+  const statusCounts = {
+    active: metrics?.activeLoans ?? 0,
+    overdue: metrics?.overdueLoans ?? 0,
+    total: (metrics?.activeLoans ?? 0) + (metrics?.overdueLoans ?? 0)
+  };
 
-  const dueSoonRows = useMemo<DueSoonLoan[]>(
-    () =>
-      loans
-        .filter((loan) => loan.status !== "closed")
-        .map((loan) => {
-          const daysUntilDue = daysUntil(loan.maturityDate);
-          return {
-            ...loan,
-            daysUntilDue: daysUntilDue ?? Number.MAX_SAFE_INTEGER,
-            outstanding: loanOutstanding(loan)
-          };
-        })
-        .filter((loan) => loan.daysUntilDue !== Number.MAX_SAFE_INTEGER && loan.daysUntilDue >= 0)
-        .sort((a, b) => a.daysUntilDue - b.daysUntilDue),
-    [loans]
-  );
+  useEffect(() => {
+    let active = true;
+    apiRequest<Paged<DueSoonLoan>>(`/loans/due-soon?page=${dueSoonPage}&pageSize=${DASHBOARD_TABLE_PAGE_SIZE}`)
+      .then(result => {
+        if (!active) return;
+        setDueSoon(result);
+        if (result.page !== dueSoonPage) setDueSoonPage(result.page);
+      })
+      .catch(() => { if (active) setDueSoon(null); });
+    return () => { active = false; };
+  }, [dueSoonPage]);
+
+  const dueSoonTotal = dueSoon?.total ?? 0;
 
   const overdueTableRows = useMemo(
     () =>
@@ -331,10 +250,8 @@ export function DashboardPage() {
     [overdueRows]
   );
 
-  const recentCollections = useMemo(() => {
-    const openLoanIds = new Set(loans.filter((loan) => loan.status !== "closed").map((loan) => loan.id));
-    return payments.filter((payment) => openLoanIds.has(payment.loanId)).slice(0, 7);
-  }, [loans, payments]);
+  // The server already returns the latest 7 payments on open loans.
+  const recentCollections = payments;
 
   const openLoans = analytics?.activeLoans ?? statusCounts.active + statusCounts.overdue;
   const overdueRate =
@@ -344,21 +261,14 @@ export function DashboardPage() {
     metrics && overdueRows.length > 0 ? metrics.totalOverdue / overdueRows.length : 0;
   const highestOverdue = overdueTableRows.reduce((max, row) => Math.max(max, row.totalOutstanding), 0);
 
-  const totalDueSoonPages = Math.max(1, Math.ceil(dueSoonRows.length / DASHBOARD_TABLE_PAGE_SIZE));
+  const totalDueSoonPages = Math.max(1, Math.ceil(dueSoonTotal / DASHBOARD_TABLE_PAGE_SIZE));
   const totalOverduePages = Math.max(1, Math.ceil(overdueTableRows.length / DASHBOARD_TABLE_PAGE_SIZE));
-
-  useEffect(() => {
-    setDueSoonPage((current) => Math.min(current, totalDueSoonPages));
-  }, [totalDueSoonPages]);
 
   useEffect(() => {
     setOverduePage((current) => Math.min(current, totalOverduePages));
   }, [totalOverduePages]);
 
-  const paginatedDueSoonRows = useMemo(() => {
-    const start = (dueSoonPage - 1) * DASHBOARD_TABLE_PAGE_SIZE;
-    return dueSoonRows.slice(start, start + DASHBOARD_TABLE_PAGE_SIZE);
-  }, [dueSoonPage, dueSoonRows]);
+  const paginatedDueSoonRows = dueSoon?.items ?? [];
 
   const paginatedOverdueRows = useMemo(() => {
     const start = (overduePage - 1) * DASHBOARD_TABLE_PAGE_SIZE;
@@ -570,7 +480,7 @@ export function DashboardPage() {
               <button type="button" className="glass-pill hover:border-c2/30 hover:text-c2" onClick={() => handleViewMore("upcoming-due")}>
                 View More
               </button>
-              <span className="glass-pill">{dueSoonRows.length} upcoming account(s)</span>
+              <span className="glass-pill">{dueSoonTotal} upcoming account(s)</span>
             </div>
           </div>
 
@@ -597,7 +507,7 @@ export function DashboardPage() {
                 </div>
               </article>
             ))}
-            {!loading && dueSoonRows.length === 0 && (
+            {!loading && dueSoonTotal === 0 && (
               <p className="rounded-lg border border-slate-200 bg-white/60 p-3 text-sm text-slate-600">
                 No upcoming due dates to show.
               </p>
@@ -627,7 +537,7 @@ export function DashboardPage() {
                     <td>{formatCurrency(loan.outstanding)}</td>
                   </tr>
                 ))}
-                {dueSoonRows.length === 0 && (
+                {dueSoonTotal === 0 && (
                   <tr>
                     <td colSpan={5} className="py-4 text-sm text-slate-600">
                       No upcoming due dates to show.
@@ -640,7 +550,7 @@ export function DashboardPage() {
           <PaginationControls
             currentPage={dueSoonPage}
             totalPages={totalDueSoonPages}
-            totalItems={dueSoonRows.length}
+            totalItems={dueSoonTotal}
             pageSize={DASHBOARD_TABLE_PAGE_SIZE}
             onPageChange={setDueSoonPage}
           />
