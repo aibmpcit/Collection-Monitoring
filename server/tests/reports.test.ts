@@ -32,7 +32,7 @@ describe("reports summary", () => {
     const response = await fetch(`${base}/summary?from=2026-09-01&to=2026-09-30&branchId=9`);
     expect(response.status).toBe(200);
     const calls = mocks.query.mock.calls;
-    expect(calls).toHaveLength(7);
+    expect(calls).toHaveLength(9);
     for (const [sql, params] of calls) {
       expect(sql).toContain("b.branch_id = $");
       expect(params).toContain(2);
@@ -77,5 +77,52 @@ describe("user activity report", () => {
     expect(body.totals).toEqual({ users: 2, byRole: { staff: 2 }, activeUsers: 1, logins: 3, visits: 20, screenSeconds: 3600 });
     expect(body.users[0]).toMatchObject({ username: "ana", actions: 7, collected: 1500 });
     expect(body.users[1]).toMatchObject({ username: "ben", actions: 0, lastSeenAt: null });
+  });
+});
+
+describe("reports summary collector and PAR age", () => {
+  it("filters collections and remarks by collector while keeping open loans branch-wide", async () => {
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    await fetch(`${base}/summary?from=2026-09-01&to=2026-09-30&branchId=9&collectorId=4`);
+    const calls = mocks.query.mock.calls as [string, unknown[]][];
+    const collectionCalls = calls.filter(([sql]) => sql.includes("FROM collections c"));
+    expect(collectionCalls.length).toBeGreaterThan(0);
+    for (const [sql, params] of collectionCalls) {
+      expect(sql).toContain("AND b.branch_id = $3");
+      expect(sql).toContain("AND c.created_by = $4");
+      expect(params).toEqual(["2026-09-01", "2026-09-30", 9, 4]);
+    }
+    const remarkCall = calls.find(([sql]) => sql.includes("FROM loan_remarks r"))!;
+    expect(remarkCall[0]).toContain("AND b.created_by = $4");
+    const openLoans = calls.find(([sql]) => sql.includes("l.status != 'closed'"))!;
+    expect(openLoans[0]).not.toContain("created_by");
+    expect(openLoans[1]).toEqual([9]);
+  });
+
+  it("numbers the collector parameter correctly without a branch", async () => {
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    await fetch(`${base}/summary?from=2026-09-01&to=2026-09-30&collectorId=4`);
+    const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("AND c.created_by = $3");
+    expect(params).toEqual(["2026-09-01", "2026-09-30", 4]);
+  });
+
+  it("returns every PAR age group with members collected and open members", async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("AS bucket") && sql.includes("FROM collections c")) {
+        return { rows: [{ bucket: "1-30", members: 3, payments: 4, amount: 900 }, { bucket: "over-365", members: 1, payments: 1, amount: 50 }] };
+      }
+      if (sql.includes("AS bucket")) return { rows: [{ bucket: "1-30", members: 10, loans: 12 }, { bucket: "current", members: 40, loans: 41 }] };
+      return { rows: [] };
+    });
+    const body = await (await fetch(`${base}/summary?from=2026-09-01&to=2026-09-30`)).json();
+    expect(body.byParAge.map((row: { bucket: string }) => row.bucket))
+      .toEqual(["current", "1-30", "31-60", "61-90", "91-180", "181-365", "over-365"]);
+    expect(body.byParAge[1]).toMatchObject({ membersCollected: 3, payments: 4, amount: 900, openMembers: 10, openLoans: 12 });
+    expect(body.byParAge[0]).toMatchObject({ membersCollected: 0, openMembers: 40 });
+    expect(body.byParAge[6]).toMatchObject({ membersCollected: 1, openMembers: 0 });
+    const bucketSql = (mocks.query.mock.calls as [string][]).find(([sql]) => sql.includes("AS bucket"))![0];
+    expect(bucketSql).toContain("WHEN l.par_age BETWEEN 1 AND 30 THEN '1-30'");
+    expect(bucketSql).toContain("WHEN l.par_age >= 366 THEN 'over-365'");
   });
 });

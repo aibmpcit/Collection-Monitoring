@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExportChoiceDialog } from "../components/ExportChoiceDialog";
 import { PageHeader } from "../components/PageHeader";
 import { ToastNotification } from "../components/ToastNotification";
 import { getRemarkCategoryLabel } from "../constants/remarkCategories";
@@ -9,6 +10,7 @@ interface ReportSummary {
   from: string;
   to: string;
   branchId: number | null;
+  collectorId: number | null;
   summary: {
     collected: number; payments: number; membersPaid: number; loansPaid: number;
     remarks: number; membersFollowedUp: number;
@@ -18,8 +20,10 @@ interface ReportSummary {
   byCollector: { userId: number | null; username: string; role: string; amount: number; payments: number; members: number }[];
   byDay: { day: string; amount: number; payments: number }[];
   byCategory: { category: string; remarks: number; members: number }[];
+  byParAge: { bucket: string; label: string; membersCollected: number; payments: number; amount: number; openMembers: number; openLoans: number }[];
 }
 interface Branch { id: number; name: string; code: string }
+interface Account { id: number; username: string; role: string; branchId: number | null }
 interface UserActivity {
   id: number; username: string; role: string; branchName: string;
   logins: number; visits: number; screenSeconds: number; lastSeenAt: string | null;
@@ -40,6 +44,8 @@ const RANK_OPTIONS: { value: RankBy; label: string }[] = [
 ];
 const ROLE_LABELS: Record<string, string> = { super_admin: "Super admin", branch_admin: "Branch admin", staff: "Collector", las: "LAS" };
 const TOP_USERS_LIMIT = 10;
+
+const coverage = (collected: number, open: number) => open > 0 ? `${((collected / open) * 100).toFixed(1)}%` : "-";
 
 function duration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -85,11 +91,14 @@ export function ReportsPage() {
   const [to, setTo] = useState(localDateValue(today));
   const [branchId, setBranchId] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [collectorId, setCollectorId] = useState("");
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [data, setData] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [exportChoiceOpen, setExportChoiceOpen] = useState(false);
   const [userReport, setUserReport] = useState<UserActivityReport | null>(null);
   const [rankBy, setRankBy] = useState<RankBy>("actions");
   const [showAllUsers, setShowAllUsers] = useState(false);
@@ -101,18 +110,31 @@ export function ReportsPage() {
   }, [isSuperAdmin]);
 
   useEffect(() => {
+    apiRequest<Account[]>("/staff").then(setAccounts).catch(() => undefined);
+  }, []);
+
+  const collectorOptions = accounts.filter(account => !isSuperAdmin || !branchId || String(account.branchId) === branchId);
+  const collectorLabel = accounts.find(account => String(account.id) === collectorId)?.username ?? "All collectors";
+
+  useEffect(() => {
+    // Drop a collector selection that no longer belongs to the chosen branch.
+    if (collectorId && accounts.length && !collectorOptions.some(account => String(account.id) === collectorId)) setCollectorId("");
+  }, [branchId, accounts]);
+
+  useEffect(() => {
     if (!from || !to || from > to) return;
     let active = true;
     setLoading(true);
     setError("");
     const params = new URLSearchParams({ from, to });
     if (isSuperAdmin && branchId) params.set("branchId", branchId);
+    if (collectorId) params.set("collectorId", collectorId);
     apiRequest<ReportSummary>(`/reports/summary?${params}`)
       .then(result => { if (active) setData(result); })
       .catch(e => { if (active) { setError(e instanceof Error ? e.message : "Unable to load reports"); setData(null); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [from, to, branchId, isSuperAdmin, refresh]);
+  }, [from, to, branchId, collectorId, isSuperAdmin, refresh]);
 
   useEffect(() => {
     if (!isSuperAdmin || !from || !to || from > to) return;
@@ -136,6 +158,7 @@ export function ReportsPage() {
       const s = data.summary;
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([
         { Metric: "Period", Value: `${data.from} to ${data.to}` },
+        { Metric: "Collector", Value: collectorLabel },
         { Metric: "Total collected", Value: s.collected },
         { Metric: "Payments", Value: s.payments },
         { Metric: "Members paid", Value: s.membersPaid },
@@ -147,6 +170,10 @@ export function ReportsPage() {
         { Metric: "Overdue loans (current)", Value: s.overdueLoans },
         { Metric: "Overdue balance (current)", Value: s.overdueBalance }
       ]), "Summary");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.byParAge.map(row => ({
+        "PAR age": row.label, "Members collected": row.membersCollected, "Members with open loans": row.openMembers,
+        Coverage: coverage(row.membersCollected, row.openMembers), Payments: row.payments, Collected: row.amount
+      }))), "By PAR Age");
       if (isSuperAdmin) {
         XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.byBranch.map(row => ({
           Branch: row.branchName, Collected: row.amount, Payments: row.payments, Members: row.members
@@ -252,7 +279,7 @@ export function ReportsPage() {
       y += 6;
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.text(`Period: ${data.from} to ${data.to}    Branch: ${branchLabel}`, left, y);
+      pdf.text(`Period: ${data.from} to ${data.to}    Branch: ${branchLabel}    Collector: ${collectorLabel}`, left, y);
       y += 4.5;
       pdf.text(`Generated: ${new Date().toLocaleString("en-PH")} by ${user?.username ?? ""}`, left, y);
       y += 7;
@@ -268,6 +295,9 @@ export function ReportsPage() {
         ["Active loans (current)", `${s.activeLoans} / ${pdfMoney(s.activeBalance)}`],
         ["Overdue loans (current)", `${s.overdueLoans} / ${pdfMoney(s.overdueBalance)}`]
       ], [3, 2]);
+      table("Members collected by PAR age", ["PAR age", "Collected", "Open", "Coverage", "Payments", "Amount"],
+        data.byParAge.map(row => [row.label, String(row.membersCollected), String(row.openMembers),
+          coverage(row.membersCollected, row.openMembers), String(row.payments), pdfMoney(row.amount)]), [2, 1.2, 1, 1.2, 1.2, 2]);
       if (isSuperAdmin) {
         table("Collections by branch", ["Branch", "Collected", "Payments", "Members"],
           data.byBranch.map(row => [row.branchName, pdfMoney(row.amount), String(row.payments), String(row.members)]), [3, 2, 1, 1]);
@@ -335,16 +365,21 @@ export function ReportsPage() {
           {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
         </select>
       </label>}
-      <div className="grid grid-cols-2 gap-2 sm:col-span-2 lg:ml-auto lg:flex">
-        <button type="button" className="btn-muted w-full lg:w-auto" disabled={!data || exporting} onClick={() => void exportPdf()}>
-          {exporting ? "Exporting..." : "Export PDF"}
-        </button>
-        <button type="button" className="btn-primary w-full lg:w-auto" disabled={!data || exporting} onClick={() => void exportExcel()}>
-          {exporting ? "Exporting..." : "Export Excel"}
-        </button>
-      </div>
+      <label className="grid min-w-0 gap-1 text-sm lg:min-w-56">Collector
+        <select className="field" value={collectorId} onChange={event => setCollectorId(event.target.value)}>
+          <option value="">All collectors</option>
+          {collectorOptions.map(account => <option key={account.id} value={account.id}>{account.username} ({ROLE_LABELS[account.role] ?? account.role})</option>)}
+        </select>
+      </label>
+      <button type="button" className="btn-primary w-full sm:col-span-2 lg:ml-auto lg:w-auto" disabled={!data || exporting} onClick={() => setExportChoiceOpen(true)}>
+        {exporting ? "Exporting..." : "Export"}
+      </button>
       {from > to && <p className="text-sm text-red-700 sm:col-span-2" role="alert">Select a valid date range.</p>}
     </section>
+
+    <ExportChoiceDialog open={exportChoiceOpen} title="Export report"
+      description={`${from} to ${to} · uses your current filters`}
+      onExcel={() => void exportExcel()} onPdf={() => void exportPdf()} onClose={() => setExportChoiceOpen(false)} />
 
     {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
 
@@ -357,6 +392,12 @@ export function ReportsPage() {
             {note && <p className="mt-1 text-xs text-slate-500">{note}</p>}
           </section>)}
         </div>
+
+        <ReportTable title="Members collected by PAR age"
+          headers={["PAR age", "Members collected", "Members with open loans", "Coverage", "Payments", "Collected"]}
+          rows={data.byParAge.map(row => [row.label, row.membersCollected, row.openMembers,
+            coverage(row.membersCollected, row.openMembers), row.payments, money(row.amount)])}
+          empty="No loans to group." />
 
         <div className="grid gap-4 xl:grid-cols-2">
           {isSuperAdmin && <ReportTable title="Collections by branch" headers={["Branch", "Collected", "Payments", "Members"]}
@@ -433,7 +474,7 @@ export function ReportsPage() {
           </button>}
         </section>}
 
-        <p className="text-xs text-slate-500">Overdue figures reflect current loan status; all other figures cover {data.from} to {data.to}.</p>
+        <p className="text-xs text-slate-500">Overdue figures, PAR age groups and open loans reflect current loan data; collections and remarks cover {data.from} to {data.to}. A member with loans in more than one PAR age group is counted in each.</p>
       </>}
     </div>
   </main>;

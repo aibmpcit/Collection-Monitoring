@@ -93,28 +93,46 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 });
 const summaryFilters = z.object({
   from: date, to: date,
-  branchId: z.coerce.number().int().positive().optional()
+  branchId: z.coerce.number().int().positive().optional(),
+  collectorId: z.coerce.number().int().positive().optional()
 }).refine(value => value.from <= value.to);
+
+// Same groupings as the PAR age filter on the Collections page.
+export const PAR_BUCKETS = [
+  { key: "current", label: "Current (0)", min: 0, max: 0 },
+  { key: "1-30", label: "PAR 1-30", min: 1, max: 30 },
+  { key: "31-60", label: "PAR 31-60", min: 31, max: 60 },
+  { key: "61-90", label: "PAR 61-90", min: 61, max: 90 },
+  { key: "91-180", label: "PAR 91-180", min: 91, max: 180 },
+  { key: "181-365", label: "PAR 181-365", min: 181, max: 365 },
+  { key: "over-365", label: "PAR over 365", min: 366, max: null }
+] as const;
+const parBucketSql = `CASE ${PAR_BUCKETS.map(bucket => bucket.max === null
+  ? `WHEN l.par_age >= ${bucket.min} THEN '${bucket.key}'`
+  : `WHEN l.par_age BETWEEN ${bucket.min} AND ${bucket.max} THEN '${bucket.key}'`).join(" ")} ELSE 'current' END`;
 
 router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const parsed = summaryFilters.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ message: "Invalid report filters or date range" });
-    const { from, to } = parsed.data;
+    const { from, to, collectorId } = parsed.data;
     const branchId = isSuperAdmin(user) ? parsed.data.branchId : userBranchId(user);
 
-    // $1/$2 are the date range; $3 (when present) is the branch.
+    // $1/$2 are the date range, followed by the branch and collector when present.
     const params: unknown[] = [from, to];
     const scoped = branchId !== undefined;
-    const branchFilter = scoped ? "AND b.branch_id = $3" : "";
     if (scoped) params.push(branchId);
+    const branchFilter = scoped ? `AND b.branch_id = $${params.length}` : "";
+    if (collectorId) params.push(collectorId);
+    const collectorIndex = params.length;
     const loanBranchParams = scoped ? [branchId] : [];
     const loanBranchFilter = scoped ? "AND b.branch_id = $1" : "";
     const collectionSource = `FROM collections c
       JOIN loans l ON l.id = c.loan_id
       JOIN borrowers b ON b.id = l.borrower_id
-      WHERE c.collected_at >= $1 AND c.collected_at < DATE_ADD($2, INTERVAL 1 DAY) ${branchFilter}`;
+      WHERE c.collected_at >= $1 AND c.collected_at < DATE_ADD($2, INTERVAL 1 DAY) ${branchFilter}
+      ${collectorId ? `AND c.created_by = $${collectorIndex}` : ""}`;
     const remarkSource = `FROM (
         SELECT r.remark_category, r.created_by, r.created_at, b.id AS member_id, b.branch_id
         FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id
@@ -122,9 +140,10 @@ router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]),
         SELECT r.remark_category, r.created_by, r.created_at, b.id, b.branch_id
         FROM borrower_remarks r JOIN borrowers b ON b.id = r.borrower_id
       ) b
-      WHERE b.created_at >= $1 AND b.created_at < DATE_ADD($2, INTERVAL 1 DAY) ${branchFilter}`;
+      WHERE b.created_at >= $1 AND b.created_at < DATE_ADD($2, INTERVAL 1 DAY) ${branchFilter}
+      ${collectorId ? `AND b.created_by = $${collectorIndex}` : ""}`;
 
-    const [totals, remarkTotals, portfolio, byBranch, byCollector, byDay, byCategory] = await Promise.all([
+    const [totals, remarkTotals, portfolio, byBranch, byCollector, byDay, byCategory, parCollected, parPortfolio] = await Promise.all([
       query<{ amount: number; payments: number; members: number; loans: number }>(
         `SELECT COALESCE(SUM(c.amount), 0) AS amount, COUNT(*) AS payments,
            COUNT(DISTINCT b.id) AS members, COUNT(DISTINCT l.id) AS loans ${collectionSource}`, params),
@@ -152,14 +171,24 @@ router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]),
       query<{ category: string; remarks: number; members: number }>(
         `SELECT b.remark_category AS category, COUNT(*) AS remarks, COUNT(DISTINCT b.member_id) AS members
          ${remarkSource}
-         GROUP BY b.remark_category ORDER BY remarks DESC`, params)
+         GROUP BY b.remark_category ORDER BY remarks DESC`, params),
+      query<{ bucket: string; members: number; payments: number; amount: number }>(
+        `SELECT ${parBucketSql} AS bucket, COUNT(DISTINCT b.id) AS members, COUNT(*) AS payments,
+           COALESCE(SUM(c.amount), 0) AS amount
+         ${collectionSource}
+         GROUP BY bucket`, params),
+      query<{ bucket: string; members: number; loans: number }>(
+        `SELECT ${parBucketSql} AS bucket, COUNT(DISTINCT b.id) AS members, COUNT(*) AS loans
+         FROM loans l JOIN borrowers b ON b.id = l.borrower_id
+         WHERE l.status != 'closed' ${loanBranchFilter}
+         GROUP BY bucket`, loanBranchParams)
     ]);
 
     const statusTotals = (status: string) => portfolio.rows.find(row => row.status === status);
     const total = totals.rows[0];
     const remarks = remarkTotals.rows[0];
     return res.json({
-      from, to, branchId: branchId ?? null,
+      from, to, branchId: branchId ?? null, collectorId: collectorId ?? null,
       summary: {
         collected: toNumber(total?.amount ?? 0),
         payments: toNumber(total?.payments ?? 0),
@@ -181,7 +210,19 @@ router.get("/summary", authenticate, authorize(["super_admin", "branch_admin"]),
         amount: toNumber(row.amount), payments: toNumber(row.payments), members: toNumber(row.members)
       })),
       byDay: byDay.rows.map(row => ({ day: row.day, amount: toNumber(row.amount), payments: toNumber(row.payments) })),
-      byCategory: byCategory.rows.map(row => ({ category: row.category, remarks: toNumber(row.remarks), members: toNumber(row.members) }))
+      byCategory: byCategory.rows.map(row => ({ category: row.category, remarks: toNumber(row.remarks), members: toNumber(row.members) })),
+      byParAge: PAR_BUCKETS.map(bucket => {
+        const collected = parCollected.rows.find(row => row.bucket === bucket.key);
+        const open = parPortfolio.rows.find(row => row.bucket === bucket.key);
+        return {
+          bucket: bucket.key, label: bucket.label,
+          membersCollected: toNumber(collected?.members ?? 0),
+          payments: toNumber(collected?.payments ?? 0),
+          amount: toNumber(collected?.amount ?? 0),
+          openMembers: toNumber(open?.members ?? 0),
+          openLoans: toNumber(open?.loans ?? 0)
+        };
+      })
     });
   } catch (error) {
     return next(error);

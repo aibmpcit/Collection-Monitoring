@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ExportChoiceDialog } from "../components/ExportChoiceDialog";
 import { PageHeader } from "../components/PageHeader";
 import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
@@ -52,6 +53,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [exportTo, setExportTo] = useState(params.get("to") ?? initialDates.to);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [exportChoiceOpen, setExportChoiceOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
@@ -133,7 +135,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const report = await apiRequest<History>(`/collection-history?${exportParams.toString()}`);
       const { jsPDF } = await import("jspdf");
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const collector = collectorName ?? user?.username ?? "Collector";
+      const selectedAccount = accounts.find(account => String(account.id) === params.get("userId"))?.username;
+      const collector = user?.role === "staff" ? (user.username ?? "Collector") : (collectorName ?? selectedAccount ?? "All users");
       const columns = [
         { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
         { label: "Member", width: 38 }, { label: "Loan Account", width: 30 }, { label: "Type", width: 22 },
@@ -152,7 +155,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         pdf.text("Collection History Report", 10, 12);
         pdf.setFontSize(9);
         pdf.setFont("helvetica", "normal");
-        pdf.text(`Collector: ${collector}`, 10, 18);
+        pdf.text(`Account: ${collector}`, 10, 18);
         pdf.text(`Period: ${exportFrom} to ${exportTo}`, 10, 23);
         pdf.text(`Activities: ${report.total}    Total collected: ${money(Number(report.summary.amount))}`, 10, 28);
         pdf.setFillColor(0, 61, 150);
@@ -183,9 +186,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         });
         y += 7;
       });
-      if (report.items.length === 0) pdf.text("No payments found for the selected date range.", 10, 49);
-      const safeName = (collectorName ?? user?.username ?? "collector").replace(/[^a-z0-9_-]+/gi, "-");
-      pdf.save(`${safeName}-payments-${exportFrom}-to-${exportTo}.pdf`);
+      if (report.items.length === 0) pdf.text("No activity found for the selected date range.", 10, 49);
+      const safeName = collector.replace(/[^a-z0-9_-]+/gi, "-");
+      pdf.save(`collection-history-${safeName}-${exportFrom}-to-${exportTo}.pdf`);
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "Unable to export payment report.");
     } finally {
@@ -221,8 +224,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">To
             <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
           </label>
-          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => void exportExcelReport()}>
-            {exporting ? "Exporting..." : "Export Excel"}
+          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
+            {exporting ? "Exporting..." : "Export"}
           </button>
         </div>
       </div>
@@ -243,8 +246,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           </select>
         </label>
       </div>}
-      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => void exportExcelReport()}>
-        {exporting ? "Exporting..." : "Export Excel"}
+      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
+        {exporting ? "Exporting..." : "Export"}
       </button>
       {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
@@ -310,6 +313,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       </section>
     </>}
     </div>
+    <ExportChoiceDialog open={exportChoiceOpen} title="Export collection history"
+      description={`${exportFrom} to ${exportTo} · uses your current filters`}
+      onExcel={() => void exportExcelReport()} onPdf={() => void exportPaymentReport()} onClose={() => setExportChoiceOpen(false)} />
     {selectedActivity && <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-center justify-center overflow-y-auto bg-slate-950/45 p-4" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
       <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedActivity.kind === "payment" ? "Payment" : "Remark"}</p><h2 id="activity-detail-title" className="mt-1 text-xl font-bold">{selectedActivity.member_name}</h2></div><button className="btn-muted" type="button" onClick={() => setSelectedActivity(null)}>Close</button></div>
