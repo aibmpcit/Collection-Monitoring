@@ -45,7 +45,9 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (!parsed.success) return res.status(400).json({ message: "Invalid history filters or date range" });
     const filter = parsed.data;
     const selectedUserId = filter.userId ?? filter.collectorId;
-    if (user.role === "staff" && selectedUserId && selectedUserId !== user.id) {
+    // Field roles (collectors and LAS) see only their own activity.
+    const ownOnly = user.role === "staff" || user.role === "las";
+    if (ownOnly && selectedUserId && selectedUserId !== user.id) {
       return res.status(403).json({ message: "You can only view your own history" });
     }
     const params: unknown[] = [];
@@ -56,7 +58,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     };
     if (!isSuperAdmin(user)) add("a.branch_id = ?", userBranchId(user));
     if (isSuperAdmin(user) && filter.branchId) add("a.branch_id = ?", filter.branchId);
-    if (user.role === "staff" || selectedUserId) add("a.collector_id = ?", user.role === "staff" ? user.id : selectedUserId);
+    if (ownOnly || selectedUserId) add("a.collector_id = ?", ownOnly ? user.id : selectedUserId);
     if (filter.from) add("a.occurred_at >= ?", filter.from);
     if (filter.to) add("a.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)", filter.to);
     if (filter.search) add("LOCATE(?, CONCAT_WS(' ', a.member_name, a.cif_key, a.loan_account_no, a.or_no, a.remark, u.username, br.name)) > 0", filter.search);
@@ -64,6 +66,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       LEFT JOIN branches br ON br.id = a.branch_id
       LEFT JOIN remark_attachments ra ON ra.remark_id = a.id AND
         ((a.kind = 'loan_remark' AND ra.remark_kind = 'loan') OR (a.kind = 'member_remark' AND ra.remark_kind = 'member'))
+      LEFT JOIN remark_photos rp ON rp.remark_id = a.id AND
+        ((a.kind = 'loan_remark' AND rp.remark_kind = 'loan') OR (a.kind = 'member_remark' AND rp.remark_kind = 'member'))
       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
     const summary = await query<{ total: number; amount: number; payments: number; members: number; attachments: number }>(
       `SELECT COUNT(*) AS total, COALESCE(SUM(a.amount), 0) AS amount,
@@ -78,7 +82,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     const exportAll = filter.export === "true";
     const pageSize = 15;
     const page = exportAll ? 1 : Math.min(filter.page, Math.max(1, Math.ceil(total / pageSize)));
-    const rows = await query(`SELECT a.*, u.username AS collector_name, u.role AS collector_role, br.name AS branch_name, ra.file_name AS attachment_name ${rowSource}
+    const rows = await query(`SELECT a.*, u.username AS collector_name, u.role AS collector_role, br.name AS branch_name, ra.file_name AS attachment_name,
+      rp.id AS photo_id, rp.latitude AS photo_latitude, rp.longitude AS photo_longitude, rp.accuracy_m AS photo_accuracy, rp.captured_at AS photo_captured_at ${rowSource}
       ORDER BY a.occurred_at DESC, a.kind, a.id DESC${exportAll ? "" : ` LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`}`, params);
     return res.json({ items: rows.rows, summary: summary.rows[0], total, page, pageSize: exportAll ? Math.max(total, 1) : pageSize });
   } catch (error) { return next(error); }

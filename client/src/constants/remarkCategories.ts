@@ -65,7 +65,32 @@ export const IMPORT_REMARK_CATEGORIES = [
   }
 ] as const;
 
+/**
+ * Primary remarks. Recording one sets the loan's field status (the newest wins); loans nobody has
+ * acted on have no status.
+ */
+export const LOAN_ACTION_STATUSES = [
+  { value: "visited", label: "Visited" },
+  { value: "partial", label: "Partial" },
+  { value: "settled", label: "Settled" }
+] as const;
+
+export type LoanActionStatus = (typeof LOAN_ACTION_STATUSES)[number]["value"];
+
+export function isLoanActionStatus(value: string | null | undefined): value is LoanActionStatus {
+  return LOAN_ACTION_STATUSES.some(status => status.value === value);
+}
+
+/** Badge colour for a field status. */
+export function actionStatusClass(status: string | null | undefined): string {
+  if (status === "settled") return "status-success";
+  if (status === "partial") return "status-warning";
+  if (status === "visited") return "status-pill bg-violet-100 text-violet-700";
+  return "status-pill bg-slate-100 text-slate-500";
+}
+
 export const REMARK_CATEGORIES = [
+  ...LOAN_ACTION_STATUSES,
   ...IMPORT_REMARK_CATEGORIES,
   { value: "follow_up_collection", label: "Follow-up Collection" },
   { value: "with_small_claims", label: "With Small Claims" },
@@ -78,6 +103,9 @@ export const REMARK_CATEGORIES = [
 ] as const;
 
 export type RemarkCategory = (typeof REMARK_CATEGORIES)[number]["value"];
+
+/** Other (non-status) remark types; also the only types allowed on member remarks. */
+export const OTHER_REMARK_CATEGORIES = REMARK_CATEGORIES.filter(category => !isLoanActionStatus(category.value));
 
 export const DEFAULT_REMARK_CATEGORY: RemarkCategory = "follow_up_collection";
 

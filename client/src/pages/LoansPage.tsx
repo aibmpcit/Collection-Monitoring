@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
+import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, isLoanActionStatus, LOAN_ACTION_STATUSES, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
+import { RemarkCategoryOptions } from "../components/RemarkCategoryOptions";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
@@ -12,6 +13,8 @@ import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
+import { RemarkPhotoField } from "../components/RemarkPhoto";
+import { photoPayload, type CapturedPhoto } from "../services/photo";
 import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark, Paged } from "../types/models";
 import { PaginationControls } from "../components/PaginationControls";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -20,15 +23,24 @@ import { LoanImportDialog } from "./loans/LoanImportDialog";
 import { LoanRecordField } from "./loans/LoanRecordField";
 import { PaymentRecordsPanel } from "./loans/PaymentRecordsPanel";
 import { RemarkRecordsPanel } from "./loans/RemarkRecordsPanel";
+import { SettledAccountsPanel } from "./loans/SettledAccountsPanel";
 import type { LoanListPage, LoanQuickRef, LoanRow, PaymentRecordRow, RemarkGroupRow, RemarkRecordRow } from "./loans/types";
 
 const SEARCH_DEBOUNCE_MS = 300;
+
+type RecordsTab = "loans" | "payments" | "remarks" | "settled";
+// Collectors and LAS on phones get just the search box; the extra filters stay on larger screens.
+const COLLECTOR_MOBILE_HIDDEN = "hidden lg:block ";
+const isSecondaryTab = (tab: string | null): tab is Exclude<RecordsTab, "loans"> =>
+  tab === "payments" || tab === "remarks" || tab === "settled";
 
 export function LoansPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isCollector = user?.role === "staff";
+  // Collectors and LAS work in the field, so they share the simpler phone layout.
+  const isFieldUser = isCollector || user?.role === "las";
   const isBranchManager = user?.role === "branch_admin";
   const canAddLoans = user?.role === "super_admin" || user?.role === "branch_admin";
   const canImportLoans = hasPermission(user, "import_collections");
@@ -62,16 +74,16 @@ export function LoansPage() {
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
   const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
+  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
   const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
   const [loanQuery, setLoanQuery] = useState("");
   const [loanTypeFilter, setLoanTypeFilter] = useState("");
   const [parAgeFilter, setParAgeFilter] = useState("");
-  const [activeRecordsTab, setActiveRecordsTab] = useState<"loans" | "payments" | "remarks">(
-    !isCollector && (searchParams.get("tab") === "payments" || searchParams.get("tab") === "remarks")
-      ? searchParams.get("tab") as "payments" | "remarks"
-      : "loans"
+  const [actionStatusFilter, setActionStatusFilter] = useState("");
+  const [activeRecordsTab, setActiveRecordsTab] = useState<RecordsTab>(
+    !isCollector && isSecondaryTab(searchParams.get("tab")) ? searchParams.get("tab") as RecordsTab : "loans"
   );
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecordRow[]>([]);
   const [paymentQuery, setPaymentQuery] = useState("");
@@ -136,6 +148,7 @@ export function LoansPage() {
   const debouncedLoanQuery = useDebouncedValue(loanQuery.trim(), SEARCH_DEBOUNCE_MS);
   const debouncedPaymentQuery = useDebouncedValue(paymentQuery.trim(), SEARCH_DEBOUNCE_MS);
   const branchFilterId = user?.role === "super_admin" && selectedBranchId > 0 ? selectedBranchId : 0;
+  const collectorFilterClass = isFieldUser ? COLLECTOR_MOBILE_HIDDEN : "";
 
   const debouncedRemarkQuery = useDebouncedValue(remarkQuery.trim(), SEARCH_DEBOUNCE_MS);
 
@@ -183,7 +196,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setLoanPage(1);
-  }, [debouncedLoanQuery, loanTypeFilter, parAgeFilter, branchFilterId]);
+  }, [debouncedLoanQuery, loanTypeFilter, parAgeFilter, actionStatusFilter, branchFilterId]);
 
   useEffect(() => {
     setPaymentPage(1);
@@ -234,7 +247,7 @@ export function LoansPage() {
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
-    if (!isCollector && (requestedTab === "payments" || requestedTab === "remarks")) {
+    if (!isCollector && isSecondaryTab(requestedTab)) {
       setActiveRecordsTab(requestedTab);
       return;
     }
@@ -320,6 +333,7 @@ export function LoansPage() {
     if (debouncedLoanQuery) params.set("search", debouncedLoanQuery);
     if (loanTypeFilter) params.set("loanType", loanTypeFilter);
     if (parAgeFilter) params.set("parAge", parAgeFilter);
+    if (actionStatusFilter) params.set("actionStatus", actionStatusFilter);
     if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
     return params;
   }
@@ -441,7 +455,7 @@ export function LoansPage() {
 
   useEffect(() => {
     void loadLoanPage();
-  }, [loanPage, rowsPerPage, debouncedLoanQuery, loanTypeFilter, parAgeFilter, branchFilterId, listRefresh]);
+  }, [loanPage, rowsPerPage, debouncedLoanQuery, loanTypeFilter, parAgeFilter, actionStatusFilter, branchFilterId, listRefresh]);
 
   useEffect(() => {
     void loadPaymentPage();
@@ -593,6 +607,7 @@ export function LoansPage() {
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setRemarkAttachment(null);
+    setRemarkPhoto(undefined);
     setRemarks([]);
     setSummaryRemark(null);
     setIsRemarksOpen(true);
@@ -605,6 +620,7 @@ export function LoansPage() {
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setRemarkAttachment(null);
+    setRemarkPhoto(undefined);
     setRemarks([]);
     setRemarkError("");
   }
@@ -613,15 +629,19 @@ export function LoansPage() {
     event.preventDefault();
     if (!remarkLoan) return;
     const remark = remarkInput.trim();
-    if (!remark) return;
+    // A status (primary remark) can be saved without a note.
+    if (!remark && !isLoanActionStatus(remarkCategory)) return;
 
     setRemarkError("");
     try {
       const attachment = await fileToAttachment(remarkAttachment);
-      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory, attachment });
+      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) });
       setRemarkInput("");
       setRemarkAttachment(null);
+      setRemarkPhoto(undefined);
       await loadRemarks(remarkLoan.id);
+      // A new status changes the loan's badge in the list.
+      if (isLoanActionStatus(remarkCategory)) setListRefresh((value) => value + 1);
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to add remark");
     }
@@ -1031,25 +1051,22 @@ export function LoansPage() {
                     onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                     required
                   >
-                    {REMARK_CATEGORIES.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
+                    <RemarkCategoryOptions />
                   </select>
                 </label>
                 <textarea
                   className="field"
                   value={remarkInput}
                   onChange={(event) => setRemarkInput(event.target.value)}
-                  placeholder="Add a new remark..."
+                  placeholder={isLoanActionStatus(remarkCategory) ? "Optional note" : "Add a new remark..."}
                   rows={3}
-                  required
+                  required={!isLoanActionStatus(remarkCategory)}
                 />
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Attachment (optional, max 5 MB)
                   <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
                 </label>
+                <RemarkPhotoField photo={remarkPhoto} hasExisting={false} onChange={setRemarkPhoto} />
                 <div className="flex justify-end">
                   <button type="submit" className="btn-primary">
                     Add Remark
@@ -1303,6 +1320,8 @@ export function LoansPage() {
           member={{ name: selectedLoan?.memberName ?? remarkLoan.memberName, cifKey: selectedLoan?.cifKey, contact: selectedLoan?.contactInfo, address: selectedLoan?.address }}
           loan={{ accountNo: remarkLoan.loanAccountNo, type: selectedLoan?.loanType, status: selectedLoan?.status, maturityDate: selectedLoan ? formatDate(selectedLoan.maturityDate) : undefined }}
           attachmentName={summaryRemark.attachmentName}
+          photo={summaryRemark.photo}
+          photoPath={`/loans/${remarkLoan.id}/remarks/${summaryRemark.id}/photo`}
           onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/loans/${remarkLoan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarkError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
           onClose={() => setSummaryRemark(null)} />;
       })()}
@@ -1394,7 +1413,8 @@ export function LoansPage() {
             {([
               ["loans", "Loan Records"],
               ["remarks", "Remarks"],
-              ["payments", "Payments"]
+              ["payments", "Payments"],
+              ["settled", "Settled Accounts"]
             ] as const).map(([tab, label]) => (
               <button
                 key={tab}
@@ -1427,7 +1447,7 @@ export function LoansPage() {
                   />
                 </div>
                 <select
-                  className="field min-w-0 w-full sm:w-52 md:w-44 md:shrink-0"
+                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-52 md:w-44 md:shrink-0`}
                   value={loanTypeFilter}
                   onChange={(event) => setLoanTypeFilter(event.target.value)}
                   aria-label="Filter by loan type"
@@ -1436,7 +1456,7 @@ export function LoansPage() {
                   {loanTypeOptions.map((loanType) => <option key={loanType} value={loanType}>{loanType}</option>)}
                 </select>
                 <select
-                  className="field min-w-0 w-full sm:w-48 md:w-40 md:shrink-0"
+                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-48 md:w-40 md:shrink-0`}
                   value={parAgeFilter}
                   onChange={(event) => setParAgeFilter(event.target.value)}
                   aria-label="Filter by PAR age"
@@ -1448,6 +1468,16 @@ export function LoansPage() {
                   <option value="91-180">PAR 91-180</option>
                   <option value="181-365">PAR 181-365</option>
                   <option value="over-365">PAR over 365</option>
+                </select>
+                <select
+                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-44 md:w-40 md:shrink-0`}
+                  value={actionStatusFilter}
+                  onChange={(event) => setActionStatusFilter(event.target.value)}
+                  aria-label="Filter by status"
+                >
+                  <option value="">All statuses</option>
+                  <option value="none">No action yet</option>
+                  {LOAN_ACTION_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
                 </select>
               </div>
               {canDeleteLoans && (
@@ -1479,7 +1509,7 @@ export function LoansPage() {
                 </div>
               )}
             </div>
-            {user?.role === "staff" ? (
+            {isFieldUser ? (
               <div className="mobile-record-list mt-3">
                 {paginatedLoans.map((loan) => (
                   <button
@@ -1494,7 +1524,9 @@ export function LoansPage() {
                       <p className="mt-1 text-xs text-slate-500">{loan.loanType}</p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
-                      <span className={loanStatusClass(loan.status)}>{loan.status}</span>
+                      {loan.actionStatus
+                        ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span>
+                        : <span className={loanStatusClass(loan.status)}>{loan.status}</span>}
                       <span className="text-sm font-semibold text-slate-700">{formatCurrency(loan.loanAmount)}</span>
                     </div>
                   </button>
@@ -1521,6 +1553,7 @@ export function LoansPage() {
                           />
                         )}
                         <span className={loanStatusClass(loan.status)}>{loan.status}</span>
+                        {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span>}
                       </div>
                     </div>
 
@@ -1584,6 +1617,7 @@ export function LoansPage() {
                     <th>Address</th>
                     <th>Loan Type</th>
                     <th>PAR Age</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1595,6 +1629,7 @@ export function LoansPage() {
                     <td>{loan.address || "-"}</td>
                     <td>{loan.loanType || "-"}</td>
                     <td>{loan.parAge}</td>
+                    <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">No action yet</span>}</td>
                   </tr>)}
                 </tbody>
               </table>
@@ -1633,6 +1668,7 @@ export function LoansPage() {
                     <th>Fines</th>
                     <th>Total</th>
                     <th>PAR Age</th>
+                    <th>Status</th>
                     <th>Remarks</th>
                   </tr>
                 </thead>
@@ -1708,6 +1744,7 @@ export function LoansPage() {
                       <td>{formatCurrency(loan.penaltyDue)}</td>
                       <td>{formatCurrency(loan.total)}</td>
                       <td>{loan.parAge}</td>
+                      <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">-</span>}</td>
                       {isBranchManager ? (
                         <td title={loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")}>
                           {loan.latestRemarks.length ? (
@@ -1739,6 +1776,8 @@ export function LoansPage() {
               onPageChange={setLoanPage}
             />
           </>
+        ) : activeRecordsTab === "settled" ? (
+          <SettledAccountsPanel branchId={branchFilterId} />
         ) : activeRecordsTab === "payments" ? (
           <PaymentRecordsPanel
             paymentQuery={paymentQuery}

@@ -22,6 +22,11 @@ export function mapLoanRow(row: Record<string, unknown>) {
     penalty: toNumber(row.penalty_due ?? row.penalty ?? 0),
     dueDate: String(row.due_date ?? row.maturity_date ?? ""),
     status: String(row.status ?? "active"),
+    actionStatus: row.action_status ? String(row.action_status) : null,
+    actionStatusAt: row.action_status_at ? String(row.action_status_at) : null,
+    actionStatusBy: row.action_status_by_name ? String(row.action_status_by_name) : null,
+    closedReason: row.closed_reason ? String(row.closed_reason) : null,
+    closedAt: row.closed_at ? String(row.closed_at) : null,
     importedAt: String(row.imported_at ?? row.created_at ?? "")
   };
 }

@@ -5,12 +5,14 @@ import { authenticate, authorize, authorizePermission, type AuthedRequest } from
 import {
   assertBranchAccess,
   canManageRemark,
+  isLoanActionStatus,
   getRequestUser,
   isSuperAdmin,
   normalizeRemarkCategory,
   userBranchId
 } from "../services/access.js";
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
+import { deleteRemarkPhoto, getRemarkPhoto, mapPhotoColumns, parsePhoto, PHOTO_COLUMNS, saveRemarkPhoto } from "../services/remarkPhotos.js";
 import { identifierKey, identifierKeySql } from "../services/identifiers.js";
 
 const router = Router();
@@ -473,6 +475,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
       username: string | null;
       attachment_name: string | null;
       author_id: number | null;
+      [column: string]: unknown;
     }>(
       `SELECT
          br.id,
@@ -482,10 +485,12 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
          br.remark_category,
          br.created_at,
          u.username,
-         ra.file_name AS attachment_name
+         ra.file_name AS attachment_name,
+         ${PHOTO_COLUMNS}
        FROM borrower_remarks br
        LEFT JOIN users u ON u.id = br.created_by
        LEFT JOIN remark_attachments ra ON ra.remark_kind = 'member' AND ra.remark_id = br.id
+       LEFT JOIN remark_photos rp ON rp.remark_kind = 'member' AND rp.remark_id = br.id
        WHERE br.borrower_id = $1
        ${user.role === "staff" ? "AND br.created_by = $2" : ""}
        ORDER BY br.created_at DESC, br.id DESC`,
@@ -501,7 +506,8 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
         createdAt: row.created_at,
         createdBy: row.username ?? "System",
         canEdit: canManageRemark(user, row.author_id),
-        attachmentName: row.attachment_name
+        attachmentName: row.attachment_name,
+        ...mapPhotoColumns(row)
       }))
     );
   } catch (error) {
@@ -528,12 +534,15 @@ router.post("/:borrowerId/remarks", authenticate, authorizePermission("add_remar
     assertBranchAccess(user, branchId);
 
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    if (isLoanActionStatus(category)) return res.status(400).json({ message: "Loan statuses can only be set on a loan" });
     const attachment = parseAttachment(req.body?.attachment);
+    const photo = parsePhoto(req.body?.photo);
     const created = await query<{ id: number }>(
       "INSERT INTO borrower_remarks (borrower_id, remark_text, remark_category, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
       [borrowerId, remark, category, user.id]
     );
     await saveRemarkAttachment("member", created.rows[0].id, attachment);
+    await saveRemarkPhoto("member", created.rows[0].id, photo);
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -575,9 +584,12 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     if (!remark) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
+    if (isLoanActionStatus(category)) return res.status(400).json({ message: "Loan statuses can only be set on a loan" });
     const attachment = parseAttachment(req.body?.attachment);
+    const photo = parsePhoto(req.body?.photo);
     await query("UPDATE borrower_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
     await saveRemarkAttachment("member", remarkId, attachment);
+    await saveRemarkPhoto("member", remarkId, photo);
     return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);
@@ -608,6 +620,7 @@ router.delete("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_
     }
     await withTransaction(async client => {
       await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'member' AND remark_id = $1", [remarkId]);
+      await deleteRemarkPhoto(client, "member", remarkId);
       await client.query("DELETE FROM borrower_remarks WHERE id = $1", [remarkId]);
     });
     return res.json({ message: "Remark deleted" });
@@ -635,6 +648,29 @@ router.get("/:borrowerId/remarks/:remarkId/attachment", authenticate, async (req
     res.setHeader("Content-Type", attachment.mime_type);
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
     return res.send(attachment.file_data);
+  } catch (error) { return next(error); }
+});
+
+router.get("/:borrowerId/remarks/:remarkId/photo", authenticate, async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const ownerId = Number(req.params.borrowerId);
+    const remarkId = Number(req.params.remarkId);
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT br.created_by, b.branch_id FROM borrower_remarks br
+       INNER JOIN borrowers b ON b.id = br.borrower_id
+       WHERE br.id = $1 AND br.borrower_id = $2 LIMIT 1`, [remarkId, ownerId]
+    );
+    const remark = existing.rows[0];
+    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
+    const photo = await getRemarkPhoto("member", remarkId);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+    res.setHeader("Content-Type", photo.mime_type);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
+    return res.send(photo.file_data);
   } catch (error) { return next(error); }
 });
 

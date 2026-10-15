@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { ensureRemarkAttachmentTable } from "./remarkAttachments.js";
+import { ensureRemarkPhotoTable } from "./remarkPhotos.js";
 
 // Idempotent structural upgrades for databases created from an older schema.mysql.sql.
 // Runs from the migrate script and again at server start, so `npm start` alone is safe.
@@ -38,6 +39,16 @@ export async function ensureSchema() {
     await query("ALTER TABLE loans ADD COLUMN total DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER other_charges");
   }
 
+  // Why and when a loan was closed: "not_in_import" (settled: missing from its branch's upload) or "deleted".
+  if (!(await columnExists("loans", "closed_reason"))) {
+    await query("ALTER TABLE loans ADD COLUMN closed_reason VARCHAR(16) NULL, ADD COLUMN closed_at DATETIME NULL");
+  }
+
+  // Field status from the latest primary remark (visited, partial, settled).
+  if (!(await columnExists("loans", "action_status"))) {
+    await query("ALTER TABLE loans ADD COLUMN action_status VARCHAR(16) NULL, ADD COLUMN action_status_at DATETIME NULL, ADD COLUMN action_status_by INT UNSIGNED NULL");
+  }
+
   if (!(await columnExists("users", "permissions"))) {
     await query("ALTER TABLE users ADD COLUMN permissions JSON NULL");
   }
@@ -54,6 +65,7 @@ export async function ensureSchema() {
   }
 
   await ensureRemarkAttachmentTable();
+  await ensureRemarkPhotoTable();
   await query(`CREATE TABLE IF NOT EXISTS user_activity_daily (
     user_id INT UNSIGNED NOT NULL,
     day DATE NOT NULL,
@@ -100,4 +112,6 @@ export async function ensureSchema() {
   await ensureIndex("loan_remarks", "idx_loan_remarks_created", "created_at");
   await ensureIndex("borrower_remarks", "idx_borrower_remarks_created", "created_at");
   await ensureIndex("loans", "idx_loans_status", "status");
+  await ensureIndex("loans", "idx_loans_action_status", "action_status");
+  await ensureIndex("loans", "idx_loans_closed", "status, closed_reason, closed_at");
 }

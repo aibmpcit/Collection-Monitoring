@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
-import { getRequestUser, isSuperAdmin, REMARK_CATEGORIES, toNumber, userBranchId } from "../services/access.js";
+import { getRequestUser, isSuperAdmin, LOAN_ACTION_STATUSES, REMARK_CATEGORIES, toNumber, userBranchId } from "../services/access.js";
 import { mapLoanRow } from "../services/loanRows.js";
 import { PAR_BUCKET_KEYS, parBucketCondition } from "../services/parBuckets.js";
 
@@ -64,6 +64,11 @@ const LOAN_LIST_COLUMNS = `
          l.penalty,
          l.due_date,
          l.status,
+         l.action_status,
+         l.action_status_at,
+         asu.username AS action_status_by_name,
+         l.closed_reason,
+         l.closed_at,
          DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
          recent.latest_remark_1,
          recent.latest_remark_category_1,
@@ -118,9 +123,13 @@ const loanListFilters = z.object({
   search: z.string().trim().max(120).optional(),
   loanType: z.string().trim().max(120).optional(),
   parAge: z.enum(PAR_BUCKET_KEYS).optional(),
+  // A field status, or "none" for loans nobody has acted on yet.
+  actionStatus: z.enum([...LOAN_ACTION_STATUSES, "none"]).optional(),
   branchId: z.coerce.number().int().positive().optional(),
   borrowerId: z.coerce.number().int().positive().optional(),
   includeClosed: z.literal("true").optional(),
+  // Settled Accounts: loans closed because they were not in their branch's latest upload.
+  settled: z.literal("true").optional(),
   idsOnly: z.literal("true").optional()
 });
 
@@ -148,18 +157,23 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (isSuperAdmin(user) && filter.branchId) add(scope, "b.branch_id = ?", filter.branchId);
 
     const conditions = [...scope];
-    if (paged && filter.includeClosed !== "true") conditions.push("l.status != 'closed'");
+    if (filter.settled === "true") conditions.push("l.status = 'closed' AND l.closed_reason = 'not_in_import'");
+    else if (paged && filter.includeClosed !== "true") conditions.push("l.status != 'closed'");
     if (filter.borrowerId) add(conditions, "l.borrower_id = ?", filter.borrowerId);
     if (filter.loanType) add(conditions, "l.loan_type = ?", filter.loanType);
     if (filter.parAge) conditions.push(parBucketCondition(filter.parAge));
+    if (filter.actionStatus === "none") conditions.push("l.action_status IS NULL");
+    else if (filter.actionStatus) add(conditions, "l.action_status = ?", filter.actionStatus);
     if (filter.search) {
       add(conditions, `LOCATE(?, CONCAT_WS(' ', b.cif_key, l.loan_account_no, b.member_name, l.loan_type, l.status,
         b.contact_info, b.address, l.notes)) > 0`, filter.search);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const order = paged
-      ? "ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id"
-      : "ORDER BY l.id DESC";
+    const order = filter.settled === "true"
+      ? "ORDER BY l.closed_at DESC, COALESCE(b.member_name, ''), l.id"
+      : paged
+        ? "ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id"
+        : "ORDER BY l.id DESC";
     const matching = `FROM loans l INNER JOIN borrowers b ON b.id = l.borrower_id ${where}`;
 
     if (filter.idsOnly === "true") {
@@ -185,6 +199,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
        FROM page_loans pl
        INNER JOIN loans l ON l.id = pl.id
        INNER JOIN borrowers b ON b.id = l.borrower_id
+       LEFT JOIN users asu ON asu.id = l.action_status_by
        ${RECENT_REMARKS_JOIN}
        ${order}`,
       params

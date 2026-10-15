@@ -1,3 +1,5 @@
+import { Camera, Paperclip } from "lucide-react";
+import { RemarkPhotoView } from "../components/RemarkPhoto";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ExportChoiceDialog } from "../components/ExportChoiceDialog";
@@ -16,13 +18,32 @@ interface Activity {
   attachment_name?: string | null;
   loan_type?: string | null; maturity_date?: string | null; loan_status?: string | null;
   contact_info?: string | null; address?: string | null; collector_role?: string | null;
+  photo_id?: number | null; photo_latitude?: number | string | null; photo_longitude?: number | string | null;
+  photo_accuracy?: number | string | null; photo_captured_at?: string | null;
 }
+
+const remarkPath = (item: Activity) => item.kind === "member_remark"
+  ? `/borrowers/${item.member_id}/remarks/${item.id}`
+  : `/loans/${item.loan_id}/remarks/${item.id}`;
+
+const toNumberOrNull = (value: unknown) => value === null || value === undefined || value === "" ? null : Number(value);
 interface History {
   items: Activity[];
   summary: { total: number; amount: number; payments: number; members: number; attachments?: number };
   total: number; page: number; pageSize: number;
 }
 const money = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
+
+const plainDateTime = (value: string) => value.replace("T", " ").replace(/\.\d+Z?$/, "");
+
+/** Short date and time for phone cards, e.g. "Oct 15, 7:30 AM". */
+function shortDateTime(value: string) {
+  const parsed = new Date(plainDateTime(value).replace(" ", "T"));
+  if (Number.isNaN(parsed.getTime())) return plainDateTime(value);
+  return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const ACTIVITY_TABS = [["all", "All"], ["payments", "Payments"], ["remarks", "Remarks"]] as const;
 
 function localDateValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -42,6 +63,8 @@ export function CollectorHistoryPage() {
 
 function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) {
   const { user } = useAuth();
+  // Collectors and LAS see only their own activity, as "My Collection History".
+  const isFieldUser = user?.role === "staff" || user?.role === "las";
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<History | null>(null);
   const [error, setError] = useState("");
@@ -60,8 +83,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const activeTab = params.get("type") ?? "all";
   const requestParams = new URLSearchParams(params);
   requestParams.delete("type");
-  if (user?.role !== "staff") requestParams.delete("collectorId");
-  if (user?.role === "staff") requestParams.set("collectorId", String(user.id));
+  if (!isFieldUser) requestParams.delete("collectorId");
+  if (isFieldUser) requestParams.set("collectorId", String(user.id));
   if (activeTab !== "all") requestParams.set("type", activeTab);
   // The date inputs default to this month before the URL has dates, so totals must follow the inputs.
   if (exportFrom) requestParams.set("from", exportFrom); else requestParams.delete("from");
@@ -131,7 +154,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     try {
       const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
       if (activeTab !== "all") exportParams.set("type", activeTab);
-      const selectedCollectorId = user?.role === "staff" ? String(user.id) : params.get("collectorId");
+      const selectedCollectorId = isFieldUser ? String(user.id) : params.get("collectorId");
       if (selectedCollectorId) exportParams.set("collectorId", selectedCollectorId);
       if (params.get("userId")) exportParams.set("userId", params.get("userId")!);
       if (params.get("branchId")) exportParams.set("branchId", params.get("branchId")!);
@@ -139,7 +162,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const { jsPDF } = await import("jspdf");
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const selectedAccount = accounts.find(account => String(account.id) === params.get("userId"))?.username;
-      const collector = user?.role === "staff" ? (user.username ?? "Collector") : (collectorName ?? selectedAccount ?? "All users");
+      const collector = isFieldUser ? (user.username ?? "Collector") : (collectorName ?? selectedAccount ?? "All users");
       const columns = [
         { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
         { label: "Member", width: 38 }, { label: "Loan Account", width: 30 }, { label: "Type", width: 22 },
@@ -201,23 +224,31 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return <main className="page-shell">
-    {user?.role !== "staff" && <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>}
-    <PageHeader title={collectorName ? `${collectorName}'s History` : user?.role === "staff" ? "My Collection History" : "Collection History"}
+    {!isFieldUser && <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>}
+    <PageHeader title={collectorName ? `${collectorName}'s History` : isFieldUser ? "My Collection History" : "Collection History"}
       eyebrow="Collection Activity"
-      actions={<button className="btn-muted max-md:absolute max-md:right-4 max-md:top-4" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
+      actions={<button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
     {!loading && data && (
-      <div className={`${user?.role === "staff" ? "hidden lg:grid" : "grid"} grid-cols-2 gap-3 xl:grid-cols-4`}>
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
         {[["Total collected", money(Number(data.summary.amount))], ["Payments", data.summary.payments],
           ["Members reached", data.summary.members], ["Follow-up notes", data.summary.total - data.summary.payments]].map(([label, value]) =>
-          <section className="panel p-4" key={label}><p className="text-sm text-slate-600">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></section>)}
+          <section className="panel min-w-0 p-3 sm:p-4" key={label}>
+            <p className="text-xs text-slate-600 sm:text-sm">{label}</p>
+            <p className="mt-1 truncate text-lg font-bold sm:text-2xl">{value}</p>
+          </section>)}
       </div>
     )}
     <section className="panel p-4 lg:flex lg:flex-wrap lg:items-end lg:gap-3">
+      {isFieldUser && <div role="tablist" aria-label="Activity type" className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 lg:mb-0 lg:w-full lg:max-w-sm">
+        {ACTIVITY_TABS.map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${activeTab === value ? "bg-white text-brand-700 shadow-sm" : "text-slate-600"}`}
+          onClick={() => change("type", value === "all" ? "" : value)}>{label}</button>)}
+      </div>}
       <div className="flex flex-col gap-4 lg:contents">
         <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid min-w-0 flex-1 gap-1 text-sm">
           <label htmlFor="history-search">Search activity</label>
           <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
-            placeholder="Member, collector, loan, receipt, note" onChange={event => setSearch(event.target.value)} />
+            placeholder={isFieldUser ? "Member, loan, receipt, note" : "Member, collector, loan, receipt, note"} onChange={event => setSearch(event.target.value)} />
             <button className="btn-muted" type="submit">Search</button></div>
         </form>
         <div className="grid min-w-0 grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap lg:shrink-0 lg:flex-nowrap">
@@ -264,46 +295,55 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <div className="surface-soft p-3"><p className="text-xs text-slate-600">Attachments</p><p className="mt-1 text-xl font-bold">{Number(data.summary.attachments ?? 0)}</p></div>
         </div>}
         <p className="mb-3 text-sm text-slate-600">{data.total} activities matching your filters. Latest first.</p>
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <ul className="grid gap-2 lg:hidden" aria-label="Collection activity">
+          {data.items.map(item => <li key={`${item.kind}-${item.id}`}>
+            <button type="button" onClick={() => setSelectedActivity(item)}
+              className="surface-soft block w-full p-3 text-left transition active:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600">
+              <span className="flex items-start justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold text-slate-900">{item.member_name}</span>
+                  <span className="mt-0.5 block truncate text-xs text-slate-500">
+                    {item.loan_account_no || (item.kind === "member_remark" ? "Member note" : "No loan account")}
+                    {!isFieldUser && item.branch_name ? ` · ${item.branch_name}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right">
+                  {item.kind === "payment"
+                    ? <span className="block font-semibold text-emerald-700">{money(Number(item.amount))}</span>
+                    : <span className="inline-block max-w-[9rem] truncate rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700">{getRemarkCategoryLabel(item.category)}</span>}
+                  <span className="mt-0.5 block text-[11px] text-slate-500">{shortDateTime(item.occurred_at)}</span>
+                </span>
+              </span>
+              {item.kind === "payment"
+                ? <span className="mt-2 block text-xs text-slate-600">Receipt: {item.or_no || "Not provided"}</span>
+                : item.remark && <span className="mt-2 block line-clamp-2 whitespace-pre-wrap break-words text-sm text-slate-700">{item.remark}</span>}
+              {(!isFieldUser || item.attachment_name || item.photo_id) && <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                {!isFieldUser && <span>By {item.collector_name || "Unattributed"}</span>}
+                {item.photo_id && <span className="inline-flex items-center gap-1"><Camera size={12} aria-hidden="true" />Photo</span>}
+                {item.attachment_name && <span className="inline-flex items-center gap-1"><Paperclip size={12} aria-hidden="true" />Attachment</span>}
+              </span>}
+            </button>
+          </li>)}
+          {data.items.length === 0 && <li className="py-8 text-center text-slate-500">No collection activity found for these filters.</li>}
+        </ul>
+        <div className="hidden overflow-x-auto rounded-xl border border-slate-200 lg:block">
           <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>Remarks / receipt</span><span>Date</span></div>
           <div className="grid min-w-[1200px] gap-0">
           {data.items.map(item => <article key={`${item.kind}-${item.id}`} tabIndex={0} role="button"
             onClick={() => setSelectedActivity(item)}
             onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedActivity(item); } }}
-            className="cursor-pointer border-b border-slate-200 bg-white px-4 py-3 text-sm transition hover:bg-brand-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 [&>div:not(:first-child)]:hidden [&>p]:hidden">
-            <div className="grid grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] items-center gap-3">
-              <span className="font-semibold text-slate-900">{item.member_name}<small className="block font-normal text-slate-500">{item.branch_name || "No branch"}</small></span>
-              <span className="text-brand-700">{item.loan_account_no || "-"}</span>
-              <span>{item.loan_type || "-"}</span>
-              <span>{item.collector_name || "Unattributed"}</span>
-              <span>{item.kind === "payment" ? "Payment" : "Remark"}</span>
-              <span>{item.kind === "payment" ? money(Number(item.amount)) : "-"}</span>
+            className="grid cursor-pointer grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 text-sm transition hover:bg-brand-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600">
+            <span className="font-semibold text-slate-900">{item.member_name}<small className="block font-normal text-slate-500">{item.branch_name || "No branch"}</small></span>
+            <span className="text-brand-700">{item.loan_account_no || "-"}</span>
+            <span>{item.loan_type || "-"}</span>
+            <span>{item.collector_name || "Unattributed"}</span>
+            <span>{item.kind === "payment" ? "Payment" : "Remark"}</span>
+            <span>{item.kind === "payment" ? money(Number(item.amount)) : "-"}</span>
+            <span className="flex min-w-0 items-center gap-1">
+              {item.attachment_name && <Paperclip size={12} className="shrink-0 text-slate-400" aria-label="Has attachment" />}
               <span className="truncate">{item.kind === "payment" ? `Receipt: ${item.or_no || "Not provided"}` : (item.remark || getRemarkCategoryLabel(item.category))}</span>
-              <span className="text-slate-500">{item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</span>
-            </div>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div><h2 className="font-semibold">{item.member_name}</h2><p className="text-xs text-slate-500">CIF: {item.cif_key || "—"} · {item.branch_name || "No branch"}</p></div>
-              <div className="sm:text-right"><p className="font-semibold">{item.kind === "payment" ? money(Number(item.amount)) : getRemarkCategoryLabel(item.category)}</p>
-                <p className="text-xs text-slate-500">{item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</p></div>
-            </div>
-            <p className="mt-2 text-sm">Recorded by <strong>{item.collector_name || "Deleted account / unattributed"}</strong>
-              {item.loan_id && <> · <Link className="font-medium text-brand-700 underline" to={`/loan-details/${item.loan_id}`}>{item.loan_account_no || `Loan #${item.loan_id}`}</Link></>}</p>
-            {item.kind === "payment" ? <p className="mt-1 text-sm text-slate-600">Payment PAY-{String(item.id).padStart(6, "0")} · Receipt: {item.or_no || "Not provided"}</p>
-              : <>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{item.kind === "member_remark" ? "Member note" : "Loan note"}</p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.remark}</p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="surface-soft p-3"><p className="text-xs text-slate-500">Member details</p><p className="mt-1 text-sm font-semibold">{item.member_name}</p><p className="text-xs text-slate-600">CIF: {item.cif_key || "-"}</p><p className="text-xs text-slate-600">Contact: {item.contact_info || "-"}</p></div>
-                  <div className="surface-soft p-3"><p className="text-xs text-slate-500">Address and branch</p><p className="mt-1 text-sm">{item.address || "-"}</p><p className="text-xs text-slate-600">{item.branch_name || "No branch"}</p></div>
-                  {item.loan_id && <div className="surface-soft p-3"><p className="text-xs text-slate-500">Loan details</p><Link className="mt-1 block text-sm font-semibold text-brand-700 underline" to={`/loan-details/${item.loan_id}`}>{item.loan_account_no || `Loan #${item.loan_id}`}</Link><p className="text-xs text-slate-600">{item.loan_type || "Loan"} / {item.loan_status || "-"}</p><p className="text-xs text-slate-600">Maturity: {item.maturity_date ? item.maturity_date.slice(0, 10) : "-"}</p></div>}
-                </div>
-              </>}
-            {item.attachment_name && <button type="button" className="btn-muted mt-2 h-8 px-3 text-xs" onClick={() => {
-              const path = item.kind === "member_remark"
-                ? `/borrowers/${item.member_id}/remarks/${item.id}/attachment`
-                : `/loans/${item.loan_id}/remarks/${item.id}/attachment`;
-              void apiDownload(path, item.attachment_name || "attachment").catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
-            }}>Download {item.attachment_name}</button>}
+            </span>
+            <span className="text-slate-500">{plainDateTime(item.occurred_at)}</span>
           </article>)}
           {data.items.length === 0 && <p className="py-8 text-center text-slate-500">No collection activity found for these filters.</p>}
           </div>
@@ -319,11 +359,41 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     <ExportChoiceDialog open={exportChoiceOpen} title="Export collection history"
       description={`${exportFrom} to ${exportTo} · uses your current filters`}
       onExcel={() => void exportExcelReport()} onPdf={() => void exportPaymentReport()} onClose={() => setExportChoiceOpen(false)} />
-    {selectedActivity && <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-center justify-center overflow-y-auto bg-slate-950/45 p-4" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
-      <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedActivity.kind === "payment" ? "Payment" : "Remark"}</p><h2 id="activity-detail-title" className="mt-1 text-xl font-bold">{selectedActivity.member_name}</h2></div><button className="btn-muted" type="button" onClick={() => setSelectedActivity(null)}>Close</button></div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2"><div><p className="text-xs text-slate-500">Date</p><p>{selectedActivity.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, "")}</p></div><div><p className="text-xs text-slate-500">Recorded by</p><p>{selectedActivity.collector_name || "Deleted account / unattributed"}</p></div><div><p className="text-xs text-slate-500">Branch</p><p>{selectedActivity.branch_name || "No branch"}</p></div><div><p className="text-xs text-slate-500">Loan account</p><p>{selectedActivity.loan_account_no || "No loan account"}</p></div><div><p className="text-xs text-slate-500">Loan type</p><p>{selectedActivity.loan_type || "-"}</p></div></div>
-        {selectedActivity.kind === "payment" ? <div className="mt-5 grid gap-4 sm:grid-cols-2"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div> : <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
+    {selectedActivity && <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-end justify-center overflow-y-auto bg-slate-950/45 sm:items-center sm:p-4" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
+      <section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedActivity.kind === "payment" ? "Payment" : selectedActivity.kind === "member_remark" ? "Member note" : "Loan note"}</p>
+            <h2 id="activity-detail-title" className="mt-1 break-words text-xl font-bold">{selectedActivity.member_name}</h2>
+          </div>
+          <button className="btn-muted shrink-0" type="button" onClick={() => setSelectedActivity(null)}>Close</button>
+        </div>
+        {selectedActivity.kind === "payment"
+          ? <div className="mt-4 grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div>
+          : <div className="mt-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
+        {selectedActivity.kind !== "payment" && selectedActivity.photo_id && <div className="mt-4">
+          <RemarkPhotoView path={`${remarkPath(selectedActivity)}/photo`} photo={{
+            latitude: toNumberOrNull(selectedActivity.photo_latitude),
+            longitude: toNumberOrNull(selectedActivity.photo_longitude),
+            accuracy: toNumberOrNull(selectedActivity.photo_accuracy),
+            capturedAt: selectedActivity.photo_captured_at ?? ""
+          }} />
+        </div>}
+        <div className="mt-5 grid grid-cols-2 gap-4 text-sm">
+          <div><p className="text-xs text-slate-500">Date</p><p>{plainDateTime(selectedActivity.occurred_at)}</p></div>
+          <div><p className="text-xs text-slate-500">Recorded by</p><p className="break-words">{selectedActivity.collector_name || "Deleted account / unattributed"}</p></div>
+          <div><p className="text-xs text-slate-500">Loan account</p><p className="break-words">{selectedActivity.loan_account_no || "No loan account"}</p></div>
+          <div><p className="text-xs text-slate-500">Loan type</p><p className="break-words">{selectedActivity.loan_type || "-"}</p></div>
+          <div><p className="text-xs text-slate-500">Branch</p><p className="break-words">{selectedActivity.branch_name || "No branch"}</p></div>
+          <div><p className="text-xs text-slate-500">Contact</p><p className="break-words">{selectedActivity.contact_info || "-"}</p></div>
+        </div>
+        {(selectedActivity.loan_id || selectedActivity.attachment_name) && <div className="mt-5 grid gap-2 sm:flex sm:flex-wrap">
+          {selectedActivity.loan_id && <Link className="btn-primary justify-center" to={`/loan-details/${selectedActivity.loan_id}`}>Open loan</Link>}
+          {selectedActivity.attachment_name && <button type="button" className="btn-muted justify-center" onClick={() => {
+            const item = selectedActivity;
+            void apiDownload(`${remarkPath(item)}/attachment`, item.attachment_name || "attachment").catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment"));
+          }}><Paperclip size={14} aria-hidden="true" /><span className="truncate">Download {selectedActivity.attachment_name}</span></button>}
+        </div>}
       </section>
     </div>}
   </main>;

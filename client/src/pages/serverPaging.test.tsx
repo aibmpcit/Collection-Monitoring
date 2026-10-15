@@ -16,7 +16,7 @@ const loan = (id: number) => ({
   id, borrowerId: id, branchId: 2, cifKey: `CIF-${id}`, memberName: `Member ${id}`, contactInfo: "", address: "",
   loanAccountNo: `LN-${id}`, loanType: "Salary", dateRelease: "2026-01-01", maturityDate: "2026-12-01", loanAmount: 1000,
   loanBalance: 500, principalDue: 100, penaltyDue: 0, interest: 10, otherCharges: 0, total: 110, parAge: 0, status: "active",
-  notes: "", importedAt: "2026-10-01T09:00:00", latestRemarks: []
+  notes: "", importedAt: "2026-10-01T09:00:00", latestRemarks: [], actionStatus: id === 101 ? "visited" : null
 });
 
 const requests = () => vi.mocked(apiRequest).mock.calls.map(([path]) => String(path));
@@ -81,6 +81,31 @@ describe("Collections page", () => {
     await user.click(screen.getByRole("button", { name: "Select All Results" }));
     expect(await screen.findByRole("button", { name: "Delete Selected (3)" })).toBeEnabled();
     expect(requests()).toContain("/loans?idsOnly=true");
+  });
+});
+
+describe("Collections loan status", () => {
+  it("shows each loan's field status and filters by it on the server", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><LoansPage /></MemoryRouter>);
+    await screen.findAllByText("Member 101");
+    expect(screen.getAllByText("Visited").length).toBeGreaterThan(0);
+    await user.selectOptions(screen.getByLabelText("Filter by status"), "none");
+    await waitFor(() => expect(loanPageRequests().some(path => path.includes("actionStatus=none") && path.includes("page=1"))).toBe(true));
+    await user.selectOptions(screen.getByLabelText("Filter by status"), "settled");
+    await waitFor(() => expect(loanPageRequests().some(path => path.includes("actionStatus=settled"))).toBe(true));
+  });
+});
+
+describe("Collections settled accounts tab", () => {
+  it("shows settled accounts in their own tab", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><LoansPage /></MemoryRouter>);
+    await screen.findAllByText("Member 101");
+    await user.click(screen.getByRole("tab", { name: "Settled Accounts" }));
+    expect(screen.getByRole("tab", { name: "Settled Accounts" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(requests()).toContain("/loans?settled=true&page=1&pageSize=15"));
+    expect(await screen.findByRole("list", { name: "Settled accounts" })).toBeInTheDocument();
   });
 });
 

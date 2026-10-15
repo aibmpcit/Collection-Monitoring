@@ -148,6 +148,17 @@ describe("collector history access and filters", () => {
     expect((await fetch(`${base}?collectorId=8`)).status).toBe(403);
     expect(mocks.query).not.toHaveBeenCalled();
   });
+  it("shows LAS only their own activity, like collectors", async () => {
+    mocks.user = { id: 8, role: "las", branchId: 2 } as JwtUser;
+    expect((await fetch(base)).status).toBe(200);
+    for (const [sql, params] of mocks.query.mock.calls) {
+      expect(sql).toContain("a.branch_id = $1 AND a.collector_id = $2");
+      expect(params).toEqual([2, 8]);
+    }
+    mocks.query.mockClear();
+    expect((await fetch(`${base}?userId=7`)).status).toBe(403);
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
   it("keeps branch administrators scoped when filtering another collector", async () => {
     mocks.user.role = "branch_admin";
     expect((await fetch(`${base}?collectorId=8`)).status).toBe(200);
@@ -206,7 +217,8 @@ it.each(["single", "bulk"])("archives a loan through %s deletion without deletin
     ...(mode === "bulk" ? { body: JSON.stringify({ ids: [9] }) } : {})
   });
   expect(response.status).toBe(200);
-  expect(mocks.query).toHaveBeenCalledWith("UPDATE loans SET status = 'closed' WHERE id = $1", [9]);
+  // Deleted loans are archived as closed and marked "deleted", so they never count as settled.
+  expect(mocks.query).toHaveBeenCalledWith("UPDATE loans SET status = 'closed', closed_reason = 'deleted', closed_at = NOW() WHERE id = $1", [9]);
   expect(mocks.query.mock.calls.some(([sql]) => /DELETE\s+FROM/i.test(sql))).toBe(false);
 });
 

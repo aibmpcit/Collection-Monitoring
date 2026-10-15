@@ -37,6 +37,10 @@ export interface Loan {
   penalty: number;
   dueDate: string;
   status: "active" | "closed" | "overdue";
+  /** Field status from the newest primary remark; null until someone acts on the loan. */
+  actionStatus?: string | null;
+  actionStatusAt?: string | null;
+  actionStatusBy?: string | null;
   notes?: string;
 }
 
@@ -120,6 +124,8 @@ export interface LoanRemark {
   createdAt: string;
   createdBy: string;
   attachmentName?: string | null;
+  /** Field photo with where and when it was taken; null when the remark has none. */
+  photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
 }
 
 export interface LoanPayment {

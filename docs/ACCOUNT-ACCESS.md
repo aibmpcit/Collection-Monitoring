@@ -6,13 +6,15 @@ Super admins can create or edit accounts in **Accounts**, choose Collector, Bran
 - Add loan remarks
 - Add loan payments
 
-LAS accounts can read branch loan data by default. Enabling **Import collections** lets that specific LAS account import loan data for its assigned branch. It does not grant account administration, loan deletion, or manual loan creation.
+LAS accounts do field work like collectors: by default they can add loan remarks and payments and update their own payments. Enabling **Import collections** lets that specific LAS account import loan data for its assigned branch. It does not grant account administration, loan deletion, or manual loan creation.
 
-Each upload is checked first and saved only after confirming. Loans missing from the file are listed; ticking **Close loans that are not in this file** closes them (their payments and remarks stay in history), and closed loans that reappear are reopened.
+Each upload is checked first and saved only after confirming. Any loan account that is not on the branch's updated list moves to the **Settled Accounts** tab on Collection Records (its payments and remarks stay in history), and a settled loan that reappears in a later upload returns to Collections. The option **Move loans that are not in this file to Settled Accounts** is on by default; untick it only when uploading a partial file. Loans deleted by an admin are archived separately and never appear as settled. Settled Accounts is available to super admins, branch admins and LAS.
 
 Remark columns: during testing (`REMARK_IMPORT_ONCE=false`) every import brings them in and skips remarks already stored. At go-live set `REMARK_IMPORT_ONCE=true`: remarks are then imported only once per branch, on its first import by a super admin, after which the branch is locked and remarks are added by users. Branch admins can edit or delete any remark in their branch; collectors and LAS can edit or delete only their own.
 
 Collectors retain their existing defaults (adding remarks and payments). Branch admins retain all three permissions by default. A super admin can override these defaults for an individual account or use **Use role defaults** to clear overrides. Other existing permissions still follow the selected role.
+
+**Loan status (primary remarks):** collectors, LAS and admins can set a loan's status to Visited, Partial or Settled. Each status is saved as a remark (the note is optional), so the history shows who set it and when; the newest one is the loan's status, and deleting it falls back to the previous one. Loans nobody has acted on show no status. This is separate from the active/overdue/closed status that comes from the daily import.
 
 Changing a role does not delete the account's payment or remark history. Role editing does not offer super-admin promotion, and super-admin accounts cannot be edited through this form.
 

@@ -33,7 +33,8 @@ it("deletes remarks and attachments once per id in a transaction", async () => {
   expect(await result.json()).toEqual({ deleted: 1 });
   expect(mocks.transaction).toHaveBeenCalledTimes(1);
   expect(mocks.query).toHaveBeenNthCalledWith(2, "DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [4]);
-  expect(mocks.query).toHaveBeenNthCalledWith(3, "DELETE FROM loan_remarks WHERE id = $1", [4]);
+  expect(mocks.query).toHaveBeenNthCalledWith(3, "DELETE FROM remark_photos WHERE remark_kind = $1 AND remark_id = $2", ["loan", 4]);
+  expect(mocks.query).toHaveBeenNthCalledWith(4, "DELETE FROM loan_remarks WHERE id = $1", [4]);
 });
 it("rejects another branch without deleting", async () => {
   mocks.query.mockResolvedValue({ rows: [{ branch_id: 3 }] });

@@ -1,9 +1,9 @@
-import { Upload } from "lucide-react";
+import { Camera, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BorrowerList } from "../components/BorrowerList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
+import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, type RemarkCategory, OTHER_REMARK_CATEGORIES } from "../constants/remarkCategories";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { ToastNotification } from "../components/ToastNotification";
@@ -12,6 +12,8 @@ import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { gridToRecords, loadXlsx, readSpreadsheet } from "../services/spreadsheet";
 import { fileToAttachment } from "../services/attachments";
+import { RemarkPhotoField } from "../components/RemarkPhoto";
+import { photoPayload, type CapturedPhoto } from "../services/photo";
 import type { Borrower, BorrowerPayload, Branch } from "../types/models";
 
 const EMPTY_FORM: BorrowerPayload = {
@@ -57,6 +59,7 @@ interface MemberRemarkRow {
   /** Set by the server: admins may manage any remark, others only their own. */
   canEdit?: boolean;
   attachmentName?: string | null;
+  photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
 }
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
@@ -119,6 +122,8 @@ export function BorrowersPage() {
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
   const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
+  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
+  const [editingHasPhoto, setEditingHasPhoto] = useState(false);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
   const [confirmDeleteRemarkId, setConfirmDeleteRemarkId] = useState<number | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<MemberRemarkRow | null>(null);
@@ -367,6 +372,7 @@ export function BorrowersPage() {
     setEditingRemarkId(null);
     setSummaryRemark(null);
     setRemarkAttachment(null);
+    setRemarkPhoto(undefined);
     setMemberRemarks([]);
     setRemarksError("");
     await loadMemberRemarks(borrower.id);
@@ -378,6 +384,7 @@ export function BorrowersPage() {
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setEditingRemarkId(null);
     setRemarkAttachment(null);
+    setRemarkPhoto(undefined);
     setMemberRemarks([]);
     setRemarksError("");
     setRemarksLoading(false);
@@ -397,12 +404,13 @@ export function BorrowersPage() {
       await apiRequest(
         `/borrowers/${remarksBorrower.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`,
         editingRemarkId ? "PATCH" : "POST",
-        { remark, remarkCategory, attachment }
+        { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) }
       );
       setRemarkInput("");
       setRemarkCategory(DEFAULT_REMARK_CATEGORY);
       setEditingRemarkId(null);
       setRemarkAttachment(null);
+      setRemarkPhoto(undefined);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
       setRemarksError(e instanceof Error ? e.message : "Unable to add member remark");
@@ -806,7 +814,7 @@ export function BorrowersPage() {
                   onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                   required
                 >
-                  {REMARK_CATEGORIES.map((item) => (
+                  {OTHER_REMARK_CATEGORIES.map((item) => (
                     <option key={item.value} value={item.value}>
                       {item.label}
                     </option>
@@ -825,6 +833,7 @@ export function BorrowersPage() {
                 Attachment (optional, max 5 MB)
                 <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
               </label>
+              <RemarkPhotoField photo={remarkPhoto} hasExisting={Boolean(editingRemarkId) && editingHasPhoto} onChange={setRemarkPhoto} disabled={remarksSubmitting} />
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={remarksSubmitting}>
                   {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Add Remark"}
@@ -850,15 +859,18 @@ export function BorrowersPage() {
                       <p className="text-sm">{item.remark}</p>
                       <p className="mt-1 text-xs text-black/60">
                         {formatDateTime(item.createdAt)} | By: {item.createdBy}
+                        {item.photo && <span className="ml-2 inline-flex items-center gap-1 text-slate-500"><Camera size={12} aria-hidden="true" />Photo{item.photo.latitude != null ? " · geotagged" : ""}</span>}
                       </p>
                       {item.canEdit !== false && <div className="mt-2 flex flex-wrap items-center gap-2" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
                         <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
                           setEditingRemarkId(item.id);
+                          setEditingHasPhoto(Boolean(item.photo));
                           setConfirmDeleteRemarkId(null);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarksError("");
                           setRemarkAttachment(null);
+                          setRemarkPhoto(undefined);
                         }}>Edit</button>
                         {confirmDeleteRemarkId === item.id ? <>
                           <span className="text-xs text-red-700">Delete this remark?</span>
@@ -887,6 +899,8 @@ export function BorrowersPage() {
         category={summaryRemark.remarkCategory} createdAt={summaryRemark.createdAt} createdBy={summaryRemark.createdBy}
         member={{ name: remarksBorrower.memberName, cifKey: remarksBorrower.cifKey, contact: remarksBorrower.contactInfo, address: remarksBorrower.address, branch: remarksBorrower.branchName ?? undefined }}
         attachmentName={summaryRemark.attachmentName}
+        photo={summaryRemark.photo}
+        photoPath={`/borrowers/${remarksBorrower.id}/remarks/${summaryRemark.id}/photo`}
         onDownload={summaryRemark.attachmentName ? () => void apiDownload(`/borrowers/${remarksBorrower.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment").catch(e => setRemarksError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
         onClose={() => setSummaryRemark(null)} />}
       <ConfirmDialog

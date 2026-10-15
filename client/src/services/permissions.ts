@@ -11,5 +11,5 @@ export function hasPermission(user: Pick<User, "role" | "permissions"> | null, p
   if (user.role === "super_admin") return true;
   if (typeof user.permissions?.[permission] === "boolean") return user.permissions[permission]!;
   if (permission === "import_collections") return user.role === "branch_admin";
-  return user.role === "branch_admin" || user.role === "staff";
+  return user.role === "branch_admin" || user.role === "staff" || user.role === "las";
 }

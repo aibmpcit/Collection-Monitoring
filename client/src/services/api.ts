@@ -82,3 +82,11 @@ export async function apiDownload(path: string, fallbackName: string) {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+/** Fetches a protected file (e.g. a remark photo) and returns an object URL for <img>; revoke it when done. */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const token = localStorage.getItem("token");
+  const response = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message ?? "Unable to load file");
+  return URL.createObjectURL(await response.blob());
+}

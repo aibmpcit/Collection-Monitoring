@@ -73,8 +73,9 @@ app.use((error: Error, _req: express.Request, res: express.Response, _next: expr
     });
   }
 
-  console.error(error);
   const { status, message } = errorResponse(error);
+  // Expected user errors (duplicates, validation, access) are answered, not logged as faults.
+  if (status >= 500) console.error(error);
   res.status(status).json({ message });
 });
 

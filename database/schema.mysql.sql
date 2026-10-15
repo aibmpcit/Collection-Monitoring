@@ -59,8 +59,13 @@ CREATE TABLE IF NOT EXISTS loans (
   penalty DECIMAL(12,2) NOT NULL DEFAULT 0,
   due_date DATE NOT NULL,
   status ENUM('active', 'closed', 'overdue') NOT NULL DEFAULT 'active',
+  action_status VARCHAR(16) NULL,
+  action_status_at DATETIME NULL,
+  action_status_by INT UNSIGNED NULL,
+  closed_reason VARCHAR(16) NULL,
+  closed_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id), UNIQUE KEY uq_loans_account (loan_account_no), KEY idx_loans_borrower (borrower_id), KEY idx_loans_status (status),
+  PRIMARY KEY (id), UNIQUE KEY uq_loans_account (loan_account_no), KEY idx_loans_borrower (borrower_id), KEY idx_loans_status (status), KEY idx_loans_action_status (action_status), KEY idx_loans_closed (status, closed_reason, closed_at),
   CONSTRAINT fk_loans_borrower FOREIGN KEY (borrower_id) REFERENCES borrowers(id)
 ) ENGINE=InnoDB;
 
@@ -156,4 +161,20 @@ CREATE TABLE IF NOT EXISTS loan_import_runs (
   PRIMARY KEY (id), KEY idx_loan_import_runs_branch (branch_id, uploaded_at),
   CONSTRAINT fk_loan_import_runs_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
   CONSTRAINT fk_loan_import_runs_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS remark_photos (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  remark_kind VARCHAR(16) NOT NULL,
+  remark_id INT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(40) NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  accuracy_m INT UNSIGNED NULL,
+  captured_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_remark_photo (remark_kind, remark_id)
 ) ENGINE=InnoDB;

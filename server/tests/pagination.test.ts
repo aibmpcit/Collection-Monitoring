@@ -89,6 +89,15 @@ describe("paged loan list", () => {
     expect(params).toEqual([2, 5]);
   });
 
+  it("lists settled accounts: loans closed because they were missing from an upload, newest first", async () => {
+    mocks.query.mockImplementation(async (sql: string) => sql.includes("COUNT(*)") ? { rows: [{ total: 0 }] } : { rows: [] });
+    await fetch(`${base}/loans?page=1&pageSize=15&settled=true`);
+    const countSql = calls().find(([sql]) => sql.includes("COUNT(*)"))![0];
+    expect(countSql).toContain("l.status = 'closed' AND l.closed_reason = 'not_in_import'");
+    expect(countSql).not.toContain("l.status != 'closed'");
+    expect(calls().find(([sql]) => sql.includes("WITH page_loans"))![0]).toContain("ORDER BY l.closed_at DESC");
+  });
+
   it("rejects unknown PAR groups", async () => {
     expect((await fetch(`${base}/loans?page=1&parAge=1-1000`)).status).toBe(400);
   });

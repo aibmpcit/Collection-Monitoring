@@ -55,8 +55,9 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
   const [rowsInFile, setRowsInFile] = useState(0);
   const [dropped, setDropped] = useState<DroppedImportRow[]>([]);
   const [result, setResult] = useState<LoanImportResult | null>(null);
-  // Off by default while the system is being tested; on, the upload works as the branch's full list.
-  const [closeMissing, setCloseMissing] = useState(false);
+  // On by default: loans missing from the branch's updated list move to Settled Accounts.
+  // Untick only for a partial file.
+  const [closeMissing, setCloseMissing] = useState(true);
 
   const branch = branches.find(item => item.id === importBranchId);
   const branchLabel = isSuperAdmin ? (branch ? `${branch.code} - ${branch.name}` : "the selected branch") : "your branch";
@@ -117,7 +118,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
       setStep("done");
       const parts = [`${saved.inserted} new`, `${saved.updated} updated`];
       if (saved.reopened) parts.push(`${saved.reopened} reopened`);
-      if (saved.closeMissing) parts.push(`${saved.closed} closed`);
+      if (saved.closeMissing) parts.push(`${saved.closed} moved to Settled Accounts`);
       if (saved.remarksImported) parts.push(`${saved.remarksImported} remarks imported`);
       onImported(`Import complete: ${parts.join(", ")}.`);
     } catch (e) {
@@ -187,7 +188,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={closeMissing} disabled={pending}
                 onChange={event => toggleCloseMissing(event.target.checked)} />
-              <span>Close loans that are not in this file<span className="block text-xs text-slate-500">Use when the file is the branch's complete overdue list. Closed loans keep their payments and remarks.</span></span>
+              <span>Move loans that are not in this file to Settled Accounts<span className="block text-xs text-slate-500">On for the branch's complete updated list. Untick only for a partial file. Settled loans keep their payments and remarks, and come back if they appear in a later upload.</span></span>
             </label>
           )}
 
@@ -200,7 +201,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
               <li>{result.updated} updated loan(s){result.reopened ? `, ${result.reopened} of them reopened` : ""}</li>
               {result.notInFile > 0 && <li>
                 {result.closeMissing
-                  ? `${result.closed} loan(s) ${step === "done" ? "closed" : "will be closed"} because they are not in this file`
+                  ? `${result.closed} loan(s) ${step === "done" ? "moved" : "will move"} to Settled Accounts because they are not in this file`
                   : `${result.notInFile} open loan(s) are not in this file and ${step === "done" ? "stayed" : "will stay"} open`}
                 {result.closedLoans.length > 0 && <span className="block text-xs text-slate-500">
                   {result.closedLoans.slice(0, 5).map(loan => `${loan.loanAccountNo} (${loan.memberName})`).join(", ")}
@@ -212,7 +213,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
             {result?.remarksNote && <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">{result.remarksNote}</p>}
             {step === "review" && result?.closeMissing && closingShare > CLOSE_WARNING_SHARE && (
               <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-red-700">
-                This would close {result.closed} of {result.openBefore} open loans ({Math.round(closingShare * 100)}%).
+                This would move {result.closed} of {result.openBefore} open loans ({Math.round(closingShare * 100)}%) to Settled Accounts.
                 Check that this is the complete list for {branchLabel} before confirming.
               </p>
             )}

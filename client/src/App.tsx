@@ -30,6 +30,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OverdueReportPage } from "./pages/OverdueReportPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { StaffPage } from "./pages/StaffPage";
+import { SettledAccountsPage } from "./pages/SettledAccountsPage";
 import { CollectorHistoryPage } from "./pages/CollectorHistoryPage";
 
 interface NavDefinition {
@@ -62,7 +63,7 @@ const NAV_ITEMS: NavDefinition[] = [
     to: "/collector-history",
     label: "Collection History",
     icon: <History size={18} />,
-    visible: (role) => role !== "las"
+    visible: () => true
   },
   {
     to: "/staff",
@@ -173,7 +174,8 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
 
   return createPortal(
     <nav
-      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md grid-cols-3 items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
+      style={{ gridTemplateColumns: `repeat(${Math.max(1, navItems.length)}, minmax(0, 1fr))` }}
+      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
       aria-label="Mobile navigation"
     >
       {navItems.map((item) => {
@@ -266,7 +268,8 @@ function ShellLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const location = useLocation();
-  const isCollectorMobileNav = user?.role === "staff";
+  // Field roles (collectors and LAS) get the phone layout: bottom navigation and a compact top bar.
+  const isCollectorMobileNav = user?.role === "staff" || user?.role === "las";
   useActivityTracking(location.pathname, Boolean(user));
 
   const navItems = useMemo(
@@ -407,6 +410,14 @@ function ShellLayout() {
               />
               <Route path="/loan-details/:loanId" element={<LoanDetailsPage />} />
               <Route path="/reports/overdue" element={<OverdueReportPage />} />
+              <Route
+                path="/settled"
+                element={
+                  <ProtectedRoute roles={["super_admin", "branch_admin", "las"]}>
+                    <SettledAccountsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/reports"
                 element={

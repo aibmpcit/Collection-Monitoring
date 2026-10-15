@@ -22,7 +22,19 @@ export const IMPORT_REMARK_CATEGORIES = new Set([
 "endorsed_to_rmu",
 ]);
 
+/**
+ * Primary remarks (Visited, Partial, Settled): recording one sets the loan's field status (latest wins). Only loans that
+ * collectors or LAS have acted on have a status.
+ */
+export const LOAN_ACTION_STATUSES = ["visited", "partial", "settled"] as const;
+export type LoanActionStatus = typeof LOAN_ACTION_STATUSES[number];
+
+export function isLoanActionStatus(value: string | null | undefined): value is LoanActionStatus {
+  return (LOAN_ACTION_STATUSES as readonly string[]).includes(String(value ?? ""));
+}
+
 export const REMARK_CATEGORIES = new Set([
+  ...LOAN_ACTION_STATUSES,
   ...IMPORT_REMARK_CATEGORIES,
   "follow_up_collection",
   "with_small_claims",

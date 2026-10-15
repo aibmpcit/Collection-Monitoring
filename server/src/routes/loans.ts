@@ -8,6 +8,7 @@ import {
   assertBranchAccess,
   canManageRemark,
   formatPaymentId,
+  isLoanActionStatus,
   IMPORT_REMARK_CATEGORIES,
   getRequestUser,
   isSuperAdmin,
@@ -17,8 +18,10 @@ import {
   userBranchId
 } from "../services/access.js";
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
+import { deleteRemarkPhoto, getRemarkPhoto, mapPhotoColumns, parsePhoto, PHOTO_COLUMNS, saveRemarkPhoto } from "../services/remarkPhotos.js";
 import { identifierKey, identifierKeySql } from "../services/identifiers.js";
 import { mapLoanRow } from "../services/loanRows.js";
+import { refreshLoanActionStatus } from "../services/loanActionStatus.js";
 import { loanListRouter } from "./loanLists.js";
 
 const router = Router();
@@ -425,8 +428,9 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
       return res.status(400).json({ message: "Choose the branch this file belongs to" });
     }
     const preview = req.body?.preview === true;
-    // Closing loans missing from the file is opt-in per upload while the system is being tested.
-    const closeMissing = req.body?.closeMissing === true;
+    // Loans missing from the branch's updated list move to Settled Accounts unless the uploader
+    // explicitly opts out (e.g. a partial test file).
+    const closeMissing = req.body?.closeMissing !== false;
     const fileName = String(req.body?.fileName ?? "").trim().slice(0, 255);
     const rowsInFile = Math.max(importRows.length, Number(req.body?.rowsInFile ?? 0) || 0);
 
@@ -850,7 +854,8 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
               `UPDATE loans
                SET borrower_id = $1, loan_account_no = $2, loan_type = $3, date_release = $4, maturity_date = $5, loan_amount = $6,
                    loan_balance = $7, principal_due = $8, penalty_due = $9, interest = $10, other_charges = $11, total = $12,
-                   par_age = $13, notes = COALESCE($14, notes), principal = $15, penalty = $16, due_date = $17, status = $18, created_at = CURRENT_TIMESTAMP
+                   par_age = $13, notes = COALESCE($14, notes), principal = $15, penalty = $16, due_date = $17, status = $18, created_at = CURRENT_TIMESTAMP,
+                   closed_reason = IF($18 = 'closed', closed_reason, NULL), closed_at = IF($18 = 'closed', closed_at, NULL)
                WHERE id = $19`,
               [
                 borrower.id,
@@ -1014,7 +1019,10 @@ router.post("/bulk", authenticate, authorizePermission("import_collections"), as
         );
         const missing = stillOpen.rows.filter((loan) => !touchedLoanIds.has(Number(loan.id)) && !fileAccountKeys.has(identifierKey(loan.loan_account_no)));
         if (closeMissing && missing.length) {
-          await client.query("UPDATE loans SET status = 'closed' WHERE id IN ($1)", [missing.map((loan) => Number(loan.id))]);
+          await client.query(
+            "UPDATE loans SET status = 'closed', closed_reason = 'not_in_import', closed_at = NOW() WHERE id IN ($1)",
+            [missing.map((loan) => Number(loan.id))]
+          );
         }
         notInFile = missing.length;
         closed = closeMissing ? missing.length : 0;
@@ -1063,16 +1071,20 @@ router.delete("/remarks/bulk", authenticate, authorize(["super_admin", "branch_a
     const user = getRequestUser(req);
     const deleted = await withTransaction(async client => {
       let count = 0;
+      const affectedLoans = new Set<number>();
       for (const id of new Set(parsed.data.ids)) {
-        const existing = await client.query<{ branch_id: number }>(
-          "SELECT b.branch_id FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id WHERE r.id = $1 FOR UPDATE", [id]
+        const existing = await client.query<{ branch_id: number; loan_id: number }>(
+          "SELECT b.branch_id, r.loan_id FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id WHERE r.id = $1 FOR UPDATE", [id]
         );
         if (!existing.rows[0]) continue;
         assertBranchAccess(user, Number(existing.rows[0].branch_id));
         await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [id]);
+        await deleteRemarkPhoto(client, "loan", id);
         await client.query("DELETE FROM loan_remarks WHERE id = $1", [id]);
+        affectedLoans.add(Number(existing.rows[0].loan_id));
         count += 1;
       }
+      for (const loanId of affectedLoans) await refreshLoanActionStatus(client, loanId);
       return count;
     });
     return res.json({ deleted });
@@ -1108,7 +1120,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       }
 
       try {
-        await query("UPDATE loans SET status = 'closed' WHERE id = $1", [loanId]);
+        await query("UPDATE loans SET status = 'closed', closed_reason = 'deleted', closed_at = NOW() WHERE id = $1", [loanId]);
         deleted += 1;
       } catch {
         skipped.push({ id: loanId, reason: "delete_failed" });
@@ -1150,6 +1162,9 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
          l.penalty,
          l.due_date,
          l.status,
+         l.action_status,
+         l.action_status_at,
+         asu.username AS action_status_by_name,
          DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%s') AS imported_at,
          b.branch_id,
          b.cif_key,
@@ -1158,6 +1173,7 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
          b.address
        FROM loans l
        INNER JOIN borrowers b ON b.id = l.borrower_id
+       LEFT JOIN users asu ON asu.id = l.action_status_by
        WHERE l.id = $1
        LIMIT 1`,
       [loanId]
@@ -1248,7 +1264,7 @@ router.delete("/:loanId", authenticate, authorize(["super_admin", "branch_admin"
     }
     assertBranchAccess(user, Number(context.branch_id ?? 0));
 
-    await query("UPDATE loans SET status = 'closed' WHERE id = $1", [loanId]);
+    await query("UPDATE loans SET status = 'closed', closed_reason = 'deleted', closed_at = NOW() WHERE id = $1", [loanId]);
 
     return res.json({ message: "Loan archived; payment and remark history retained" });
   } catch (error) {
@@ -1352,7 +1368,7 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
   }
 });
 
-router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_admin", "branch_admin", "staff"]), async (req: AuthedRequest, res, next) => {
+router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_admin", "branch_admin", "staff", "las"]), async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const loanId = Number(req.params.loanId);
@@ -1373,7 +1389,7 @@ router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_adm
     const payment = existing.rows[0];
     if (!payment) return res.status(404).json({ message: "Payment not found" });
     assertBranchAccess(user, Number(payment.branch_id ?? 0));
-    if (user.role === "staff" && Number(payment.created_by) !== user.id) {
+    if ((user.role === "staff" || user.role === "las") && Number(payment.created_by) !== user.id) {
       return res.status(403).json({ message: "You can only edit your own payments" });
     }
 
@@ -1434,6 +1450,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
       created_at: string;
       created_by: string | null;
       attachment_name: string | null;
+      [column: string]: unknown;
     }>(
       `SELECT
          lr.id,
@@ -1443,10 +1460,12 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
          lr.remark_category,
          lr.created_at,
          COALESCE(u.username, 'System') AS created_by,
-         ra.file_name AS attachment_name
+         ra.file_name AS attachment_name,
+         ${PHOTO_COLUMNS}
        FROM loan_remarks lr
        LEFT JOIN users u ON u.id = lr.created_by
        LEFT JOIN remark_attachments ra ON ra.remark_kind = 'loan' AND ra.remark_id = lr.id
+       LEFT JOIN remark_photos rp ON rp.remark_kind = 'loan' AND rp.remark_id = lr.id
        WHERE lr.loan_id = $1
        ORDER BY lr.created_at DESC, lr.id DESC`,
       [loanId]
@@ -1461,7 +1480,8 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
         remarkCategory: row.remark_category,
         createdAt: row.created_at,
         createdBy: row.created_by ?? "System",
-        attachmentName: row.attachment_name
+        attachmentName: row.attachment_name,
+        ...mapPhotoColumns(row)
       }))
     );
   } catch (error) {
@@ -1476,6 +1496,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     const remark = String(req.body?.remark ?? "").trim();
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
+    const photo = parsePhoto(req.body?.photo);
 
     const context = await loanContext(loanId);
     if (!context) {
@@ -1483,7 +1504,8 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     }
     assertBranchAccess(user, Number(context.branch_id ?? 0));
 
-    if (!remark) {
+    // A status (primary remark) may be recorded without a note; other remarks need one.
+    if (!remark && !isLoanActionStatus(category)) {
       return res.status(400).json({ message: "Remark is required" });
     }
     if (remark.length > 2000) {
@@ -1495,6 +1517,8 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
       [loanId, remark, category, user.id]
     );
     await saveRemarkAttachment("loan", created.rows[0].id, attachment);
+    await saveRemarkPhoto("loan", created.rows[0].id, photo);
+    if (isLoanActionStatus(category)) await refreshLoanActionStatus({ query }, loanId);
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -1517,8 +1541,8 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
       return res.status(400).json({ message: "Invalid loan or remark id" });
     }
-    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
-      `SELECT lr.created_by, b.branch_id
+    const existing = await query<{ created_by: number | null; branch_id: number | null; remark_category: string | null }>(
+      `SELECT lr.created_by, b.branch_id, lr.remark_category
        FROM loan_remarks lr
        INNER JOIN loans l ON l.id = lr.loan_id
        INNER JOIN borrowers b ON b.id = l.borrower_id
@@ -1536,10 +1560,16 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     const remark = String(req.body?.remark ?? "").trim();
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
-    if (!remark) return res.status(400).json({ message: "Remark is required" });
+    const photo = parsePhoto(req.body?.photo);
+    if (!remark && !isLoanActionStatus(category)) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     await query("UPDATE loan_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
+    // The edit may have added, changed or removed a status.
+    if (isLoanActionStatus(existingRemark.remark_category) || isLoanActionStatus(category)) {
+      await refreshLoanActionStatus({ query }, loanId);
+    }
     await saveRemarkAttachment("loan", remarkId, attachment);
+    await saveRemarkPhoto("loan", remarkId, photo);
     return res.json({ id: remarkId, loanId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);
@@ -1554,8 +1584,8 @@ router.delete("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admi
     if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
       return res.status(400).json({ message: "Invalid loan or remark id" });
     }
-    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
-      `SELECT lr.created_by, b.branch_id
+    const existing = await query<{ created_by: number | null; branch_id: number | null; remark_category: string | null }>(
+      `SELECT lr.created_by, b.branch_id, lr.remark_category
        FROM loan_remarks lr
        INNER JOIN loans l ON l.id = lr.loan_id
        INNER JOIN borrowers b ON b.id = l.borrower_id
@@ -1571,7 +1601,10 @@ router.delete("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admi
     }
     await withTransaction(async client => {
       await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [remarkId]);
+      await deleteRemarkPhoto(client, "loan", remarkId);
       await client.query("DELETE FROM loan_remarks WHERE id = $1", [remarkId]);
+      // Deleting the latest status falls back to the one before it.
+      if (isLoanActionStatus(existingRemark.remark_category)) await refreshLoanActionStatus(client, loanId);
     });
     return res.json({ message: "Remark deleted" });
   } catch (error) {
@@ -1598,6 +1631,28 @@ router.get("/:loanId/remarks/:remarkId/attachment", authenticate, async (req: Au
     res.setHeader("Content-Type", attachment.mime_type);
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
     return res.send(attachment.file_data);
+  } catch (error) { return next(error); }
+});
+
+router.get("/:loanId/remarks/:remarkId/photo", authenticate, async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const ownerId = Number(req.params.loanId);
+    const remarkId = Number(req.params.remarkId);
+    const existing = await query<{ created_by: number | null; branch_id: number | null }>(
+      `SELECT lr.created_by, b.branch_id FROM loan_remarks lr
+       INNER JOIN loans l ON l.id = lr.loan_id INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE lr.id = $1 AND lr.loan_id = $2 LIMIT 1`, [remarkId, ownerId]
+    );
+    const remark = existing.rows[0];
+    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    const photo = await getRemarkPhoto("loan", remarkId);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+    res.setHeader("Content-Type", photo.mime_type);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
+    return res.send(photo.file_data);
   } catch (error) { return next(error); }
 });
 

@@ -9,6 +9,13 @@ export interface LoanRow extends LoanPayload {
   address: string;
   importedAt: string;
   latestRemarks: Array<{ remark: string; remarkCategory: string }>;
+  /** Field status from the newest primary remark; null until someone acts on the loan. */
+  actionStatus?: string | null;
+  actionStatusAt?: string | null;
+  actionStatusBy?: string | null;
+  /** "not_in_import" (settled) or "deleted", with when it happened; null for open loans. */
+  closedReason?: string | null;
+  closedAt?: string | null;
 }
 
 export interface PaymentRecordRow {

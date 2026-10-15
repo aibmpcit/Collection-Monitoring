@@ -185,10 +185,19 @@ describe("daily upload rules", () => {
     expect((await response.json()).message).toBe("Choose the branch this file belongs to");
   });
 
-  it("lists loans missing from the file but leaves them open unless asked", async () => {
+  it("moves loans missing from the updated list to Settled Accounts by default", async () => {
     branchLoans();
     const body = await (await post("/loans/bulk", [loanRow()])).json();
-    expect(body).toMatchObject({ closeMissing: false, updated: 1, closed: 0, notInFile: 1, closedLoans: [{ loanAccountNo: "LN-2" }] });
+    expect(body).toMatchObject({ closeMissing: true, updated: 1, closed: 1, notInFile: 1, closedLoans: [{ loanAccountNo: "LN-2" }] });
+    const settle = writes.find(write => write.sql.includes("SET status = 'closed'"))!;
+    expect(settle.sql).toContain("closed_reason = 'not_in_import'");
+    expect(settle.params).toEqual([[2]]);
+  });
+
+  it("keeps missing loans open when the uploader opts out (partial file)", async () => {
+    branchLoans();
+    const body = await (await post("/loans/bulk", [loanRow()], { branchId: 2, closeMissing: false })).json();
+    expect(body).toMatchObject({ closeMissing: false, closed: 0, notInFile: 1 });
     expect(writes.some(write => write.sql.includes("SET status = 'closed'"))).toBe(false);
   });
 
@@ -197,6 +206,7 @@ describe("daily upload rules", () => {
     const body = await (await post("/loans/bulk", [loanRow()], { branchId: 2, fileName: "altavas-oct15.xlsx", rowsInFile: 3, closeMissing: true })).json();
     expect(body).toMatchObject({ preview: false, updated: 1, closed: 1, notInFile: 1, openBefore: 2, closedLoans: [{ loanAccountNo: "LN-2", memberName: "Ana" }] });
     const close = writes.find(write => write.sql.includes("SET status = 'closed'"))!;
+    expect(close.sql).toContain("closed_reason = 'not_in_import'");
     expect(close.params).toEqual([[2]]);
     expect(runs).toHaveLength(1);
     expect(runs[0].params).toEqual([2, 1, "altavas-oct15.xlsx", 3, 0, 1, 0, 1, 0, 0]);
@@ -233,6 +243,9 @@ describe("daily upload rules", () => {
     branchLoans();
     const body = await (await post("/loans/bulk", [loanRow(), loanRow({ loanAccountNo: "LN-3", parAge: 5 })])).json();
     expect(body).toMatchObject({ updated: 2, reopened: 1 });
+    // Reopened loans leave Settled Accounts.
+    const reopen = writes.find(write => write.sql.includes("UPDATE loans") && write.params.at(-1) === 3)!;
+    expect(reopen.sql).toContain("closed_reason = IF($18 = 'closed', closed_reason, NULL)");
   });
 
   it("reports the spreadsheet row and a plain reason for skipped rows", async () => {

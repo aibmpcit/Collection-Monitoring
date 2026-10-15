@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams, useParams } from "react-router-dom";
@@ -9,9 +10,12 @@ import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { ToastNotification } from "../components/ToastNotification";
-import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
+import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, isLoanActionStatus, LOAN_ACTION_STATUSES, type RemarkCategory } from "../constants/remarkCategories";
+import { RemarkCategoryOptions } from "../components/RemarkCategoryOptions";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
+import { RemarkPhotoField } from "../components/RemarkPhoto";
+import { photoPayload, type CapturedPhoto } from "../services/photo";
 import type { Loan, LoanPayment, LoanRemark } from "../types/models";
 
 interface LoanDetails extends Loan {
@@ -83,6 +87,8 @@ export function LoanDetailsPage() {
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
   const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
+  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
+  const [editingHasPhoto, setEditingHasPhoto] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
@@ -116,6 +122,8 @@ export function LoanDetailsPage() {
   const backLink =
     origin === "due-monitoring"
       ? { to: "/reports/overdue", label: "Back to Due Monitoring" }
+      : origin === "settled"
+        ? { to: "/loans?tab=settled", label: "Back to Settled Accounts" }
       : origin === "payments"
         ? { to: "/loans?tab=payments", label: "Back to Payments" }
         : origin === "remarks"
@@ -213,7 +221,8 @@ export function LoanDetailsPage() {
     if (!loan || remarksSubmitting) return;
 
     const remark = remarkInput.trim();
-    if (!remark) {
+    // A status (primary remark) can be saved without a note.
+    if (!remark && !isLoanActionStatus(remarkCategory)) {
       setRemarkError("Enter a remark.");
       return;
     }
@@ -223,15 +232,19 @@ export function LoanDetailsPage() {
     setMessage("");
     try {
       const attachment = await fileToAttachment(remarkAttachment);
-      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory, attachment });
+      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) });
       setRemarkInput("");
       setRemarkAttachment(null);
+      setRemarkPhoto(undefined);
       setEditingRemarkId(null);
+      setEditingHasPhoto(false);
       setRemarkModalOpen(false);
       setMessage(editingRemarkId ? "Remark updated." : "Remark added.");
       try {
         await loadRemarks(loan.id);
         setRemarkPage(1);
+        // The loan's status follows its newest primary remark.
+        setLoan(await apiRequest<LoanDetails>(`/loans/${loan.id}`));
       } catch {
         setError("Remark was added, but the remarks list could not be refreshed. Reload the page to see it.");
       }
@@ -249,10 +262,12 @@ export function LoanDetailsPage() {
     try {
       await apiRequest(`/loans/${loan.id}/remarks/${editingRemarkId}`, "DELETE");
       setEditingRemarkId(null);
+      setEditingHasPhoto(false);
       setConfirmingRemarkDelete(false);
       setRemarkModalOpen(false);
       setMessage("Remark deleted.");
-      await loadRemarks(loan.id).catch(() => setError("Remark was deleted, but the list could not be refreshed. Reload the page."));
+      await Promise.all([loadRemarks(loan.id), apiRequest<LoanDetails>(`/loans/${loan.id}`).then(setLoan)])
+        .catch(() => setError("Remark was deleted, but the list could not be refreshed. Reload the page."));
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to delete remark.");
     } finally {
@@ -345,6 +360,8 @@ export function LoanDetailsPage() {
         member={{ name: loan.memberName, cifKey: loan.cifKey, contact: loan.contactInfo, address: loan.address }}
         loan={{ accountNo: loan.loanAccountNo, type: loan.loanType, status: loan.status, maturityDate: formatDate(loan.maturityDate) }}
         attachmentName={summaryRemark.attachmentName}
+        photo={summaryRemark.photo}
+        photoPath={`/loans/${loan.id}/remarks/${summaryRemark.id}/photo`}
         onDownload={summaryRemark.attachmentName ? () => void apiDownload(
           `/loans/${loan.id}/remarks/${summaryRemark.id}/attachment`, summaryRemark.attachmentName || "attachment"
         ).catch(e => setError(e instanceof Error ? e.message : "Unable to download attachment")) : undefined}
@@ -418,11 +435,7 @@ export function LoanDetailsPage() {
                     onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                     required
                   >
-                    {REMARK_CATEGORIES.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
+                    <RemarkCategoryOptions />
                   </select>
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -432,14 +445,15 @@ export function LoanDetailsPage() {
                     rows={4}
                     value={remarkInput}
                     onChange={(event) => setRemarkInput(event.target.value)}
-                    placeholder="Add a loan remark..."
-                    required
+                    placeholder={isLoanActionStatus(remarkCategory) ? "Optional note, e.g. amount promised or who you talked to" : "Add a loan remark..."}
+                    required={!isLoanActionStatus(remarkCategory)}
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Attachment (optional, max 5 MB)
                   <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
                 </label>
+                <RemarkPhotoField photo={remarkPhoto} hasExisting={Boolean(editingRemarkId) && editingHasPhoto} onChange={setRemarkPhoto} disabled={remarksSubmitting} />
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
                   {editingRemarkId && (confirmingRemarkDelete ? (
                     <div className="flex flex-wrap items-center gap-2 sm:mr-auto" role="group" aria-label="Confirm remark deletion">
@@ -498,10 +512,11 @@ export function LoanDetailsPage() {
                   {loan.cifKey} | {loan.loanType}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
+              <div className="flex shrink-0 flex-col items-end gap-1">
                 <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
                   {loan.status}
                 </span>
+                {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)} title="Field status">{getRemarkCategoryLabel(loan.actionStatus)}</span>}
               </div>
             </div>
             <div id="loan-information-details" hidden={!detailsExpanded}>
@@ -610,6 +625,29 @@ export function LoanDetailsPage() {
               </div>
             ) : (
               <div role="tabpanel">
+              <div className="surface-soft mb-3 grid gap-2 p-3">
+                {hasPermission(user, "add_remarks") && <label className="grid gap-1 text-sm font-medium text-black/80 sm:max-w-xs">
+                  Set status
+                  {/* Choosing a status opens the remark form with it preselected; the select itself stays on the prompt. */}
+                  <select className="field" value="" aria-label="Set loan status" onChange={event => {
+                    const value = event.target.value as RemarkCategory;
+                    if (!value) return;
+                    setRemarkError("");
+                    setEditingRemarkId(null);
+                    setEditingHasPhoto(false);
+                    setRemarkInput("");
+                    setRemarkCategory(value);
+                    setRemarkAttachment(null);
+                    setRemarkPhoto(undefined);
+                    setRemarkModalOpen(true);
+                  }}>
+                    <option value="">Choose a status...</option>
+                    {LOAN_ACTION_STATUSES.map(status => <option key={status.value} value={status.value}>
+                      {status.label}{loan.actionStatus === status.value ? " (current)" : ""}
+                    </option>)}
+                  </select>
+                </label>}
+              </div>
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
@@ -618,9 +656,11 @@ export function LoanDetailsPage() {
                   {hasPermission(user, "add_remarks") && <button type="button" className="btn-primary" onClick={() => {
                     setRemarkError("");
                     setEditingRemarkId(null);
+                    setEditingHasPhoto(false);
                     setRemarkInput("");
                     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
                     setRemarkAttachment(null);
+                    setRemarkPhoto(undefined);
                     setRemarkModalOpen(true);
                   }}>Add Remark</button>}
                 </div>
@@ -643,15 +683,18 @@ export function LoanDetailsPage() {
                         <p className="text-sm text-slate-900">{item.remark}</p>
                         <p className="mt-1 text-xs text-black/60">
                           {formatDateTime(item.createdAt)} | By: {item.createdBy}
+                          {item.photo && <span className="ml-2 inline-flex items-center gap-1 text-slate-500"><Camera size={12} aria-hidden="true" />Photo{item.photo.latitude != null ? " · geotagged" : ""}</span>}
                         </p>
                         {item.canEdit !== false && <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
                           event.stopPropagation();
                           setEditingRemarkId(item.id);
+                          setEditingHasPhoto(Boolean(item.photo));
                           setConfirmingRemarkDelete(false);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarkError("");
                           setRemarkAttachment(null);
+                          setRemarkPhoto(undefined);
                           setRemarkModalOpen(true);
                         }}>Edit</button>}
                       </li>

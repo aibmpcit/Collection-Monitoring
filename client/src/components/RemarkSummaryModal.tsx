@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { getRemarkCategoryLabel } from "../constants/remarkCategories";
+import { RemarkPhotoView, type RemarkPhotoInfo } from "./RemarkPhoto";
 
 interface DetailGroup {
   name: string;
@@ -17,7 +18,7 @@ interface LoanGroup {
 }
 
 export function RemarkSummaryModal({
-  open, remark, category, createdAt, createdBy, member, loan, attachmentName, onDownload, onClose
+  open, remark, category, createdAt, createdBy, member, loan, attachmentName, onDownload, photo, photoPath, onClose
 }: {
   open: boolean;
   remark: string;
@@ -28,6 +29,9 @@ export function RemarkSummaryModal({
   loan?: LoanGroup;
   attachmentName?: string | null;
   onDownload?: () => void;
+  photo?: RemarkPhotoInfo | null;
+  /** API path of the photo image, e.g. /loans/9/remarks/3/photo. */
+  photoPath?: string;
   onClose: () => void;
 }) {
   if (!open || typeof document === "undefined") return null;
@@ -68,6 +72,11 @@ export function RemarkSummaryModal({
             <p className="text-sm text-slate-600">Maturity: {loan.maturityDate || "-"}</p>
           </section>}
         </div>
+
+        {photo && photoPath && <section className="mt-4 surface-soft p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Field photo</p>
+          <RemarkPhotoView path={photoPath} photo={photo} />
+        </section>}
 
         <section className="mt-4 surface-soft p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attachment</p>
