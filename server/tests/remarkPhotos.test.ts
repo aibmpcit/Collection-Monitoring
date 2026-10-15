@@ -75,7 +75,7 @@ describe("remark photos", () => {
   });
 
   it("saves a geotagged photo alongside a new remark", async () => {
-    const response = await send("/loans/9/remarks", { remark: "Visited the house", remarkCategory: "visited", photo: photo() });
+    const response = await send("/loans/9/remarks", { remark: "Visited the house", remarkCategory: "visited", photo: photo(), location: { latitude: 11.5841234, longitude: 122.5432109, accuracy: 12 } });
     expect(response.status).toBe(201);
     const insert = calls().find(([sql]) => sql.includes("INSERT INTO remark_photos"))!;
     expect(insert[1].slice(0, 4)).toEqual(["loan", 31, "visit.jpg", "image/jpeg"]);

@@ -37,7 +37,7 @@ export interface Loan {
   penalty: number;
   dueDate: string;
   status: "active" | "closed" | "overdue";
-  /** Field status from the newest primary remark; null until someone acts on the loan. */
+  /** Type of the newest payment ("partial" or "settled"); null until a payment is recorded. */
   actionStatus?: string | null;
   actionStatusAt?: string | null;
   actionStatusBy?: string | null;
@@ -126,10 +126,16 @@ export interface LoanRemark {
   attachmentName?: string | null;
   /** Field photo with where and when it was taken; null when the remark has none. */
   photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
+  /** Where the remark was recorded ("Add location"). */
+  location?: { latitude: number; longitude: number; accuracy: number | null } | null;
 }
 
 export interface LoanPayment {
   canEdit?: boolean;
+  /** Photo or file proving the payment, with where it was recorded. */
+  proof?: { kind: string; fileName: string; latitude: number; longitude: number; accuracy: number | null; capturedAt: string } | null;
+  /** "partial" or "settled"; older payments may have none. */
+  paymentStatus?: string | null;
   id: number;
   paymentId: string;
   loanId: number;

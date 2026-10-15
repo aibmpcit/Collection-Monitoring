@@ -3,9 +3,19 @@ import { ensureSchema } from "../services/schema.js";
 
 const RESET_MIGRATION = "20260925_reset_collection_data_for_revised_loan_schema";
 const PAR_STATUS_MIGRATION = "20260925_derive_overdue_status_from_par_age";
+const PAYMENT_STATUS_MIGRATION = "20261016_field_status_from_payments";
 
 async function run() {
   await ensureSchema();
+
+  const paymentStatusApplied = await query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1 LIMIT 1", [PAYMENT_STATUS_MIGRATION]);
+  if (paymentStatusApplied.rowCount === 0) {
+    await withTransaction(async client => {
+      // Field status now comes from payments; statuses set by remarks earlier are cleared.
+      await client.query("UPDATE loans SET action_status = NULL, action_status_at = NULL, action_status_by = NULL WHERE action_status IS NOT NULL");
+      await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [PAYMENT_STATUS_MIGRATION]);
+    });
+  }
 
   const parStatusApplied = await query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1 LIMIT 1", [PAR_STATUS_MIGRATION]);
   if (parStatusApplied.rowCount === 0) {

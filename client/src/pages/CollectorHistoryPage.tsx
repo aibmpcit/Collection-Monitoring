@@ -1,12 +1,13 @@
 import { Camera, Paperclip } from "lucide-react";
 import { RemarkPhotoView } from "../components/RemarkPhoto";
+import { MapLink } from "../components/FieldEvidence";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ExportChoiceDialog } from "../components/ExportChoiceDialog";
 import { PageHeader } from "../components/PageHeader";
 import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
-import { getRemarkCategoryLabel } from "../constants/remarkCategories";
+import { getRemarkCategoryLabel, paymentStatusLabel } from "../constants/remarkCategories";
 import { apiDownload, apiRequest } from "../services/api";
 
 interface Activity {
@@ -18,8 +19,11 @@ interface Activity {
   attachment_name?: string | null;
   loan_type?: string | null; maturity_date?: string | null; loan_status?: string | null;
   contact_info?: string | null; address?: string | null; collector_role?: string | null;
+  payment_status?: string | null;
   photo_id?: number | null; photo_latitude?: number | string | null; photo_longitude?: number | string | null;
   photo_accuracy?: number | string | null; photo_captured_at?: string | null;
+  geo_latitude?: number | string | null; geo_longitude?: number | string | null; geo_accuracy?: number | string | null;
+  proof_kind?: string | null; proof_name?: string | null;
 }
 
 const remarkPath = (item: Activity) => item.kind === "member_remark"
@@ -315,7 +319,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
                 </span>
               </span>
               {item.kind === "payment"
-                ? <span className="mt-2 block text-xs text-slate-600">Receipt: {item.or_no || "Not provided"}</span>
+                ? <span className="mt-2 block text-xs text-slate-600">Receipt: {item.or_no || "Not provided"}{item.payment_status ? ` · ${paymentStatusLabel(item.payment_status)}` : ""}</span>
                 : item.remark && <span className="mt-2 block line-clamp-2 whitespace-pre-wrap break-words text-sm text-slate-700">{item.remark}</span>}
               {(!isFieldUser || item.attachment_name || item.photo_id) && <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 {!isFieldUser && <span>By {item.collector_name || "Unattributed"}</span>}
@@ -371,6 +375,22 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         {selectedActivity.kind === "payment"
           ? <div className="mt-4 grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div>
           : <div className="mt-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
+        {selectedActivity.geo_latitude != null && selectedActivity.geo_longitude != null && <div className="mt-3">
+          <MapLink point={{ latitude: Number(selectedActivity.geo_latitude), longitude: Number(selectedActivity.geo_longitude), accuracy: toNumberOrNull(selectedActivity.geo_accuracy) }}
+            label={selectedActivity.kind === "payment" ? "Where it was collected" : "View on map"} />
+        </div>}
+        {selectedActivity.kind === "payment" && selectedActivity.proof_kind && <div className="mt-3">
+          {selectedActivity.proof_kind === "photo"
+            ? <RemarkPhotoView path={`/loans/${selectedActivity.loan_id}/payments/${selectedActivity.id}/proof`} photo={{
+                latitude: toNumberOrNull(selectedActivity.geo_latitude), longitude: toNumberOrNull(selectedActivity.geo_longitude),
+                accuracy: toNumberOrNull(selectedActivity.geo_accuracy), capturedAt: plainDateTime(selectedActivity.occurred_at)
+              }} />
+            : <button type="button" className="btn-muted" onClick={() => {
+                const item = selectedActivity;
+                void apiDownload(`/loans/${item.loan_id}/payments/${item.id}/proof`, item.proof_name || "payment-proof")
+                  .catch(e => setError(e instanceof Error ? e.message : "Unable to download proof"));
+              }}><Paperclip size={14} aria-hidden="true" /><span className="truncate">Proof: {selectedActivity.proof_name}</span></button>}
+        </div>}
         {selectedActivity.kind !== "payment" && selectedActivity.photo_id && <div className="mt-4">
           <RemarkPhotoView path={`${remarkPath(selectedActivity)}/photo`} photo={{
             latitude: toNumberOrNull(selectedActivity.photo_latitude),

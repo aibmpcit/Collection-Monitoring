@@ -9,7 +9,7 @@ export interface LoanRow extends LoanPayload {
   address: string;
   importedAt: string;
   latestRemarks: Array<{ remark: string; remarkCategory: string }>;
-  /** Field status from the newest primary remark; null until someone acts on the loan. */
+  /** Type of the newest payment ("partial" or "settled"); null until a payment is recorded. */
   actionStatus?: string | null;
   actionStatusAt?: string | null;
   actionStatusBy?: string | null;
@@ -19,6 +19,7 @@ export interface LoanRow extends LoanPayload {
 }
 
 export interface PaymentRecordRow {
+  paymentStatus?: string | null;
   id: number;
   paymentId: string;
   loanId: number;

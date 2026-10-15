@@ -4,8 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, isLoanActionStatus, LOAN_ACTION_STATUSES, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
-import { RemarkCategoryOptions } from "../components/RemarkCategoryOptions";
+import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, PAYMENT_STATUSES, paymentStatusLabel, REMARK_CATEGORIES, type PaymentStatus, type RemarkCategory } from "../constants/remarkCategories";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
@@ -13,8 +12,7 @@ import { ToastNotification } from "../components/ToastNotification";
 import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
-import { RemarkPhotoField } from "../components/RemarkPhoto";
-import { photoPayload, type CapturedPhoto } from "../services/photo";
+import { PaymentProofField, proofPayload, RemarkEvidenceField, remarkEvidencePayload, type PaymentProofUpload , type RemarkEvidence } from "../components/FieldEvidence";
 import type { Borrower, Branch, LoanPayload, LoanPayment, LoanRemark, Paged } from "../types/models";
 import { PaginationControls } from "../components/PaginationControls";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -73,8 +71,7 @@ export function LoansPage() {
   const [remarks, setRemarks] = useState<LoanRemark[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
-  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
-  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
+  const [remarkProof, setRemarkProof] = useState<RemarkEvidence | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<LoanRemark | null>(null);
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
@@ -100,6 +97,8 @@ export function LoansPage() {
   const [payments, setPayments] = useState<LoanPayment[]>([]);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "">("");
+  const [paymentProof, setPaymentProof] = useState<PaymentProofUpload | null>(null);
   const [paymentDateTime, setPaymentDateTime] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
@@ -311,7 +310,7 @@ export function LoansPage() {
       if (current?.loanId === loanId) {
         return null;
       }
-      const estimatedMenuHeight = 156;
+      const estimatedMenuHeight = 200;
       const openUp = rect.bottom + estimatedMenuHeight > window.innerHeight - 8;
       return {
         loanId,
@@ -606,8 +605,7 @@ export function LoansPage() {
     setRemarkLoan({ id: loan.id, loanAccountNo: loan.loanAccountNo, memberName: loan.memberName });
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
-    setRemarkAttachment(null);
-    setRemarkPhoto(undefined);
+    setRemarkProof(null);
     setRemarks([]);
     setSummaryRemark(null);
     setIsRemarksOpen(true);
@@ -619,8 +617,7 @@ export function LoansPage() {
     setRemarkLoan(null);
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
-    setRemarkAttachment(null);
-    setRemarkPhoto(undefined);
+    setRemarkProof(null);
     setRemarks([]);
     setRemarkError("");
   }
@@ -629,19 +626,14 @@ export function LoansPage() {
     event.preventDefault();
     if (!remarkLoan) return;
     const remark = remarkInput.trim();
-    // A status (primary remark) can be saved without a note.
-    if (!remark && !isLoanActionStatus(remarkCategory)) return;
+    if (!remark) return;
 
     setRemarkError("");
     try {
-      const attachment = await fileToAttachment(remarkAttachment);
-      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) });
+      await apiRequest(`/loans/${remarkLoan.id}/remarks`, "POST", { remark, remarkCategory, ...remarkEvidencePayload(remarkProof, false) });
       setRemarkInput("");
-      setRemarkAttachment(null);
-      setRemarkPhoto(undefined);
+      setRemarkProof(null);
       await loadRemarks(remarkLoan.id);
-      // A new status changes the loan's badge in the list.
-      if (isLoanActionStatus(remarkCategory)) setListRefresh((value) => value + 1);
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to add remark");
     }
@@ -830,6 +822,8 @@ export function LoansPage() {
     setPayments([]);
     setPaymentAmount("");
     setPaymentOrNo("");
+    setPaymentStatus("");
+    setPaymentProof(null);
     setPaymentError("");
     const now = new Date();
     const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -861,17 +855,31 @@ export function LoansPage() {
       setPaymentError("OR No is too long.");
       return;
     }
+    if (!paymentStatus) {
+      setPaymentError("Choose the payment type.");
+      return;
+    }
+    if (!paymentProof) {
+      setPaymentError("Add a photo or an attachment, with location, as proof of payment.");
+      return;
+    }
 
     setPaymentError("");
     try {
       await apiRequest(`/loans/${paymentLoan.id}/payments`, "POST", {
         amount,
         orNo,
-        collectedAt: paymentDateTime
+        collectedAt: paymentDateTime,
+        paymentStatus,
+        proof: proofPayload(paymentProof)
       });
       setPaymentAmount("");
       setPaymentOrNo("");
+      setPaymentStatus("");
+      setPaymentProof(null);
       await loadPayments(paymentLoan.id);
+      // The loan's status badge follows its newest payment.
+      setListRefresh((value) => value + 1);
       setMessage("Payment recorded.");
     } catch (e) {
       setPaymentError(e instanceof Error ? e.message : "Unable to record payment");
@@ -981,14 +989,9 @@ export function LoansPage() {
                   Par Age
                   <input className="field min-w-0" type="number" min={0} value={form.parAge} onChange={(event) => setForm((c) => ({ ...c, parAge: Number(event.target.value) }))} placeholder="Par Age" required />
                 </label>
-                <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Status
-                  <select className="field min-w-0" value={form.status} onChange={(event) => setForm((c) => ({ ...c, status: event.target.value as LoanPayload["status"] }))}>
-                    <option value="active">active</option>
-                    <option value="overdue">overdue</option>
-                    <option value="closed">closed</option>
-                  </select>
-                </label>
+                <p className="text-xs text-slate-500 sm:col-span-2">
+                  Active / overdue is set automatically from PAR age (above 0 = overdue).
+                </p>
 
                 {loanFormBranchId > 0 && availableLoanMembers.length === 0 && (
                   <p className="md:col-span-2 text-xs text-black/70">
@@ -1051,22 +1054,22 @@ export function LoansPage() {
                     onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                     required
                   >
-                    <RemarkCategoryOptions />
+                    {REMARK_CATEGORIES.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <textarea
                   className="field"
                   value={remarkInput}
                   onChange={(event) => setRemarkInput(event.target.value)}
-                  placeholder={isLoanActionStatus(remarkCategory) ? "Optional note" : "Add a new remark..."}
+                  placeholder="Add a new remark..."
                   rows={3}
-                  required={!isLoanActionStatus(remarkCategory)}
+                  required
                 />
-                <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Attachment (optional, max 5 MB)
-                  <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
-                </label>
-                <RemarkPhotoField photo={remarkPhoto} hasExisting={false} onChange={setRemarkPhoto} />
+                <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} />
                 <div className="flex justify-end">
                   <button type="submit" className="btn-primary">
                     Add Remark
@@ -1111,7 +1114,7 @@ export function LoansPage() {
             <div className="modal-card max-w-2xl">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-lg font-semibold">Add Payments</h3>
+                  <h3 className="text-lg font-semibold">Update</h3>
                   <p className="text-xs text-black/70">
                     {paymentLoan.loanAccountNo} | {paymentLoan.memberName}
                   </p>
@@ -1147,6 +1150,13 @@ export function LoansPage() {
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Payment Type
+                  <select className="field" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)} required>
+                    <option value="" disabled>Choose payment type...</option>
+                    {PAYMENT_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
                   Payment Date/Time
                   <input
                     className="field"
@@ -1156,6 +1166,9 @@ export function LoansPage() {
                     required
                   />
                 </label>
+                <div className="sm:col-span-2">
+                  <PaymentProofField proof={paymentProof} onChange={setPaymentProof} />
+                </div>
                 <div className="sm:col-span-2 flex justify-end">
                   <button type="submit" className="btn-primary">
                     Save Payment
@@ -1263,9 +1276,9 @@ export function LoansPage() {
             data-action-menu="loan"
             role="menu"
             style={{
-              left: openMenuLoan.left,
-              top: openMenuLoan.top,
-              transform: openMenuLoan.openUp ? "translate(-100%, -100%)" : "translateX(-100%)"
+              right: Math.max(8, window.innerWidth - openMenuLoan.left),
+              top: openMenuLoan.openUp ? undefined : openMenuLoan.top,
+              bottom: openMenuLoan.openUp ? window.innerHeight - openMenuLoan.top : undefined
             }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -1279,6 +1292,18 @@ export function LoansPage() {
             >
               View Details
             </button>
+            {hasPermission(user, "add_payments") && (
+              <button
+                type="button"
+                className="action-menu-item"
+                onClick={() => {
+                  setOpenMenuLoan(null);
+                  void openPaymentModal(activeMenuLoan);
+                }}
+              >
+                Update
+              </button>
+            )}
             {canEditLoans && (
               <button
                 type="button"
@@ -1476,8 +1501,8 @@ export function LoansPage() {
                   aria-label="Filter by status"
                 >
                   <option value="">All statuses</option>
-                  <option value="none">No action yet</option>
-                  {LOAN_ACTION_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+                  <option value="none">No payment yet</option>
+                  {PAYMENT_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
                 </select>
               </div>
               {canDeleteLoans && (
@@ -1525,7 +1550,7 @@ export function LoansPage() {
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       {loan.actionStatus
-                        ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span>
+                        ? <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span>
                         : <span className={loanStatusClass(loan.status)}>{loan.status}</span>}
                       <span className="text-sm font-semibold text-slate-700">{formatCurrency(loan.loanAmount)}</span>
                     </div>
@@ -1553,7 +1578,7 @@ export function LoansPage() {
                           />
                         )}
                         <span className={loanStatusClass(loan.status)}>{loan.status}</span>
-                        {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span>}
+                        {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span>}
                       </div>
                     </div>
 
@@ -1629,7 +1654,7 @@ export function LoansPage() {
                     <td>{loan.address || "-"}</td>
                     <td>{loan.loanType || "-"}</td>
                     <td>{loan.parAge}</td>
-                    <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">No action yet</span>}</td>
+                    <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">No payment yet</span>}</td>
                   </tr>)}
                 </tbody>
               </table>
@@ -1654,6 +1679,7 @@ export function LoansPage() {
                     )}
                     {canUseLoanActions && <th>Action</th>}
                     {!isBranchManager && <th>Member Code</th>}
+                    <th>Status</th>
                     <th>Member Name</th>
                     <th>Address</th>
                     <th>Contact No.</th>
@@ -1668,7 +1694,6 @@ export function LoansPage() {
                     <th>Fines</th>
                     <th>Total</th>
                     <th>PAR Age</th>
-                    <th>Status</th>
                     <th>Remarks</th>
                   </tr>
                 </thead>
@@ -1720,6 +1745,7 @@ export function LoansPage() {
                       {!isBranchManager && <td title={loan.cifKey}>
                         <span className="cell-clip">{loan.cifKey}</span>
                       </td>}
+                      <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">-</span>}</td>
                       <td title={loan.memberName}>
                         <span className="cell-clip">{loan.memberName}</span>
                       </td>
@@ -1744,7 +1770,6 @@ export function LoansPage() {
                       <td>{formatCurrency(loan.penaltyDue)}</td>
                       <td>{formatCurrency(loan.total)}</td>
                       <td>{loan.parAge}</td>
-                      <td>{loan.actionStatus ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span> : <span className="text-xs text-slate-400">-</span>}</td>
                       {isBranchManager ? (
                         <td title={loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")}>
                           {loan.latestRemarks.length ? (

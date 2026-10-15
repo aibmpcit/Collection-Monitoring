@@ -2,6 +2,7 @@ import { Search } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PaginationControls } from "../../components/PaginationControls";
+import { actionStatusClass, paymentStatusLabel } from "../../constants/remarkCategories";
 import { formatCurrency, formatDateTime } from "./format";
 import { LoanRecordField } from "./LoanRecordField";
 import type { PaymentRecordRow } from "./types";
@@ -123,6 +124,7 @@ export function PaymentRecordsPanel({
                   <LoanRecordField label="OR No" value={row.orNo || "-"} />
                   <LoanRecordField label="Collected By" value={row.collectedBy || "System"} />
                   <LoanRecordField label="Amount" value={formatCurrency(row.amount)} />
+                <LoanRecordField label="Type" value={row.paymentStatus ? <span className={actionStatusClass(row.paymentStatus)}>{paymentStatusLabel(row.paymentStatus)}</span> : "-"} />
                   <LoanRecordField label="Collected At" value={formatDateTime(row.collectedAt)} />
                 </div>
               </article>
@@ -152,6 +154,7 @@ export function PaymentRecordsPanel({
                   <th>Loan Account No</th>
                   <th>Member Name</th>
                   <th>Amount</th>
+              <th>Type</th>
                   <th>Collected At</th>
                 </tr>
               </thead>
@@ -184,6 +187,7 @@ export function PaymentRecordsPanel({
                     <td>{row.loanAccountNo}</td>
                     <td>{row.memberName}</td>
                     <td>{formatCurrency(row.amount)}</td>
+                <td>{row.paymentStatus ? <span className={actionStatusClass(row.paymentStatus)}>{paymentStatusLabel(row.paymentStatus)}</span> : "-"}</td>
                     <td>{formatDateTime(row.collectedAt)}</td>
                   </tr>
                 ))}

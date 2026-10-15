@@ -444,9 +444,9 @@ export function BorrowerList({
           data-action-menu="borrower"
           role="menu"
           style={{
-            left: openMenu.left,
-            top: openMenu.top,
-            transform: openMenu.openUp ? "translate(-100%, -100%)" : "translateX(-100%)"
+            right: Math.max(8, window.innerWidth - openMenu.left),
+              top: openMenu.openUp ? undefined : openMenu.top,
+              bottom: openMenu.openUp ? window.innerHeight - openMenu.top : undefined
           }}
           onClick={(event) => event.stopPropagation()}
         >

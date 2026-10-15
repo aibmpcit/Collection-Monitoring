@@ -1,0 +1,151 @@
+import { query, type QueryClient } from "../config/db.js";
+import { toBusinessDateTime } from "../config/time.js";
+
+// Field evidence captured on the collector's phone:
+// - every payment carries proof (a camera photo or an attached file) plus where it was recorded;
+// - a remark may carry just a location ("Add location").
+
+export interface GeoPoint {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+}
+
+export interface PaymentProofPayload extends GeoPoint {
+  kind: "photo" | "attachment";
+  name: string;
+  type: string;
+  data: string;
+  capturedAt: string;
+}
+
+const MAX_PROOF_BYTES = 5 * 1024 * 1024;
+
+function invalid(message: string) {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
+function coordinate(value: unknown, limit: number, label: string) {
+  const number = Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(number) || Math.abs(number) > limit) {
+    throw invalid(label);
+  }
+  return Math.round(number * 1e6) / 1e6;
+}
+
+function accuracyOf(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+/** A required point: both coordinates present and in range. */
+export function parseGeoPoint(value: unknown, message = "Location is required"): GeoPoint {
+  if (!value || typeof value !== "object") throw invalid(message);
+  const raw = value as Record<string, unknown>;
+  return {
+    latitude: coordinate(raw.latitude, 90, message),
+    longitude: coordinate(raw.longitude, 180, message),
+    accuracy: accuracyOf(raw.accuracy)
+  };
+}
+
+/** Remark location: undefined = leave as is, null = remove, object = save. */
+export function parseRemarkLocation(value: unknown): GeoPoint | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return parseGeoPoint(value, "Invalid location");
+}
+
+/** Payment proof: a photo or file with the location it was recorded at. */
+export function parsePaymentProof(value: unknown): PaymentProofPayload | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object") throw invalid("Invalid payment proof");
+  const raw = value as Record<string, unknown>;
+  const kind = raw.kind === "photo" ? "photo" : raw.kind === "attachment" ? "attachment" : null;
+  if (!kind) throw invalid("Payment proof must be a photo or an attachment");
+  const type = String(raw.type ?? "").trim().toLowerCase().slice(0, 120) || "application/octet-stream";
+  if (kind === "photo" && !type.startsWith("image/")) throw invalid("The payment photo must be an image");
+  const data = String(raw.data ?? "").replace(/^data:[^;]+;base64,/, "");
+  const bytes = Buffer.from(data, "base64").length;
+  if (!data || bytes === 0) throw invalid("Payment proof file is empty");
+  if (bytes > MAX_PROOF_BYTES) throw invalid("Payment proof must be 5 MB or smaller");
+  const point = parseGeoPoint(raw, "Payment proof needs a location. Allow location access and try again.");
+  const capturedAt = toBusinessDateTime(typeof raw.capturedAt === "string" ? raw.capturedAt : undefined);
+  if (!capturedAt) throw invalid("Invalid payment proof time");
+  const name = String(raw.name ?? "").trim().slice(0, 255) || (kind === "photo" ? "payment-photo.jpg" : "payment-proof");
+  return { kind, name, type, data, capturedAt, ...point };
+}
+
+export async function ensureFieldEvidenceTables() {
+  await query(`CREATE TABLE IF NOT EXISTS payment_proofs (
+    payment_id INT UNSIGNED NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(120) NOT NULL,
+    file_data LONGBLOB NOT NULL,
+    latitude DECIMAL(9,6) NOT NULL,
+    longitude DECIMAL(9,6) NOT NULL,
+    accuracy_m INT UNSIGNED NULL,
+    captured_at DATETIME NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (payment_id)
+  ) ENGINE=InnoDB`);
+}
+
+export async function savePaymentProof(client: QueryClient, paymentId: number, proof: PaymentProofPayload) {
+  await client.query(
+    `INSERT INTO payment_proofs (payment_id, kind, file_name, mime_type, file_data, latitude, longitude, accuracy_m, captured_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON DUPLICATE KEY UPDATE kind = VALUES(kind), file_name = VALUES(file_name), mime_type = VALUES(mime_type),
+       file_data = VALUES(file_data), latitude = VALUES(latitude), longitude = VALUES(longitude),
+       accuracy_m = VALUES(accuracy_m), captured_at = VALUES(captured_at), created_at = CURRENT_TIMESTAMP`,
+    [paymentId, proof.kind, proof.name, proof.type, Buffer.from(proof.data, "base64"), proof.latitude, proof.longitude, proof.accuracy, proof.capturedAt]
+  );
+}
+
+export async function getPaymentProof(paymentId: number) {
+  const result = await query<{ kind: string; file_name: string; mime_type: string; file_data: Buffer }>(
+    "SELECT kind, file_name, mime_type, file_data FROM payment_proofs WHERE payment_id = $1 LIMIT 1",
+    [paymentId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Columns to select (with `pp` joined) so payment lists can show the proof and its location. */
+export const PROOF_COLUMNS = `pp.kind AS proof_kind, pp.file_name AS proof_name, pp.latitude AS proof_latitude,
+  pp.longitude AS proof_longitude, pp.accuracy_m AS proof_accuracy, pp.captured_at AS proof_captured_at`;
+
+export function mapProofColumns(row: Record<string, unknown>) {
+  if (!row.proof_kind) return { proof: null };
+  return {
+    proof: {
+      kind: String(row.proof_kind),
+      fileName: String(row.proof_name ?? ""),
+      latitude: Number(row.proof_latitude),
+      longitude: Number(row.proof_longitude),
+      accuracy: row.proof_accuracy == null ? null : Number(row.proof_accuracy),
+      capturedAt: String(row.proof_captured_at ?? "")
+    }
+  };
+}
+
+/** Remark rows: `location` from the latitude/longitude/location_accuracy columns. */
+export function mapRemarkLocation(row: Record<string, unknown>) {
+  if (row.latitude == null || row.longitude == null) return { location: null };
+  return {
+    location: {
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      accuracy: row.location_accuracy == null ? null : Number(row.location_accuracy)
+    }
+  };
+}
+
+export async function saveRemarkLocation(table: "loan_remarks" | "borrower_remarks", remarkId: number, location: GeoPoint | null | undefined) {
+  if (location === undefined) return;
+  await query(
+    `UPDATE ${table} SET latitude = $1, longitude = $2, location_accuracy = $3 WHERE id = $4`,
+    [location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, remarkId]
+  );
+}

@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS collections (
   amount DECIMAL(12,2) NOT NULL,
   or_no VARCHAR(80) NULL,
   collected_at DATETIME NOT NULL,
+  payment_status VARCHAR(16) NULL,
   created_by INT UNSIGNED NULL,
   PRIMARY KEY (id), KEY idx_collections_loan (loan_id), KEY idx_collections_user (created_by), KEY idx_collections_collected_at (collected_at),
   CONSTRAINT fk_collections_loan FOREIGN KEY (loan_id) REFERENCES loans(id),
@@ -92,6 +93,9 @@ CREATE TABLE IF NOT EXISTS loan_remarks (
   loan_id INT UNSIGNED NOT NULL,
   remark_text TEXT NOT NULL,
   remark_category VARCHAR(64) NOT NULL DEFAULT 'follow_up_collection',
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  location_accuracy INT UNSIGNED NULL,
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), KEY idx_loan_remarks_loan (loan_id),
@@ -105,6 +109,9 @@ CREATE TABLE IF NOT EXISTS borrower_remarks (
   borrower_id INT UNSIGNED NOT NULL,
   remark_text TEXT NOT NULL,
   remark_category VARCHAR(64) NOT NULL DEFAULT 'follow_up_collection',
+  latitude DECIMAL(9,6) NULL,
+  longitude DECIMAL(9,6) NULL,
+  location_accuracy INT UNSIGNED NULL,
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), KEY idx_borrower_remarks_borrower (borrower_id), KEY idx_borrower_remarks_created (created_at),
@@ -177,4 +184,18 @@ CREATE TABLE IF NOT EXISTS remark_photos (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_remark_photo (remark_kind, remark_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS payment_proofs (
+  payment_id INT UNSIGNED NOT NULL,
+  kind VARCHAR(16) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(120) NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  latitude DECIMAL(9,6) NOT NULL,
+  longitude DECIMAL(9,6) NOT NULL,
+  accuracy_m INT UNSIGNED NULL,
+  captured_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (payment_id)
 ) ENGINE=InnoDB;

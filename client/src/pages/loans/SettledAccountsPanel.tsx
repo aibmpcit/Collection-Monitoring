@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PaginationControls } from "../../components/PaginationControls";
 import { ToastNotification } from "../../components/ToastNotification";
-import { actionStatusClass, getRemarkCategoryLabel } from "../../constants/remarkCategories";
+import { actionStatusClass, paymentStatusLabel } from "../../constants/remarkCategories";
 import { useAuth } from "../../context/AuthContext";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { apiRequest } from "../../services/api";
@@ -63,8 +63,8 @@ export function SettledAccountsPanel({ branchId: fixedBranchId }: {
   const total = data?.total ?? 0;
   const open = (loan: LoanRow) => navigate(`/loan-details/${loan.id}?from=settled`);
   const fieldStatus = (loan: LoanRow) => loan.actionStatus
-    ? <span className={actionStatusClass(loan.actionStatus)}>{getRemarkCategoryLabel(loan.actionStatus)}</span>
-    : <span className="text-xs text-slate-400">No action</span>;
+    ? <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span>
+    : <span className="text-xs text-slate-400">No payment</span>;
 
   return (
     <>
@@ -114,7 +114,7 @@ export function SettledAccountsPanel({ branchId: fixedBranchId }: {
                 <th>Last Balance</th>
                 <th>Last Total Due</th>
                 <th>PAR Age</th>
-                <th>Field Status</th>
+                <th>Last Payment</th>
                 <th>Settled On</th>
               </tr>
             </thead>

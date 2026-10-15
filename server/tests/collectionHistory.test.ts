@@ -44,7 +44,7 @@ describe("collector history access and filters", () => {
   ])("lets collectors edit their own record at %s", async (path, body, table) => {
     mocks.query.mockReset();
     mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 7, branch_id: 2 }] })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [] }).mockResolvedValue({ rows: [] });
     const response = await fetch(`${base}${path}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -74,7 +74,7 @@ describe("collector history access and filters", () => {
     mocks.user = { id: 3, role: "branch_admin", branchId: 2 } as JwtUser;
     mocks.query.mockReset();
     mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 2 }] })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [] }).mockResolvedValue({ rows: [] });
     const response = await fetch(`${base}/loans/9/payments/11`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -100,7 +100,7 @@ describe("collector history access and filters", () => {
     mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
     mocks.query.mockReset();
     mocks.query.mockResolvedValueOnce({ rows: [{ created_by: 8, branch_id: 4 }] })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [] }).mockResolvedValue({ rows: [] });
     const response = await fetch(`${base}/loans/9/payments/11`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },

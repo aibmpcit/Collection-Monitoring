@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
-import { getRequestUser, isSuperAdmin, LOAN_ACTION_STATUSES, REMARK_CATEGORIES, toNumber, userBranchId } from "../services/access.js";
+import { getRequestUser, isSuperAdmin, PAYMENT_STATUSES, REMARK_CATEGORIES, toNumber, userBranchId } from "../services/access.js";
 import { mapLoanRow } from "../services/loanRows.js";
 import { PAR_BUCKET_KEYS, parBucketCondition } from "../services/parBuckets.js";
 
@@ -124,7 +124,7 @@ const loanListFilters = z.object({
   loanType: z.string().trim().max(120).optional(),
   parAge: z.enum(PAR_BUCKET_KEYS).optional(),
   // A field status, or "none" for loans nobody has acted on yet.
-  actionStatus: z.enum([...LOAN_ACTION_STATUSES, "none"]).optional(),
+  actionStatus: z.enum([...PAYMENT_STATUSES, "none"]).optional(),
   branchId: z.coerce.number().int().positive().optional(),
   borrowerId: z.coerce.number().int().positive().optional(),
   includeClosed: z.literal("true").optional(),

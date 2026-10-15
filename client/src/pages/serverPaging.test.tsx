@@ -16,7 +16,7 @@ const loan = (id: number) => ({
   id, borrowerId: id, branchId: 2, cifKey: `CIF-${id}`, memberName: `Member ${id}`, contactInfo: "", address: "",
   loanAccountNo: `LN-${id}`, loanType: "Salary", dateRelease: "2026-01-01", maturityDate: "2026-12-01", loanAmount: 1000,
   loanBalance: 500, principalDue: 100, penaltyDue: 0, interest: 10, otherCharges: 0, total: 110, parAge: 0, status: "active",
-  notes: "", importedAt: "2026-10-01T09:00:00", latestRemarks: [], actionStatus: id === 101 ? "visited" : null
+  notes: "", importedAt: "2026-10-01T09:00:00", latestRemarks: [], actionStatus: id === 101 ? "partial" : null
 });
 
 const requests = () => vi.mocked(apiRequest).mock.calls.map(([path]) => String(path));
@@ -85,15 +85,28 @@ describe("Collections page", () => {
 });
 
 describe("Collections loan status", () => {
-  it("shows each loan's field status and filters by it on the server", async () => {
+  it("shows each loan's latest payment status and filters by it on the server", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><LoansPage /></MemoryRouter>);
     await screen.findAllByText("Member 101");
-    expect(screen.getAllByText("Visited").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Partially Paid").length).toBeGreaterThan(0);
     await user.selectOptions(screen.getByLabelText("Filter by status"), "none");
     await waitFor(() => expect(loanPageRequests().some(path => path.includes("actionStatus=none") && path.includes("page=1"))).toBe(true));
     await user.selectOptions(screen.getByLabelText("Filter by status"), "settled");
     await waitFor(() => expect(loanPageRequests().some(path => path.includes("actionStatus=settled"))).toBe(true));
+  });
+});
+
+describe("Collections row actions", () => {
+  it("offers Update (payment and status) from the row menu", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><LoansPage /></MemoryRouter>);
+    await screen.findAllByText("Member 101");
+    await user.click(screen.getByRole("button", { name: "Open actions for loan LN-101" }));
+    await user.click(screen.getByRole("button", { name: "Update" }));
+    expect(await screen.findByRole("heading", { name: "Update" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Payment Type/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add current location" })).toBeInTheDocument();
   });
 });
 

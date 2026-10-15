@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BorrowerList } from "../components/BorrowerList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, type RemarkCategory, OTHER_REMARK_CATEGORIES } from "../constants/remarkCategories";
+import { DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, REMARK_CATEGORIES, type RemarkCategory } from "../constants/remarkCategories";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { ToastNotification } from "../components/ToastNotification";
@@ -12,8 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { apiDownload, apiRequest } from "../services/api";
 import { gridToRecords, loadXlsx, readSpreadsheet } from "../services/spreadsheet";
 import { fileToAttachment } from "../services/attachments";
-import { RemarkPhotoField } from "../components/RemarkPhoto";
-import { photoPayload, type CapturedPhoto } from "../services/photo";
+import { MapLink, RemarkEvidenceField, remarkEvidencePayload, type PaymentProofUpload , type RemarkEvidence } from "../components/FieldEvidence";
 import type { Borrower, BorrowerPayload, Branch } from "../types/models";
 
 const EMPTY_FORM: BorrowerPayload = {
@@ -60,6 +59,7 @@ interface MemberRemarkRow {
   canEdit?: boolean;
   attachmentName?: string | null;
   photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
+  location?: { latitude: number; longitude: number; accuracy: number | null } | null;
 }
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
@@ -121,9 +121,8 @@ export function BorrowersPage() {
   const [memberRemarks, setMemberRemarks] = useState<MemberRemarkRow[]>([]);
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
-  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
-  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
-  const [editingHasPhoto, setEditingHasPhoto] = useState(false);
+  const [remarkProof, setRemarkProof] = useState<RemarkEvidence | null>(null);
+  const [editingHasEvidence, setEditingHasEvidence] = useState(false);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
   const [confirmDeleteRemarkId, setConfirmDeleteRemarkId] = useState<number | null>(null);
   const [summaryRemark, setSummaryRemark] = useState<MemberRemarkRow | null>(null);
@@ -371,8 +370,7 @@ export function BorrowersPage() {
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setEditingRemarkId(null);
     setSummaryRemark(null);
-    setRemarkAttachment(null);
-    setRemarkPhoto(undefined);
+    setRemarkProof(null);
     setMemberRemarks([]);
     setRemarksError("");
     await loadMemberRemarks(borrower.id);
@@ -383,8 +381,7 @@ export function BorrowersPage() {
     setRemarkInput("");
     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
     setEditingRemarkId(null);
-    setRemarkAttachment(null);
-    setRemarkPhoto(undefined);
+    setRemarkProof(null);
     setMemberRemarks([]);
     setRemarksError("");
     setRemarksLoading(false);
@@ -400,17 +397,15 @@ export function BorrowersPage() {
     setRemarksSubmitting(true);
     setRemarksError("");
     try {
-      const attachment = await fileToAttachment(remarkAttachment);
       await apiRequest(
         `/borrowers/${remarksBorrower.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`,
         editingRemarkId ? "PATCH" : "POST",
-        { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) }
+        { remark, remarkCategory, ...remarkEvidencePayload(remarkProof, Boolean(editingRemarkId)) }
       );
       setRemarkInput("");
       setRemarkCategory(DEFAULT_REMARK_CATEGORY);
       setEditingRemarkId(null);
-      setRemarkAttachment(null);
-      setRemarkPhoto(undefined);
+      setRemarkProof(null);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
       setRemarksError(e instanceof Error ? e.message : "Unable to add member remark");
@@ -814,7 +809,7 @@ export function BorrowersPage() {
                   onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                   required
                 >
-                  {OTHER_REMARK_CATEGORIES.map((item) => (
+                  {REMARK_CATEGORIES.map((item) => (
                     <option key={item.value} value={item.value}>
                       {item.label}
                     </option>
@@ -829,11 +824,7 @@ export function BorrowersPage() {
                 rows={3}
                 required
               />
-              <label className="grid gap-1 text-sm font-medium text-black/80">
-                Attachment (optional, max 5 MB)
-                <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
-              </label>
-              <RemarkPhotoField photo={remarkPhoto} hasExisting={Boolean(editingRemarkId) && editingHasPhoto} onChange={setRemarkPhoto} disabled={remarksSubmitting} />
+              <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} hasExisting={Boolean(editingRemarkId) && editingHasEvidence} disabled={remarksSubmitting} />
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={remarksSubmitting}>
                   {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Add Remark"}
@@ -859,18 +850,18 @@ export function BorrowersPage() {
                       <p className="text-sm">{item.remark}</p>
                       <p className="mt-1 text-xs text-black/60">
                         {formatDateTime(item.createdAt)} | By: {item.createdBy}
+                        {item.location && <span className="mt-1 block"><MapLink point={item.location} /></span>}
                         {item.photo && <span className="ml-2 inline-flex items-center gap-1 text-slate-500"><Camera size={12} aria-hidden="true" />Photo{item.photo.latitude != null ? " · geotagged" : ""}</span>}
                       </p>
                       {item.canEdit !== false && <div className="mt-2 flex flex-wrap items-center gap-2" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
                         <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => {
                           setEditingRemarkId(item.id);
-                          setEditingHasPhoto(Boolean(item.photo));
+                          setEditingHasEvidence(Boolean(item.attachmentName || item.photo));
                           setConfirmDeleteRemarkId(null);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarksError("");
-                          setRemarkAttachment(null);
-                          setRemarkPhoto(undefined);
+                          setRemarkProof(null);
                         }}>Edit</button>
                         {confirmDeleteRemarkId === item.id ? <>
                           <span className="text-xs text-red-700">Delete this remark?</span>

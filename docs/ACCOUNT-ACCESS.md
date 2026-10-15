@@ -14,7 +14,7 @@ Remark columns: during testing (`REMARK_IMPORT_ONCE=false`) every import brings 
 
 Collectors retain their existing defaults (adding remarks and payments). Branch admins retain all three permissions by default. A super admin can override these defaults for an individual account or use **Use role defaults** to clear overrides. Other existing permissions still follow the selected role.
 
-**Loan status (primary remarks):** collectors, LAS and admins can set a loan's status to Visited, Partial or Settled. Each status is saved as a remark (the note is optional), so the history shows who set it and when; the newest one is the loan's status, and deleting it falls back to the previous one. Loans nobody has acted on show no status. This is separate from the active/overdue/closed status that comes from the daily import.
+**Loan status (from payments):** when collectors, LAS or admins record a payment they must choose its type, **Partially Paid** or **Settled**, and add proof: a camera photo or an attached file, together with the phone's location (a payment can't be saved without a location). Remarks offer the same two steps (photo or file, and current location) but both are optional.
 
 Changing a role does not delete the account's payment or remark history. Role editing does not offer super-admin promotion, and super-admin accounts cannot be edited through this form.
 

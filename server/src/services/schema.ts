@@ -1,6 +1,7 @@
 import { query } from "../config/db.js";
 import { ensureRemarkAttachmentTable } from "./remarkAttachments.js";
 import { ensureRemarkPhotoTable } from "./remarkPhotos.js";
+import { ensureFieldEvidenceTables } from "./fieldEvidence.js";
 
 // Idempotent structural upgrades for databases created from an older schema.mysql.sql.
 // Runs from the migrate script and again at server start, so `npm start` alone is safe.
@@ -44,7 +45,12 @@ export async function ensureSchema() {
     await query("ALTER TABLE loans ADD COLUMN closed_reason VARCHAR(16) NULL, ADD COLUMN closed_at DATETIME NULL");
   }
 
-  // Field status from the latest primary remark (visited, partial, settled).
+  // Payment type (partial / settled); the newest one is the loan's field status.
+  if (!(await columnExists("collections", "payment_status"))) {
+    await query("ALTER TABLE collections ADD COLUMN payment_status VARCHAR(16) NULL");
+  }
+
+  // Field status from the newest payment's type.
   if (!(await columnExists("loans", "action_status"))) {
     await query("ALTER TABLE loans ADD COLUMN action_status VARCHAR(16) NULL, ADD COLUMN action_status_at DATETIME NULL, ADD COLUMN action_status_by INT UNSIGNED NULL");
   }
@@ -66,6 +72,13 @@ export async function ensureSchema() {
 
   await ensureRemarkAttachmentTable();
   await ensureRemarkPhotoTable();
+  await ensureFieldEvidenceTables();
+  // "Add location" on remarks.
+  for (const table of ["loan_remarks", "borrower_remarks"]) {
+    if (!(await columnExists(table, "latitude"))) {
+      await query(`ALTER TABLE ${table} ADD COLUMN latitude DECIMAL(9,6) NULL, ADD COLUMN longitude DECIMAL(9,6) NULL, ADD COLUMN location_accuracy INT UNSIGNED NULL`);
+    }
+  }
   await query(`CREATE TABLE IF NOT EXISTS user_activity_daily (
     user_id INT UNSIGNED NOT NULL,
     day DATE NOT NULL,

@@ -5,13 +5,13 @@ import { authenticate, authorize, authorizePermission, type AuthedRequest } from
 import {
   assertBranchAccess,
   canManageRemark,
-  isLoanActionStatus,
   getRequestUser,
   isSuperAdmin,
   normalizeRemarkCategory,
   userBranchId
 } from "../services/access.js";
 import { getRemarkAttachment, parseAttachment, saveRemarkAttachment } from "../services/remarkAttachments.js";
+import { mapRemarkLocation, parseRemarkLocation, saveRemarkLocation } from "../services/fieldEvidence.js";
 import { deleteRemarkPhoto, getRemarkPhoto, mapPhotoColumns, parsePhoto, PHOTO_COLUMNS, saveRemarkPhoto } from "../services/remarkPhotos.js";
 import { identifierKey, identifierKeySql } from "../services/identifiers.js";
 
@@ -486,6 +486,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
          br.created_at,
          u.username,
          ra.file_name AS attachment_name,
+         br.latitude, br.longitude, br.location_accuracy,
          ${PHOTO_COLUMNS}
        FROM borrower_remarks br
        LEFT JOIN users u ON u.id = br.created_by
@@ -507,7 +508,8 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
         createdBy: row.username ?? "System",
         canEdit: canManageRemark(user, row.author_id),
         attachmentName: row.attachment_name,
-        ...mapPhotoColumns(row)
+        ...mapPhotoColumns(row),
+        ...mapRemarkLocation(row)
       }))
     );
   } catch (error) {
@@ -534,15 +536,16 @@ router.post("/:borrowerId/remarks", authenticate, authorizePermission("add_remar
     assertBranchAccess(user, branchId);
 
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
-    if (isLoanActionStatus(category)) return res.status(400).json({ message: "Loan statuses can only be set on a loan" });
     const attachment = parseAttachment(req.body?.attachment);
     const photo = parsePhoto(req.body?.photo);
+    const location = parseRemarkLocation(req.body?.location);
     const created = await query<{ id: number }>(
       "INSERT INTO borrower_remarks (borrower_id, remark_text, remark_category, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
       [borrowerId, remark, category, user.id]
     );
     await saveRemarkAttachment("member", created.rows[0].id, attachment);
     await saveRemarkPhoto("member", created.rows[0].id, photo);
+    await saveRemarkLocation("borrower_remarks", created.rows[0].id, location);
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -584,12 +587,13 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     if (!remark) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
-    if (isLoanActionStatus(category)) return res.status(400).json({ message: "Loan statuses can only be set on a loan" });
     const attachment = parseAttachment(req.body?.attachment);
     const photo = parsePhoto(req.body?.photo);
+    const location = parseRemarkLocation(req.body?.location);
     await query("UPDATE borrower_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
     await saveRemarkAttachment("member", remarkId, attachment);
     await saveRemarkPhoto("member", remarkId, photo);
+    await saveRemarkLocation("borrower_remarks", remarkId, location);
     return res.json({ id: remarkId, borrowerId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);

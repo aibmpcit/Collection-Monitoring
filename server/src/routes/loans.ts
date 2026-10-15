@@ -8,7 +8,7 @@ import {
   assertBranchAccess,
   canManageRemark,
   formatPaymentId,
-  isLoanActionStatus,
+  isPaymentStatus,
   IMPORT_REMARK_CATEGORIES,
   getRequestUser,
   isSuperAdmin,
@@ -22,6 +22,7 @@ import { deleteRemarkPhoto, getRemarkPhoto, mapPhotoColumns, parsePhoto, PHOTO_C
 import { identifierKey, identifierKeySql } from "../services/identifiers.js";
 import { mapLoanRow } from "../services/loanRows.js";
 import { refreshLoanActionStatus } from "../services/loanActionStatus.js";
+import { getPaymentProof, mapProofColumns, mapRemarkLocation, parsePaymentProof, parseRemarkLocation, PROOF_COLUMNS, savePaymentProof, saveRemarkLocation } from "../services/fieldEvidence.js";
 import { loanListRouter } from "./loanLists.js";
 
 const router = Router();
@@ -232,6 +233,15 @@ function summarizeZodError(error: z.ZodError) {
   return `${path}: ${firstIssue.message}`;
 }
 
+/**
+ * Active / overdue / closed is a label, never typed in by hand: a loan with PAR age above 0 is
+ * overdue, otherwise active. "Closed" only comes from leaving the uploaded list (settled), an
+ * admin deleting the loan, or a Status column in the import file saying it is paid.
+ */
+function statusFromParAge(parAge: number): "active" | "overdue" {
+  return parAge > 0 ? "overdue" : "active";
+}
+
 function normalizeImportedLoanStatus(value: unknown): "active" | "closed" | "overdue" | string {
   const raw = String(value ?? "")
     .trim()
@@ -381,7 +391,7 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
           parsed.data.principalDue,
           parsed.data.penaltyDue,
           parsed.data.maturityDate.trim(),
-          parsed.data.status
+          statusFromParAge(parsed.data.parAge)
         ]
       );
 
@@ -406,7 +416,7 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
       otherCharges: parsed.data.otherCharges,
       total: parsed.data.total,
       parAge: parsed.data.parAge,
-      status: parsed.data.status,
+      status: statusFromParAge(parsed.data.parAge),
       notes: parsed.data.notes ?? ""
     });
   } catch (error) {
@@ -1084,7 +1094,6 @@ router.delete("/remarks/bulk", authenticate, authorize(["super_admin", "branch_a
         affectedLoans.add(Number(existing.rows[0].loan_id));
         count += 1;
       }
-      for (const loanId of affectedLoans) await refreshLoanActionStatus(client, loanId);
       return count;
     });
     return res.json({ deleted });
@@ -1215,6 +1224,8 @@ router.patch("/:loanId", authenticate, authorize(["super_admin", "branch_admin",
     if (!parsed.success) {
       return res.status(400).json({ message: "Invalid loan payload" });
     }
+    const current = await query<{ status: string }>("SELECT status FROM loans WHERE id = $1 LIMIT 1", [loanId]);
+    const status = current.rows[0]?.status === "closed" ? "closed" : statusFromParAge(parsed.data.parAge);
 
     await query(
       `UPDATE loans
@@ -1239,7 +1250,7 @@ router.patch("/:loanId", authenticate, authorize(["super_admin", "branch_admin",
         parsed.data.principalDue,
         parsed.data.penaltyDue,
         parsed.data.maturityDate.trim(),
-        parsed.data.status,
+        status,
         loanId
       ]
     );
@@ -1290,6 +1301,8 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
       or_no: string | null;
       collected_at: string;
       username: string | null;
+      payment_status: string | null;
+      [column: string]: unknown;
     }>(
       `SELECT
          c.id,
@@ -1298,9 +1311,12 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
          c.amount,
          c.or_no,
          c.collected_at,
-         u.username
+         c.payment_status,
+         u.username,
+         ${PROOF_COLUMNS}
        FROM collections c
        LEFT JOIN users u ON u.id = c.created_by
+       LEFT JOIN payment_proofs pp ON pp.payment_id = c.id
        WHERE c.loan_id = $1
        ORDER BY c.collected_at DESC, c.id DESC`,
       [loanId]
@@ -1309,11 +1325,13 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
     return res.json(
       result.rows.map((row) => ({
         id: row.id,
-        canEdit: user.role !== "las" && (user.role !== "staff" || Number(row.author_id) === user.id),
+        canEdit: canManageRemark(user, row.author_id),
         paymentId: formatPaymentId(row.id),
         loanId: row.loan_id,
         amount: toNumber(row.amount),
         orNo: row.or_no ?? "",
+        paymentStatus: row.payment_status,
+        ...mapProofColumns(row),
         collectedBy: row.username ?? "System",
         collectedAt: row.collected_at
       }))
@@ -1340,6 +1358,17 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ message: "Payment amount must be greater than 0" });
     }
+    // Checked after access, so outsiders get "forbidden" rather than validation details.
+    const paymentStatus = req.body?.paymentStatus;
+    if (!isPaymentStatus(paymentStatus)) {
+      return res.status(400).json({ message: "Choose the payment type: partially paid or settled" });
+    }
+    // Every payment needs proof from the field: a photo or a file, with where it was recorded.
+    const proof = parsePaymentProof(req.body?.proof);
+    if (!proof) {
+      return res.status(400).json({ message: "Add a photo or an attachment, with location, as proof of payment" });
+    }
+
     if (orNo.length > 80) {
       return res.status(400).json({ message: "OR No is too long" });
     }
@@ -1349,10 +1378,15 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
     if (!collectedAt) {
       return res.status(400).json({ message: "Invalid payment date/time" });
     }
-    const created = await query<{ id: number }>(
-      "INSERT INTO collections (loan_id, amount, or_no, collected_at, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-      [loanId, amount, orNo || null, collectedAt, user.id]
-    );
+    const created = await withTransaction(async client => {
+      const inserted = await client.query<{ id: number }>(
+        "INSERT INTO collections (loan_id, amount, or_no, collected_at, payment_status, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        [loanId, amount, orNo || null, collectedAt, paymentStatus, user.id]
+      );
+      await savePaymentProof(client, inserted.rows[0].id, proof);
+      await refreshLoanActionStatus(client, loanId);
+      return inserted;
+    });
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -1360,6 +1394,7 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
       loanId,
       amount,
       orNo,
+      paymentStatus,
       collectedBy: user.username,
       collectedAt
     });
@@ -1400,9 +1435,20 @@ router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_adm
     if (orNo.length > 80) return res.status(400).json({ message: "OR No is too long" });
     const collectedAt = collectedAtRaw ? toBusinessDateTime(collectedAtRaw) : null;
     if (!collectedAt) return res.status(400).json({ message: "Invalid payment date/time" });
+    const paymentStatus = req.body?.paymentStatus;
+    if (paymentStatus !== undefined && !isPaymentStatus(paymentStatus)) {
+      return res.status(400).json({ message: "Payment type must be partially paid or settled" });
+    }
+    const proof = parsePaymentProof(req.body?.proof);
 
-    await query("UPDATE collections SET amount = $1, or_no = $2, collected_at = $3 WHERE id = $4", [amount, orNo || null, collectedAt, paymentId]);
-    return res.json({ id: paymentId, paymentId: formatPaymentId(paymentId), loanId, amount, orNo, collectedAt });
+    await query(
+      `UPDATE collections SET amount = $1, or_no = $2, collected_at = $3, payment_status = COALESCE($4, payment_status) WHERE id = $5`,
+      [amount, orNo || null, collectedAt, paymentStatus ?? null, paymentId]
+    );
+    if (proof) await savePaymentProof({ query }, paymentId, proof);
+    // Type or date may have changed which payment is newest.
+    await refreshLoanActionStatus({ query }, loanId);
+    return res.json({ id: paymentId, paymentId: formatPaymentId(paymentId), loanId, amount, orNo, paymentStatus, collectedAt });
   } catch (error) {
     return next(error);
   }
@@ -1461,6 +1507,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
          lr.created_at,
          COALESCE(u.username, 'System') AS created_by,
          ra.file_name AS attachment_name,
+         lr.latitude, lr.longitude, lr.location_accuracy,
          ${PHOTO_COLUMNS}
        FROM loan_remarks lr
        LEFT JOIN users u ON u.id = lr.created_by
@@ -1481,7 +1528,8 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
         createdAt: row.created_at,
         createdBy: row.created_by ?? "System",
         attachmentName: row.attachment_name,
-        ...mapPhotoColumns(row)
+        ...mapPhotoColumns(row),
+        ...mapRemarkLocation(row)
       }))
     );
   } catch (error) {
@@ -1497,6 +1545,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
     const photo = parsePhoto(req.body?.photo);
+    const location = parseRemarkLocation(req.body?.location);
 
     const context = await loanContext(loanId);
     if (!context) {
@@ -1504,8 +1553,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     }
     assertBranchAccess(user, Number(context.branch_id ?? 0));
 
-    // A status (primary remark) may be recorded without a note; other remarks need one.
-    if (!remark && !isLoanActionStatus(category)) {
+    if (!remark) {
       return res.status(400).json({ message: "Remark is required" });
     }
     if (remark.length > 2000) {
@@ -1518,7 +1566,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     );
     await saveRemarkAttachment("loan", created.rows[0].id, attachment);
     await saveRemarkPhoto("loan", created.rows[0].id, photo);
-    if (isLoanActionStatus(category)) await refreshLoanActionStatus({ query }, loanId);
+    await saveRemarkLocation("loan_remarks", created.rows[0].id, location);
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -1561,15 +1609,13 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
     const photo = parsePhoto(req.body?.photo);
-    if (!remark && !isLoanActionStatus(category)) return res.status(400).json({ message: "Remark is required" });
+    const location = parseRemarkLocation(req.body?.location);
+    if (!remark) return res.status(400).json({ message: "Remark is required" });
     if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
     await query("UPDATE loan_remarks SET remark_text = $1, remark_category = $2 WHERE id = $3", [remark, category, remarkId]);
-    // The edit may have added, changed or removed a status.
-    if (isLoanActionStatus(existingRemark.remark_category) || isLoanActionStatus(category)) {
-      await refreshLoanActionStatus({ query }, loanId);
-    }
     await saveRemarkAttachment("loan", remarkId, attachment);
     await saveRemarkPhoto("loan", remarkId, photo);
+    await saveRemarkLocation("loan_remarks", remarkId, location);
     return res.json({ id: remarkId, loanId, remark, remarkCategory: category, attachmentName: attachment?.name });
   } catch (error) {
     return next(error);
@@ -1603,8 +1649,6 @@ router.delete("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admi
       await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [remarkId]);
       await deleteRemarkPhoto(client, "loan", remarkId);
       await client.query("DELETE FROM loan_remarks WHERE id = $1", [remarkId]);
-      // Deleting the latest status falls back to the one before it.
-      if (isLoanActionStatus(existingRemark.remark_category)) await refreshLoanActionStatus(client, loanId);
     });
     return res.json({ message: "Remark deleted" });
   } catch (error) {
@@ -1653,6 +1697,28 @@ router.get("/:loanId/remarks/:remarkId/photo", authenticate, async (req: AuthedR
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
     return res.send(photo.file_data);
+  } catch (error) { return next(error); }
+});
+
+router.get("/:loanId/payments/:paymentId/proof", authenticate, async (req: AuthedRequest, res, next) => {
+  try {
+    const user = getRequestUser(req);
+    const loanId = Number(req.params.loanId);
+    const paymentId = Number(req.params.paymentId);
+    const existing = await query<{ branch_id: number | null }>(
+      `SELECT b.branch_id FROM collections c
+       INNER JOIN loans l ON l.id = c.loan_id INNER JOIN borrowers b ON b.id = l.borrower_id
+       WHERE c.id = $1 AND c.loan_id = $2 LIMIT 1`, [paymentId, loanId]
+    );
+    if (!existing.rows[0]) return res.status(404).json({ message: "Payment not found" });
+    assertBranchAccess(user, Number(existing.rows[0].branch_id ?? 0));
+    const proof = await getPaymentProof(paymentId);
+    if (!proof) return res.status(404).json({ message: "No proof for this payment" });
+    res.setHeader("Content-Type", proof.mime_type);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    const disposition = proof.mime_type.startsWith("image/") ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(proof.file_name)}`);
+    return res.send(proof.file_data);
   } catch (error) { return next(error); }
 });
 

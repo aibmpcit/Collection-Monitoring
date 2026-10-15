@@ -10,12 +10,10 @@ import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
 import { RemarkSummaryModal } from "../components/RemarkSummaryModal";
 import { ToastNotification } from "../components/ToastNotification";
-import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, isLoanActionStatus, LOAN_ACTION_STATUSES, type RemarkCategory } from "../constants/remarkCategories";
-import { RemarkCategoryOptions } from "../components/RemarkCategoryOptions";
-import { apiDownload, apiRequest } from "../services/api";
+import { actionStatusClass, DEFAULT_REMARK_CATEGORY, getRemarkCategoryLabel, PAYMENT_STATUSES, paymentStatusLabel, REMARK_CATEGORIES, type PaymentStatus, type RemarkCategory } from "../constants/remarkCategories";
+import { apiBlobUrl, apiDownload, apiRequest } from "../services/api";
 import { fileToAttachment } from "../services/attachments";
-import { RemarkPhotoField } from "../components/RemarkPhoto";
-import { photoPayload, type CapturedPhoto } from "../services/photo";
+import { MapLink, PaymentProofField, proofPayload, RemarkEvidenceField, remarkEvidencePayload, type PaymentProofUpload , type RemarkEvidence } from "../components/FieldEvidence";
 import type { Loan, LoanPayment, LoanRemark } from "../types/models";
 
 interface LoanDetails extends Loan {
@@ -86,11 +84,13 @@ export function LoanDetailsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [remarkInput, setRemarkInput] = useState("");
   const [remarkCategory, setRemarkCategory] = useState<RemarkCategory>(DEFAULT_REMARK_CATEGORY);
-  const [remarkAttachment, setRemarkAttachment] = useState<File | null>(null);
-  const [remarkPhoto, setRemarkPhoto] = useState<CapturedPhoto | null | undefined>(undefined);
-  const [editingHasPhoto, setEditingHasPhoto] = useState(false);
+  const [remarkProof, setRemarkProof] = useState<RemarkEvidence | null>(null);
+  const [editingHasEvidence, setEditingHasEvidence] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentOrNo, setPaymentOrNo] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "">("");
+  const [paymentProof, setPaymentProof] = useState<PaymentProofUpload | null>(null);
+  const [editingPaymentHasProof, setEditingPaymentHasProof] = useState(false);
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
@@ -221,8 +221,7 @@ export function LoanDetailsPage() {
     if (!loan || remarksSubmitting) return;
 
     const remark = remarkInput.trim();
-    // A status (primary remark) can be saved without a note.
-    if (!remark && !isLoanActionStatus(remarkCategory)) {
+    if (!remark) {
       setRemarkError("Enter a remark.");
       return;
     }
@@ -231,20 +230,16 @@ export function LoanDetailsPage() {
     setRemarkError("");
     setMessage("");
     try {
-      const attachment = await fileToAttachment(remarkAttachment);
-      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory, attachment, photo: photoPayload(remarkPhoto) });
+      await apiRequest(`/loans/${loan.id}/remarks${editingRemarkId ? `/${editingRemarkId}` : ""}`, editingRemarkId ? "PATCH" : "POST", { remark, remarkCategory, ...remarkEvidencePayload(remarkProof, Boolean(editingRemarkId)) });
       setRemarkInput("");
-      setRemarkAttachment(null);
-      setRemarkPhoto(undefined);
+      setRemarkProof(null);
       setEditingRemarkId(null);
-      setEditingHasPhoto(false);
+      setEditingHasEvidence(false);
       setRemarkModalOpen(false);
       setMessage(editingRemarkId ? "Remark updated." : "Remark added.");
       try {
         await loadRemarks(loan.id);
         setRemarkPage(1);
-        // The loan's status follows its newest primary remark.
-        setLoan(await apiRequest<LoanDetails>(`/loans/${loan.id}`));
       } catch {
         setError("Remark was added, but the remarks list could not be refreshed. Reload the page to see it.");
       }
@@ -262,16 +257,28 @@ export function LoanDetailsPage() {
     try {
       await apiRequest(`/loans/${loan.id}/remarks/${editingRemarkId}`, "DELETE");
       setEditingRemarkId(null);
-      setEditingHasPhoto(false);
+      setEditingHasEvidence(false);
       setConfirmingRemarkDelete(false);
       setRemarkModalOpen(false);
       setMessage("Remark deleted.");
-      await Promise.all([loadRemarks(loan.id), apiRequest<LoanDetails>(`/loans/${loan.id}`).then(setLoan)])
+      await loadRemarks(loan.id)
         .catch(() => setError("Remark was deleted, but the list could not be refreshed. Reload the page."));
     } catch (e) {
       setRemarkError(e instanceof Error ? e.message : "Unable to delete remark.");
     } finally {
       setRemarksSubmitting(false);
+    }
+  }
+
+  async function openPaymentProof(paymentId: number, proof: { kind: string; fileName: string }) {
+    if (!loan) return;
+    const path = `/loans/${loan.id}/payments/${paymentId}/proof`;
+    try {
+      // Photos open in a new tab; attached files download.
+      if (proof.kind === "photo") window.open(await apiBlobUrl(path), "_blank", "noopener");
+      else await apiDownload(path, proof.fileName);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to open the payment proof.");
     }
   }
 
@@ -289,6 +296,14 @@ export function LoanDetailsPage() {
       setPaymentError("OR No is too long.");
       return;
     }
+    if (!paymentStatus) {
+      setPaymentError("Choose the payment type.");
+      return;
+    }
+    if (!paymentProof && !(editingPaymentId && editingPaymentHasProof)) {
+      setPaymentError("Add a photo or an attachment, with location, as proof of payment.");
+      return;
+    }
 
     setPaymentsSubmitting(true);
     setPaymentError("");
@@ -297,9 +312,12 @@ export function LoanDetailsPage() {
       await apiRequest(`/loans/${loan.id}/payments${editingPaymentId ? `/${editingPaymentId}` : ""}`, editingPaymentId ? "PATCH" : "POST", {
         amount,
         orNo,
-        collectedAt: paymentDateTime
+        collectedAt: paymentDateTime,
+        paymentStatus,
+        proof: proofPayload(paymentProof)
       });
       setPaymentAmount("");
+      setPaymentProof(null);
       setPaymentOrNo("");
       setPaymentDateTime(getLocalDateTimeInputValue());
       setEditingPaymentId(null);
@@ -308,6 +326,8 @@ export function LoanDetailsPage() {
       try {
         await loadPayments(loan.id);
         setPaymentPage(1);
+        // The loan's status follows its newest payment.
+        setLoan(await apiRequest<LoanDetails>(`/loans/${loan.id}`));
       } catch {
         setError("Payment was recorded, but the payment list could not be refreshed. Reload the page to see it.");
       }
@@ -397,7 +417,14 @@ export function LoanDetailsPage() {
                     placeholder="Optional OR number"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-medium text-black/80 sm:col-span-2">
+                <label className="grid gap-1 text-sm font-medium text-black/80">
+                  Payment Type
+                  <select className="field" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)} required>
+                    <option value="" disabled>Choose payment type...</option>
+                    {PAYMENT_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-black/80">
                   Payment Date/Time
                   <input
                     className="field"
@@ -407,6 +434,9 @@ export function LoanDetailsPage() {
                     required
                   />
                 </label>
+                <div className="sm:col-span-2">
+                  <PaymentProofField proof={paymentProof} onChange={setPaymentProof} hasExisting={Boolean(editingPaymentId) && editingPaymentHasProof} disabled={paymentsSubmitting} />
+                </div>
                 <div className="flex justify-stretch sm:col-span-2 sm:justify-end">
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={paymentsSubmitting}>
                     {paymentsSubmitting ? "Saving..." : editingPaymentId ? "Update Payment" : "Save Payment"}
@@ -435,7 +465,11 @@ export function LoanDetailsPage() {
                     onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                     required
                   >
-                    <RemarkCategoryOptions />
+                    {REMARK_CATEGORIES.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -445,15 +479,11 @@ export function LoanDetailsPage() {
                     rows={4}
                     value={remarkInput}
                     onChange={(event) => setRemarkInput(event.target.value)}
-                    placeholder={isLoanActionStatus(remarkCategory) ? "Optional note, e.g. amount promised or who you talked to" : "Add a loan remark..."}
-                    required={!isLoanActionStatus(remarkCategory)}
+                    placeholder="Add a loan remark..."
+                    required
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Attachment (optional, max 5 MB)
-                  <input className="field" type="file" onChange={event => setRemarkAttachment(event.target.files?.[0] ?? null)} />
-                </label>
-                <RemarkPhotoField photo={remarkPhoto} hasExisting={Boolean(editingRemarkId) && editingHasPhoto} onChange={setRemarkPhoto} disabled={remarksSubmitting} />
+                <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} hasExisting={Boolean(editingRemarkId) && editingHasEvidence} disabled={remarksSubmitting} />
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
                   {editingRemarkId && (confirmingRemarkDelete ? (
                     <div className="flex flex-wrap items-center gap-2 sm:mr-auto" role="group" aria-label="Confirm remark deletion">
@@ -491,54 +521,71 @@ export function LoanDetailsPage() {
 
       {loan && (
         <>
-          <DuesCard principal={loan.principalDue} interest={loan.interest} penalty={loan.penaltyDue} />
-
           <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="panel cursor-pointer p-4 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-            role="button" tabIndex={0}
-            aria-label={`${detailsExpanded ? "Collapse" : "Expand"} loan information for ${loan.memberName}`}
-            aria-expanded={detailsExpanded} aria-controls="loan-information-details"
-            onClick={() => setDetailsExpanded(expanded => !expanded)}
+            className="panel cursor-pointer p-4 text-sm transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+            role="button" tabIndex={0} aria-haspopup="dialog"
+            aria-label={`View loan details for ${loan.memberName}`}
+            onClick={() => setDetailsExpanded(true)}
             onKeyDown={event => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                setDetailsExpanded(expanded => !expanded);
+                setDetailsExpanded(true);
               }
             }}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-slate-900">{loan.memberName}</h2>
+                <h2 className="text-lg font-semibold text-brand-700 underline decoration-brand-200 underline-offset-4">{loan.memberName}</h2>
                 <p className="text-xs text-slate-600">
                   {loan.cifKey} | {loan.loanType}
                 </p>
+                <p className="mt-1 text-xs text-slate-500">Tap to view loan details</p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
                   {loan.status}
                 </span>
-                {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)} title="Field status">{getRemarkCategoryLabel(loan.actionStatus)}</span>}
+                {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)} title="Latest payment">{paymentStatusLabel(loan.actionStatus)}</span>}
               </div>
             </div>
-            <div id="loan-information-details" hidden={!detailsExpanded}>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Detail label="Loan Account No" value={loan.loanAccountNo} />
-              <Detail label="CIF Key" value={loan.cifKey} />
-              <Detail label="Contact Info" value={loan.contactInfo || "-"} />
-              <Detail label="Address" value={loan.address || "-"} />
-              <Detail label="Date Release" value={formatDate(loan.dateRelease)} />
-              <Detail label="Maturity Date" value={formatDate(loan.maturityDate)} />
-              <Detail label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
-              <Detail label="Loan Balance" value={formatCurrency(loan.loanBalance)} />
-              <Detail label="Principal Arrears" value={formatCurrency(loan.principalDue)} />
-              <Detail label="Interest" value={formatCurrency(loan.interest)} />
-              <Detail label="Fines" value={formatCurrency(loan.penaltyDue)} />
-              <Detail label="Total" value={formatCurrency(loan.total)} />
-              <Detail label="PAR Age" value={String(loan.parAge)} />
-              <Detail label="Due Date" value={formatDate(loan.dueDate)} />
-              <Detail label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
-            </div>
-            </div>
           </motion.section>
+
+          {/* Loan details live in a window opened from the member's name, keeping the page short on phones. */}
+          {detailsExpanded && createPortal(
+            <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-end justify-center bg-slate-950/45 sm:items-center sm:p-4" role="presentation"
+              onMouseDown={() => setDetailsExpanded(false)}
+              onKeyDown={event => { if (event.key === "Escape") setDetailsExpanded(false); }}>
+              <section className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6"
+                role="dialog" aria-modal="true" aria-labelledby="loan-details-title" onMouseDown={event => event.stopPropagation()}>
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Loan details</p>
+                    <h2 id="loan-details-title" className="mt-1 break-words text-xl font-bold text-slate-900">{loan.memberName}</h2>
+                    <p className="text-xs text-slate-600">{loan.cifKey} | {loan.loanType}</p>
+                  </div>
+                  <button type="button" className="btn-muted shrink-0" autoFocus onClick={() => setDetailsExpanded(false)}>Close</button>
+                </div>
+                <DuesCard principal={loan.principalDue} interest={loan.interest} penalty={loan.penaltyDue} />
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Detail label="Loan Account No" value={loan.loanAccountNo} />
+                  <Detail label="CIF Key" value={loan.cifKey} />
+                  <Detail label="Contact Info" value={loan.contactInfo || "-"} />
+                  <Detail label="Address" value={loan.address || "-"} />
+                  <Detail label="Date Release" value={formatDate(loan.dateRelease)} />
+                  <Detail label="Maturity Date" value={formatDate(loan.maturityDate)} />
+                  <Detail label="Loan Amount" value={formatCurrency(loan.loanAmount)} />
+                  <Detail label="Loan Balance" value={formatCurrency(loan.loanBalance)} />
+                  <Detail label="Principal Arrears" value={formatCurrency(loan.principalDue)} />
+                  <Detail label="Interest" value={formatCurrency(loan.interest)} />
+                  <Detail label="Fines" value={formatCurrency(loan.penaltyDue)} />
+                  <Detail label="Total" value={formatCurrency(loan.total)} />
+                  <Detail label="PAR Age" value={String(loan.parAge)} />
+                  <Detail label="Due Date" value={formatDate(loan.dueDate)} />
+                  <Detail label="Notes" value={loan.notes?.trim() ? loan.notes : "-"} />
+                </div>
+              </section>
+            </div>,
+            document.body
+          )}
 
           <section className="panel p-4">
             <div className="mb-4 flex gap-2 border-b border-slate-200" role="tablist" aria-label="Loan activity">
@@ -575,6 +622,13 @@ export function LoanDetailsPage() {
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Status:{" "}
+                    {loan.actionStatus
+                      ? <><span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span>
+                        <span className="ml-2 text-xs text-slate-500">{loan.actionStatusAt ? formatDateTime(loan.actionStatusAt) : ""}{loan.actionStatusBy ? ` · ${loan.actionStatusBy}` : ""}</span></>
+                      : <span className="text-slate-500">No payment yet</span>}
+                  </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   {hasPermission(user, "add_payments") && <button type="button" className="btn-primary" onClick={() => {
@@ -582,6 +636,9 @@ export function LoanDetailsPage() {
                     setEditingPaymentId(null);
                     setPaymentAmount("");
                     setPaymentOrNo("");
+                    setPaymentStatus("");
+                    setPaymentProof(null);
+                    setEditingPaymentHasProof(false);
                     setPaymentDateTime(getLocalDateTimeInputValue());
                     setPaymentModalOpen(true);
                   }}>Add Payment</button>}
@@ -599,7 +656,10 @@ export function LoanDetailsPage() {
                       <li key={item.id} className="p-3">
                         <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-start">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900">{formatCurrency(item.amount)}</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatCurrency(item.amount)}
+                              {item.paymentStatus && <span className={`ml-2 align-middle ${actionStatusClass(item.paymentStatus)}`}>{paymentStatusLabel(item.paymentStatus)}</span>}
+                            </p>
                             <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
                             <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
                           </div>
@@ -609,6 +669,9 @@ export function LoanDetailsPage() {
                               setEditingPaymentId(item.id);
                               setPaymentAmount(String(item.amount));
                               setPaymentOrNo(item.orNo || "");
+                              setPaymentStatus(item.paymentStatus === "settled" || item.paymentStatus === "partial" ? item.paymentStatus : "");
+                              setPaymentProof(null);
+                              setEditingPaymentHasProof(Boolean(item.proof));
                               setPaymentDateTime(toLocalDateTimeInputValue(item.collectedAt));
                               setPaymentError("");
                               setPaymentModalOpen(true);
@@ -616,6 +679,12 @@ export function LoanDetailsPage() {
                           </div>
                         </div>
                         <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>
+                        {item.proof && <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <button type="button" className="text-xs font-semibold text-brand-700 underline" onClick={() => void openPaymentProof(item.id, item.proof!)}>
+                            {item.proof.kind === "photo" ? "View photo" : `Open ${item.proof.fileName}`}
+                          </button>
+                          <MapLink point={item.proof} />
+                        </div>}
                       </li>
                     ))}
                   </ul>
@@ -625,29 +694,6 @@ export function LoanDetailsPage() {
               </div>
             ) : (
               <div role="tabpanel">
-              <div className="surface-soft mb-3 grid gap-2 p-3">
-                {hasPermission(user, "add_remarks") && <label className="grid gap-1 text-sm font-medium text-black/80 sm:max-w-xs">
-                  Set status
-                  {/* Choosing a status opens the remark form with it preselected; the select itself stays on the prompt. */}
-                  <select className="field" value="" aria-label="Set loan status" onChange={event => {
-                    const value = event.target.value as RemarkCategory;
-                    if (!value) return;
-                    setRemarkError("");
-                    setEditingRemarkId(null);
-                    setEditingHasPhoto(false);
-                    setRemarkInput("");
-                    setRemarkCategory(value);
-                    setRemarkAttachment(null);
-                    setRemarkPhoto(undefined);
-                    setRemarkModalOpen(true);
-                  }}>
-                    <option value="">Choose a status...</option>
-                    {LOAN_ACTION_STATUSES.map(status => <option key={status.value} value={status.value}>
-                      {status.label}{loan.actionStatus === status.value ? " (current)" : ""}
-                    </option>)}
-                  </select>
-                </label>}
-              </div>
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
@@ -656,11 +702,10 @@ export function LoanDetailsPage() {
                   {hasPermission(user, "add_remarks") && <button type="button" className="btn-primary" onClick={() => {
                     setRemarkError("");
                     setEditingRemarkId(null);
-                    setEditingHasPhoto(false);
+                    setEditingHasEvidence(false);
                     setRemarkInput("");
                     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
-                    setRemarkAttachment(null);
-                    setRemarkPhoto(undefined);
+                    setRemarkProof(null);
                     setRemarkModalOpen(true);
                   }}>Add Remark</button>}
                 </div>
@@ -683,18 +728,18 @@ export function LoanDetailsPage() {
                         <p className="text-sm text-slate-900">{item.remark}</p>
                         <p className="mt-1 text-xs text-black/60">
                           {formatDateTime(item.createdAt)} | By: {item.createdBy}
+                          {item.location && <span className="mt-1 block"><MapLink point={item.location} /></span>}
                           {item.photo && <span className="ml-2 inline-flex items-center gap-1 text-slate-500"><Camera size={12} aria-hidden="true" />Photo{item.photo.latitude != null ? " · geotagged" : ""}</span>}
                         </p>
                         {item.canEdit !== false && <button type="button" className="btn-muted absolute right-3 top-3 h-8 px-3 text-xs" onClick={event => {
                           event.stopPropagation();
                           setEditingRemarkId(item.id);
-                          setEditingHasPhoto(Boolean(item.photo));
+                          setEditingHasEvidence(Boolean(item.attachmentName || item.photo));
                           setConfirmingRemarkDelete(false);
                           setRemarkInput(item.remark);
                           setRemarkCategory(item.remarkCategory as RemarkCategory);
                           setRemarkError("");
-                          setRemarkAttachment(null);
-                          setRemarkPhoto(undefined);
+                          setRemarkProof(null);
                           setRemarkModalOpen(true);
                         }}>Edit</button>}
                       </li>

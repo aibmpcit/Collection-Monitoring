@@ -3,6 +3,12 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { authenticate, authorize, type AuthedRequest } from "../middleware/auth.js";
 import { assertBranchAccess, formatPaymentId, getRequestUser, isSuperAdmin, toNumber, userBranchId } from "../services/access.js";
+import { refreshLoanActionStatus } from "../services/loanActionStatus.js";
+
+async function paymentLoanId(paymentId: number) {
+  const result = await query<{ loan_id: number }>("SELECT loan_id FROM collections WHERE id = $1 LIMIT 1", [paymentId]);
+  return result.rows[0]?.loan_id ?? null;
+}
 
 const router = Router();
 
@@ -94,6 +100,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       loan_account_no: string;
       cif_key: string | null;
       member_name: string | null;
+      payment_status: string | null;
     }>(
       `SELECT
          c.id,
@@ -102,6 +109,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
          c.amount,
          c.or_no,
          c.collected_at,
+         c.payment_status,
          u.username AS collected_by,
          l.loan_account_no,
          b.cif_key,
@@ -121,6 +129,7 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
       memberName: row.member_name ?? "",
       amount: toNumber(row.amount),
       orNo: row.or_no ?? "",
+      paymentStatus: row.payment_status,
       collectedBy: row.collected_by ?? "System",
       collectedAt: row.collected_at
     }));
@@ -157,7 +166,11 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       }
 
       try {
+        const loanId = await paymentLoanId(paymentId);
+        await query("DELETE FROM payment_proofs WHERE payment_id = $1", [paymentId]);
         await query("DELETE FROM collections WHERE id = $1", [paymentId]);
+        // The loan's status falls back to its previous payment's type.
+        if (loanId) await refreshLoanActionStatus({ query }, loanId);
         deleted += 1;
       } catch {
         skipped.push({ id: paymentId, reason: "delete_failed" });
@@ -184,7 +197,10 @@ router.delete("/:paymentId", authenticate, authorize(["super_admin", "branch_adm
     }
     assertBranchAccess(user, Number(branchId));
 
+    const loanId = await paymentLoanId(paymentId);
+    await query("DELETE FROM payment_proofs WHERE payment_id = $1", [paymentId]);
     await query("DELETE FROM collections WHERE id = $1", [paymentId]);
+    if (loanId) await refreshLoanActionStatus({ query }, loanId);
     return res.json({ message: "Payment deleted" });
   } catch (error) {
     return next(error);

@@ -10,13 +10,14 @@ vi.mock("../src/middleware/auth.js", async () => ({
   authenticate: (req: { user: JwtUser }, _res: unknown, next: () => void) => { req.user = mocks.user; next(); }
 }));
 import { hasPermission } from "../src/services/permissions.js";
+import { errorResponse } from "../src/services/access.js";
 import { loanRouter } from "../src/routes/loans.js";
 import { borrowerRouter } from "../src/routes/borrowers.js";
+import { paymentRouter } from "../src/routes/payments.js";
 
 let server: Server;
 let base: string;
-let latestStatus: Array<Record<string, unknown>>;
-let existingCategory: string;
+let latestPayment: Array<Record<string, unknown>>;
 const calls = () => mocks.query.mock.calls as [string, unknown[]][];
 
 beforeAll(async () => {
@@ -24,18 +25,24 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/loans", loanRouter);
   app.use("/borrowers", borrowerRouter);
+  app.use("/payments", paymentRouter);
+  // Same error handling as the real app, so thrown validation errors come back as JSON.
+  app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const { status, message } = errorResponse(error);
+    res.status(status).json({ message });
+  });
   server = await new Promise<Server>(resolve => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(() => new Promise<void>(resolve => server.close(() => resolve())));
 beforeEach(() => {
   mocks.user = { id: 7, role: "staff", branchId: 2 } as JwtUser;
-  latestStatus = [{ remark_category: "visited", created_at: "2026-10-15 09:00:00", created_by: 7 }];
-  existingCategory = "others";
+  latestPayment = [{ payment_status: "partial", collected_at: "2026-10-15 09:00:00", created_by: 7 }];
   const handle = async (sql: string) => {
     if (sql.includes("FROM loans l") && sql.includes("WHERE l.id = $1")) return { rows: [{ id: 9, branch_id: 2, borrower_id: 4 }], rowCount: 1 };
-    if (sql.includes("created_by, b.branch_id")) return { rows: [{ created_by: 7, branch_id: 2, remark_category: existingCategory }], rowCount: 1 };
-    if (sql.includes("remark_category IN")) return { rows: latestStatus, rowCount: latestStatus.length };
+    if (sql.includes("created_by, b.branch_id")) return { rows: [{ created_by: 7, branch_id: 2, remark_category: "others" }], rowCount: 1 };
+    if (sql.includes("payment_status IS NOT NULL")) return { rows: latestPayment, rowCount: latestPayment.length };
+    if (sql.includes("SELECT loan_id FROM collections")) return { rows: [{ loan_id: 9 }], rowCount: 1 };
     if (sql.includes("SELECT branch_id FROM borrowers")) return { rows: [{ branch_id: 2 }], rowCount: 1 };
     return { rows: [{ id: 31 }], rowCount: 1 };
   };
@@ -47,53 +54,98 @@ const post = (path: string, body: unknown, method = "POST") => fetch(`${base}${p
   method, headers: { "content-type": "application/json" }, body: JSON.stringify(body)
 });
 
-describe("loan status from primary remarks", () => {
-  it("records a status without a note and sets the loan's status from the newest one", async () => {
-    const response = await post("/loans/9/remarks", { remark: "", remarkCategory: "visited" });
+const PROOF = {
+  kind: "photo", name: "receipt.jpg", type: "image/jpeg", data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString("base64"),
+  latitude: 11.5841234, longitude: 122.5432109, accuracy: 9, capturedAt: "2026-10-15T09:00:00"
+};
+
+const ATTACHMENT = { name: "letter.pdf", type: "application/pdf", data: Buffer.from("pdf").toString("base64") };
+
+describe("loan status from payments", () => {
+  it("records the payment type and sets the loan's status from the newest payment", async () => {
+    const response = await post("/loans/9/payments", { amount: 500, orNo: "OR-1", collectedAt: "2026-10-15T09:00", paymentStatus: "partial", proof: PROOF });
     expect(response.status).toBe(201);
+    const insert = calls().find(([sql]) => sql.includes("INSERT INTO collections"))!;
+    expect(insert[1]).toEqual([9, 500, "OR-1", "2026-10-15 09:00:00", "partial", 7]);
+    const proof = calls().find(([sql]) => sql.includes("INSERT INTO payment_proofs"))!;
+    expect(proof[1][1]).toBe("photo");
+    expect(proof[1].slice(5)).toEqual([11.584123, 122.543211, 9, "2026-10-15 09:00:00"]);
     const update = calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))!;
-    expect(update[1]).toEqual(["visited", "2026-10-15 09:00:00", 7, 9]);
-    const lookup = calls().find(([sql]) => sql.includes("remark_category IN"))!;
-    expect(lookup[1]).toEqual([9, ["visited", "partial", "settled"]]);
+    expect(update[1]).toEqual(["partial", "2026-10-15 09:00:00", 7, 9]);
   });
 
-  it("still requires a note for ordinary remarks, and leaves the status alone", async () => {
-    expect((await post("/loans/9/remarks", { remark: "", remarkCategory: "promised_to_pay" })).status).toBe(400);
-    expect((await post("/loans/9/remarks", { remark: "Will pay Friday", remarkCategory: "promised_to_pay" })).status).toBe(201);
+  it("requires a payment type and proof with a location", async () => {
+    const base = { amount: 100, collectedAt: "2026-10-15T09:00" };
+    const noType = await post("/loans/9/payments", { ...base, proof: PROOF });
+    expect(noType.status).toBe(400);
+    expect((await noType.json()).message).toBe("Choose the payment type: partially paid or settled");
+    expect((await post("/loans/9/payments", { ...base, paymentStatus: "visited", proof: PROOF })).status).toBe(400);
+    const noProof = await post("/loans/9/payments", { ...base, paymentStatus: "settled" });
+    expect((await noProof.json()).message).toBe("Add a photo or an attachment, with location, as proof of payment");
+    const noLocation = await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, latitude: null, longitude: null } });
+    expect(noLocation.status).toBe(400);
+    expect((await noLocation.json()).message).toMatch(/needs a location/);
+    const attachment = await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, kind: "attachment", name: "receipt.pdf", type: "application/pdf" } });
+    expect(attachment.status).toBe(201);
+  });
+
+  it("lets remarks be saved without a photo, attachment or location (they are optional)", async () => {
+    expect((await post("/loans/9/remarks", { remark: "Called the member", remarkCategory: "others" })).status).toBe(201);
+    expect((await post("/loans/9/remarks", { remark: "At the house", remarkCategory: "visited", location: { latitude: 11.5, longitude: 122.5 } })).status).toBe(201);
+    expect((await post("/loans/9/remarks/31", { remark: "x", remarkCategory: "visited", location: null }, "PATCH")).status).toBe(200);
+  });
+
+  it("saves a remark's location with its evidence", async () => {
+    const response = await post("/loans/9/remarks", { remark: "At the member's house", remarkCategory: "visited", attachment: ATTACHMENT, location: { latitude: 11.5, longitude: 122.5, accuracy: 12 } });
+    expect(response.status).toBe(201);
+    const saved = calls().find(([sql]) => sql.includes("UPDATE loan_remarks SET latitude"))!;
+    expect(saved[1]).toEqual([11.5, 122.5, 12, 31]);
+    expect((await post("/loans/9/remarks", { remark: "x", location: { latitude: 200, longitude: 1 } })).status).toBe(400);
+  });
+
+  it("updates the status when a payment is edited, keeping its type if none is sent", async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT c.created_by")) return { rows: [{ created_by: 7, branch_id: 2 }], rowCount: 1 };
+      if (sql.includes("payment_status IS NOT NULL")) return { rows: [{ payment_status: "settled", collected_at: "2026-10-15 10:00:00", created_by: 7 }], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    });
+    await post("/loans/9/payments/5", { amount: 900, collectedAt: "2026-10-15T10:00", paymentStatus: "settled" }, "PATCH");
+    const edit = calls().find(([sql]) => sql.includes("UPDATE collections"))!;
+    expect(edit[1]).toEqual([900, null, "2026-10-15 10:00:00", "settled", 5]);
+    expect(calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))![1][0]).toBe("settled");
+    mocks.query.mockClear();
+    await post("/loans/9/payments/5", { amount: 900, collectedAt: "2026-10-15T10:00" }, "PATCH");
+    expect(calls().find(([sql]) => sql.includes("UPDATE collections"))![1][3]).toBeNull();
+  });
+
+  it("falls back to the previous payment's type when a payment is deleted", async () => {
+    mocks.user = { id: 3, role: "branch_admin", branchId: 2 } as JwtUser;
+    latestPayment = [];
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT b.branch_id")) return { rows: [{ branch_id: 2 }], rowCount: 1 };
+      if (sql.includes("SELECT loan_id FROM collections")) return { rows: [{ loan_id: 9 }], rowCount: 1 };
+      if (sql.includes("payment_status IS NOT NULL")) return { rows: latestPayment, rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    expect((await fetch(`${base}/payments/5`, { method: "DELETE" })).status).toBe(200);
+    expect(calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))![1]).toEqual([null, null, null, 9]);
+  });
+
+  it("no longer sets a status from remarks; Visited is an ordinary remark", async () => {
+    expect((await post("/loans/9/remarks", { remark: "", remarkCategory: "visited" })).status).toBe(400);
+    expect((await post("/loans/9/remarks", { remark: "Talked to the member", remarkCategory: "visited", attachment: ATTACHMENT, location: { latitude: 11.5, longitude: 122.5 } })).status).toBe(201);
+    expect(calls().find(([sql]) => sql.includes("INSERT INTO loan_remarks"))![1][2]).toBe("visited");
     expect(calls().some(([sql]) => sql.includes("UPDATE loans SET action_status"))).toBe(false);
   });
 
-  it("falls back to the previous status when the latest status remark is deleted", async () => {
-    existingCategory = "settled";
-    latestStatus = [{ remark_category: "partial", created_at: "2026-10-14 10:00:00", created_by: 7 }];
-    expect((await fetch(`${base}/loans/9/remarks/31`, { method: "DELETE" })).status).toBe(200);
-    const update = calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))!;
-    expect(update[1]).toEqual(["partial", "2026-10-14 10:00:00", 7, 9]);
-  });
-
-  it("clears the status when no status remark is left", async () => {
-    existingCategory = "visited";
-    latestStatus = [];
-    await post("/loans/9/remarks/31", { remark: "Actually a follow-up", remarkCategory: "follow_up_collection" }, "PATCH");
-    const update = calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))!;
-    expect(update[1]).toEqual([null, null, null, 9]);
-  });
-
-  it("does not allow loan statuses on member remarks", async () => {
-    const response = await post("/borrowers/4/remarks", { remark: "x", remarkCategory: "settled" });
-    expect(response.status).toBe(400);
-    expect((await response.json()).message).toBe("Loan statuses can only be set on a loan");
-  });
-
-  it("filters the Collections list by status, including loans with no action yet", async () => {
+  it("filters the Collections list by payment status, including loans with no payment yet", async () => {
     mocks.query.mockImplementation(async (sql: string) => sql.includes("COUNT(*)") ? { rows: [{ total: 0 }] } : { rows: [] });
-    await fetch(`${base}/loans?page=1&actionStatus=partial`);
+    await fetch(`${base}/loans?page=1&actionStatus=settled`);
     expect(calls().find(([sql]) => sql.includes("COUNT(*)"))![0]).toContain("l.action_status = $2");
     mocks.query.mockClear();
     await fetch(`${base}/loans?page=1&actionStatus=none`);
     expect(calls().find(([sql]) => sql.includes("COUNT(*)"))![0]).toContain("l.action_status IS NULL");
-    expect((await fetch(`${base}/loans?page=1&actionStatus=paid`)).status).toBe(400);
-    expect((await fetch(`${base}/loans?page=1&actionStatus=updated`)).status).toBe(400);
+    expect((await fetch(`${base}/loans?page=1&actionStatus=visited`)).status).toBe(400);
   });
 });
 
@@ -115,5 +167,36 @@ describe("LAS field work", () => {
     mocks.query.mockImplementation(async (sql: string) => sql.includes("SELECT c.created_by")
       ? { rows: [{ created_by: 8, branch_id: 2 }], rowCount: 1 } : { rows: [], rowCount: 1 });
     expect((await post("/loans/9/payments/5", body, "PATCH")).status).toBe(200);
+  });
+});
+
+describe("active / overdue / closed label", () => {
+  const loanBody = (parAge: number) => ({
+    borrowerId: 4, loanAccountNo: "LN-50", loanType: "Salary", dateRelease: "2026-01-01", maturityDate: "2026-12-01",
+    loanAmount: 1000, principalDue: 100, penaltyDue: 0, interest: 10, parAge, status: "closed"
+  });
+
+  it("is worked out from PAR age when a loan is created, ignoring any status sent", async () => {
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    expect((await post("/loans", loanBody(5))).status).toBe(201);
+    const insert = calls().find(([sql]) => sql.includes("INSERT INTO loans"))!;
+    expect(insert[1].at(-1)).toBe("overdue");
+    mocks.query.mockClear();
+    await post("/loans", loanBody(0));
+    expect(calls().find(([sql]) => sql.includes("INSERT INTO loans"))![1].at(-1)).toBe("active");
+  });
+
+  it("follows PAR age on edit, but a closed loan stays closed", async () => {
+    mocks.user = { id: 1, role: "super_admin", branchId: null } as JwtUser;
+    const base = mocks.query.getMockImplementation()!;
+    let stored = "active";
+    mocks.query.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith("SELECT status FROM loans") ? { rows: [{ status: stored }], rowCount: 1 } : base(sql, params));
+    await post("/loans/9", loanBody(0), "PATCH");
+    expect(calls().find(([sql]) => sql.includes("UPDATE loans") && sql.includes("status = $17"))![1].at(-2)).toBe("active");
+    mocks.query.mockClear();
+    stored = "closed";
+    await post("/loans/9", loanBody(30), "PATCH");
+    expect(calls().find(([sql]) => sql.includes("UPDATE loans") && sql.includes("status = $17"))![1].at(-2)).toBe("closed");
   });
 });
