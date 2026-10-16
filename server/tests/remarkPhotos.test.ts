@@ -65,7 +65,7 @@ describe("parsePhoto", () => {
   it("maps list columns to a photo summary", () => {
     expect(mapPhotoColumns({ photo_id: null })).toEqual({ photo: null });
     expect(mapPhotoColumns({ photo_id: 3, photo_latitude: "11.584123", photo_longitude: "122.543211", photo_accuracy: 12, photo_captured_at: "2026-10-15 07:30:15" }))
-      .toEqual({ photo: { latitude: 11.584123, longitude: 122.543211, accuracy: 12, capturedAt: "2026-10-15 07:30:15" } });
+      .toEqual({ photo: { latitude: 11.584123, longitude: 122.543211, accuracy: 12, placeName: null, capturedAt: "2026-10-15 07:30:15" } });
   });
 });
 
@@ -79,7 +79,7 @@ describe("remark photos", () => {
     expect(response.status).toBe(201);
     const insert = calls().find(([sql]) => sql.includes("INSERT INTO remark_photos"))!;
     expect(insert[1].slice(0, 4)).toEqual(["loan", 31, "visit.jpg", "image/jpeg"]);
-    expect(insert[1].slice(5)).toEqual([11.584123, 122.543211, 12, "2026-10-15 07:30:15"]);
+    expect(insert[1].slice(5)).toEqual([11.584123, 122.543211, 12, null, "2026-10-15 07:30:15"]);
   });
 
   it("rejects an invalid photo before saving the remark", async () => {

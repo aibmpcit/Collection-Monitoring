@@ -125,15 +125,15 @@ export interface LoanRemark {
   createdBy: string;
   attachmentName?: string | null;
   /** Field photo with where and when it was taken; null when the remark has none. */
-  photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
+  photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; placeName?: string | null; capturedAt: string } | null;
   /** Where the remark was recorded ("Add location"). */
-  location?: { latitude: number; longitude: number; accuracy: number | null } | null;
+  location?: { latitude: number; longitude: number; accuracy: number | null; placeName?: string | null } | null;
 }
 
 export interface LoanPayment {
   canEdit?: boolean;
   /** Photo or file proving the payment, with where it was recorded. */
-  proof?: { kind: string; fileName: string; latitude: number; longitude: number; accuracy: number | null; capturedAt: string } | null;
+  proof?: { kind: string; fileName: string; latitude: number; longitude: number; accuracy: number | null; placeName?: string | null; capturedAt: string } | null;
   /** "partial" or "settled"; older payments may have none. */
   paymentStatus?: string | null;
   id: number;

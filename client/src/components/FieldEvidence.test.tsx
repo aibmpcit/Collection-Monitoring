@@ -5,6 +5,7 @@ import { PaymentProofField, proofPayload, RemarkEvidenceField, remarkEvidencePay
 
 vi.mock("../services/photo", async () => ({
   ...await vi.importActual<typeof import("../services/photo")>("../services/photo"),
+  lookupPlace: vi.fn(async () => "Brgy. Centro Norte, Culasi, Antique"),
   prepareGeotaggedPhoto: vi.fn(async () => ({
     name: "remark-photo.jpg", type: "image/jpeg", data: "cGhvdG8=", latitude: 11.5, longitude: 122.5, accuracy: 8,
     capturedAt: "2026-10-15T09:00:00", previewUrl: "data:image/jpeg;base64,cGhvdG8=", locationError: ""
@@ -44,7 +45,7 @@ describe("PaymentProofField", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     const proof = onChange.mock.calls.at(-1)![0] as PaymentProofUpload;
     expect(proof).toMatchObject({ kind: "attachment", name: "receipt.pdf", type: "application/pdf", latitude: 11.5, longitude: 122.5, accuracy: 8 });
-    expect(screen.getByText("11.500000, 122.500000 (±8 m)")).toBeInTheDocument();
+    expect(screen.getByText("Brgy. Centro Norte, Culasi, Antique")).toBeInTheDocument();
   });
 
   it("stamps a photo once the location is added, in either order", async () => {
@@ -81,7 +82,7 @@ describe("remarkEvidencePayload", () => {
   const at = { latitude: 11.5, longitude: 122.5, accuracy: 8 };
   it("sends a photo with its coordinates, plus the location", () => {
     expect(remarkEvidencePayload({ file: photoFile, location: at }, false)).toEqual({
-      photo: { name: "x.jpg", type: "image/jpeg", data: "eA==", capturedAt: "2026-10-15T09:00:00", latitude: 11.5, longitude: 122.5, accuracy: 8 },
+      photo: { name: "x.jpg", type: "image/jpeg", data: "eA==", capturedAt: "2026-10-15T09:00:00", latitude: 11.5, longitude: 122.5, accuracy: 8, placeName: null },
       location: at
     });
   });
@@ -102,7 +103,8 @@ describe("RemarkEvidenceField", () => {
     render(<RemarkEvidenceField proof={null} onChange={onChange} />);
     expect(screen.getByText(/\(optional\)/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add current location" }));
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ file: null, location: { latitude: 11.5, longitude: 122.5, accuracy: 8 } }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ file: null, location: { latitude: 11.5, longitude: 122.5, accuracy: 8, placeName: "Brgy. Centro Norte, Culasi, Antique" } }));
+    expect(screen.getByText("Brgy. Centro Norte, Culasi, Antique")).toBeInTheDocument();
   });
 
   it("accepts a file on its own", async () => {

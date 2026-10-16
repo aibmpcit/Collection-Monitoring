@@ -31,6 +31,25 @@ export function wallClock(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/**
+ * Barangay, town and province for a location (e.g. "Brgy. Centro Norte, Culasi, Antique"), or
+ * "" when it can't be looked up (offline, or no barangay on the map there).
+ */
+export async function lookupPlace(latitude: number, longitude: number): Promise<string> {
+  try {
+    const { apiRequest } = await import("./api");
+    const place = await apiRequest<{ label: string }>(`/geo/reverse?lat=${latitude}&lng=${longitude}`);
+    return place.label ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** The place name when known, otherwise the coordinates. */
+export function describeLocation(point: { latitude: number; longitude: number; accuracy?: number | null; placeName?: string | null }) {
+  return point.placeName || formatCoordinates(point);
+}
+
 export function formatCoordinates(fix: Pick<GeoFix, "latitude" | "longitude"> & { accuracy?: number | null }) {
   const base = `${fix.latitude.toFixed(6)}, ${fix.longitude.toFixed(6)}`;
   return fix.accuracy != null ? `${base} (±${Math.round(fix.accuracy)} m)` : base;
@@ -100,7 +119,7 @@ function stamp(context: CanvasRenderingContext2D, width: number, height: number,
 }
 
 /** Shrinks the photo, stamps time and location on it, and returns it ready to upload. */
-export async function prepareGeotaggedPhoto(file: File, location: { fix: GeoFix | null; error: string }, takenAt = new Date()): Promise<CapturedPhoto> {
+export async function prepareGeotaggedPhoto(file: File, location: { fix: GeoFix | null; error: string }, takenAt = new Date(), placeName = ""): Promise<CapturedPhoto> {
   if (!file.type.startsWith("image/")) throw new Error("Choose a photo.");
   const image = await loadImage(file);
   const scale = Math.min(1, MAX_EDGE / Math.max(image.width, image.height));
@@ -115,7 +134,8 @@ export async function prepareGeotaggedPhoto(file: File, location: { fix: GeoFix 
   const capturedAt = wallClock(takenAt);
   stamp(context, width, height, [
     takenAt.toLocaleString(),
-    location.fix ? formatCoordinates(location.fix) : "Location unavailable"
+    // The barangay reads better than coordinates; coordinates are the fallback.
+    placeName || (location.fix ? formatCoordinates(location.fix) : "Location unavailable")
   ]);
   const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
   return {

@@ -23,7 +23,7 @@ interface Activity {
   photo_id?: number | null; photo_latitude?: number | string | null; photo_longitude?: number | string | null;
   photo_accuracy?: number | string | null; photo_captured_at?: string | null;
   geo_latitude?: number | string | null; geo_longitude?: number | string | null; geo_accuracy?: number | string | null;
-  proof_kind?: string | null; proof_name?: string | null;
+  proof_kind?: string | null; proof_name?: string | null; geo_place?: string | null;
 }
 
 const remarkPath = (item: Activity) => item.kind === "member_remark"
@@ -376,14 +376,14 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           ? <div className="mt-4 grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div>
           : <div className="mt-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
         {selectedActivity.geo_latitude != null && selectedActivity.geo_longitude != null && <div className="mt-3">
-          <MapLink point={{ latitude: Number(selectedActivity.geo_latitude), longitude: Number(selectedActivity.geo_longitude), accuracy: toNumberOrNull(selectedActivity.geo_accuracy) }}
+          <MapLink point={{ latitude: Number(selectedActivity.geo_latitude), longitude: Number(selectedActivity.geo_longitude), accuracy: toNumberOrNull(selectedActivity.geo_accuracy), placeName: selectedActivity.geo_place ?? null }}
             label={selectedActivity.kind === "payment" ? "Where it was collected" : "View on map"} />
         </div>}
         {selectedActivity.kind === "payment" && selectedActivity.proof_kind && <div className="mt-3">
           {selectedActivity.proof_kind === "photo"
             ? <RemarkPhotoView path={`/loans/${selectedActivity.loan_id}/payments/${selectedActivity.id}/proof`} photo={{
                 latitude: toNumberOrNull(selectedActivity.geo_latitude), longitude: toNumberOrNull(selectedActivity.geo_longitude),
-                accuracy: toNumberOrNull(selectedActivity.geo_accuracy), capturedAt: plainDateTime(selectedActivity.occurred_at)
+                accuracy: toNumberOrNull(selectedActivity.geo_accuracy), placeName: selectedActivity.geo_place ?? null, capturedAt: plainDateTime(selectedActivity.occurred_at)
               }} />
             : <button type="button" className="btn-muted" onClick={() => {
                 const item = selectedActivity;

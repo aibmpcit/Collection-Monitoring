@@ -9,6 +9,7 @@ export interface GeoPoint {
   latitude: number;
   longitude: number;
   accuracy: number | null;
+  placeName: string | null;
 }
 
 export interface PaymentProofPayload extends GeoPoint {
@@ -20,6 +21,12 @@ export interface PaymentProofPayload extends GeoPoint {
 }
 
 const MAX_PROOF_BYTES = 5 * 1024 * 1024;
+
+/** Readable place for a location (e.g. "Brgy. Centro Norte, Culasi, Antique"); display only. */
+export function placeNameOf(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, 160) : "";
+  return text || null;
+}
 
 function invalid(message: string) {
   return Object.assign(new Error(message), { status: 400 });
@@ -46,7 +53,8 @@ export function parseGeoPoint(value: unknown, message = "Location is required"):
   return {
     latitude: coordinate(raw.latitude, 90, message),
     longitude: coordinate(raw.longitude, 180, message),
-    accuracy: accuracyOf(raw.accuracy)
+    accuracy: accuracyOf(raw.accuracy),
+    placeName: placeNameOf(raw.placeName)
   };
 }
 
@@ -87,6 +95,7 @@ export async function ensureFieldEvidenceTables() {
     latitude DECIMAL(9,6) NOT NULL,
     longitude DECIMAL(9,6) NOT NULL,
     accuracy_m INT UNSIGNED NULL,
+    place_name VARCHAR(160) NULL,
     captured_at DATETIME NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (payment_id)
@@ -95,12 +104,12 @@ export async function ensureFieldEvidenceTables() {
 
 export async function savePaymentProof(client: QueryClient, paymentId: number, proof: PaymentProofPayload) {
   await client.query(
-    `INSERT INTO payment_proofs (payment_id, kind, file_name, mime_type, file_data, latitude, longitude, accuracy_m, captured_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO payment_proofs (payment_id, kind, file_name, mime_type, file_data, latitude, longitude, accuracy_m, place_name, captured_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON DUPLICATE KEY UPDATE kind = VALUES(kind), file_name = VALUES(file_name), mime_type = VALUES(mime_type),
        file_data = VALUES(file_data), latitude = VALUES(latitude), longitude = VALUES(longitude),
-       accuracy_m = VALUES(accuracy_m), captured_at = VALUES(captured_at), created_at = CURRENT_TIMESTAMP`,
-    [paymentId, proof.kind, proof.name, proof.type, Buffer.from(proof.data, "base64"), proof.latitude, proof.longitude, proof.accuracy, proof.capturedAt]
+       accuracy_m = VALUES(accuracy_m), place_name = VALUES(place_name), captured_at = VALUES(captured_at), created_at = CURRENT_TIMESTAMP`,
+    [paymentId, proof.kind, proof.name, proof.type, Buffer.from(proof.data, "base64"), proof.latitude, proof.longitude, proof.accuracy, proof.placeName, proof.capturedAt]
   );
 }
 
@@ -114,7 +123,7 @@ export async function getPaymentProof(paymentId: number) {
 
 /** Columns to select (with `pp` joined) so payment lists can show the proof and its location. */
 export const PROOF_COLUMNS = `pp.kind AS proof_kind, pp.file_name AS proof_name, pp.latitude AS proof_latitude,
-  pp.longitude AS proof_longitude, pp.accuracy_m AS proof_accuracy, pp.captured_at AS proof_captured_at`;
+  pp.longitude AS proof_longitude, pp.accuracy_m AS proof_accuracy, pp.place_name AS proof_place, pp.captured_at AS proof_captured_at`;
 
 export function mapProofColumns(row: Record<string, unknown>) {
   if (!row.proof_kind) return { proof: null };
@@ -125,6 +134,7 @@ export function mapProofColumns(row: Record<string, unknown>) {
       latitude: Number(row.proof_latitude),
       longitude: Number(row.proof_longitude),
       accuracy: row.proof_accuracy == null ? null : Number(row.proof_accuracy),
+      placeName: row.proof_place ? String(row.proof_place) : null,
       capturedAt: String(row.proof_captured_at ?? "")
     }
   };
@@ -137,7 +147,8 @@ export function mapRemarkLocation(row: Record<string, unknown>) {
     location: {
       latitude: Number(row.latitude),
       longitude: Number(row.longitude),
-      accuracy: row.location_accuracy == null ? null : Number(row.location_accuracy)
+      accuracy: row.location_accuracy == null ? null : Number(row.location_accuracy),
+      placeName: row.place_name ? String(row.place_name) : null
     }
   };
 }
@@ -145,7 +156,7 @@ export function mapRemarkLocation(row: Record<string, unknown>) {
 export async function saveRemarkLocation(table: "loan_remarks" | "borrower_remarks", remarkId: number, location: GeoPoint | null | undefined) {
   if (location === undefined) return;
   await query(
-    `UPDATE ${table} SET latitude = $1, longitude = $2, location_accuracy = $3 WHERE id = $4`,
-    [location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, remarkId]
+    `UPDATE ${table} SET latitude = $1, longitude = $2, location_accuracy = $3, place_name = $4 WHERE id = $5`,
+    [location?.latitude ?? null, location?.longitude ?? null, location?.accuracy ?? null, location?.placeName ?? null, remarkId]
   );
 }

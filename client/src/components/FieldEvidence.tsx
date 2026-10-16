@@ -1,12 +1,14 @@
 import { Camera, MapPin, Paperclip } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fileToAttachment } from "../services/attachments";
-import { formatCoordinates, getCurrentLocation, mapLink, prepareGeotaggedPhoto, wallClock, type GeoFix } from "../services/photo";
+import { describeLocation, getCurrentLocation, lookupPlace, mapLink, prepareGeotaggedPhoto, wallClock, type GeoFix } from "../services/photo";
 
 export interface GeoPoint {
   latitude: number;
   longitude: number;
   accuracy: number | null;
+  /** e.g. "Brgy. Centro Norte, Culasi, Antique"; null when it couldn't be looked up. */
+  placeName?: string | null;
 }
 
 export interface PaymentProofUpload extends GeoPoint {
@@ -30,7 +32,7 @@ const toPoint = (fix: GeoFix): GeoPoint => ({ latitude: fix.latitude, longitude:
 export function MapLink({ point, label = "View on map" }: { point: GeoPoint; label?: string }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-600">
-      <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden="true" />{formatCoordinates(point)}</span>
+      <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden="true" />{describeLocation(point)}</span>
       <a className="font-semibold text-brand-700 underline" href={mapLink(point.latitude, point.longitude)} target="_blank" rel="noreferrer">{label}</a>
     </span>
   );
@@ -81,7 +83,7 @@ export function remarkEvidencePayload(evidence: RemarkEvidence | null, replacing
   const payload: Record<string, unknown> = {};
   if (evidence.file?.kind === "photo") {
     const { name, type, data, capturedAt } = evidence.file;
-    payload.photo = { name, type, data, capturedAt, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, accuracy: location?.accuracy ?? null };
+    payload.photo = { name, type, data, capturedAt, latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, accuracy: location?.accuracy ?? null, placeName: location?.placeName ?? null };
     if (replacing) payload.attachment = null;
   } else if (evidence.file) {
     const { name, type, data } = evidence.file;
@@ -144,7 +146,7 @@ export function EvidenceField({ label, required, value, onEvidence, hasExisting 
         if (file?.kind === "photo") {
           const photo = await prepareGeotaggedPhoto(file.file, point
             ? { fix: { ...point, accuracy: point.accuracy ?? 0 }, error: "" }
-            : { fix: null, error: "" });
+            : { fix: null, error: "" }, new Date(), point?.placeName ?? "");
           built = { kind: "photo", name: photo.name, type: photo.type, data: photo.data, capturedAt: photo.capturedAt, previewUrl: photo.previewUrl };
         } else if (file) {
           const attachment = await fileToAttachment(file.file);
@@ -174,9 +176,16 @@ export function EvidenceField({ label, required, value, onEvidence, hasExisting 
     setLocating(true);
     setError("");
     const location = await getCurrentLocation();
+    if (!location.fix) {
+      setLocating(false);
+      setError(`Couldn't get the current location. ${location.error}`);
+      return;
+    }
+    const point = toPoint(location.fix);
+    // Name the barangay when possible; coordinates are kept either way.
+    const placeName = await lookupPlace(point.latitude, point.longitude);
     setLocating(false);
-    if (location.fix) setPoint(toPoint(location.fix));
-    else setError(`Couldn't get the current location. ${location.error}`);
+    setPoint({ ...point, placeName: placeName || null });
   }
 
   const busy = locating || building;

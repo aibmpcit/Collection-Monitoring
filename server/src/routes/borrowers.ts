@@ -486,7 +486,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
          br.created_at,
          u.username,
          ra.file_name AS attachment_name,
-         br.latitude, br.longitude, br.location_accuracy,
+         br.latitude, br.longitude, br.location_accuracy, br.place_name,
          ${PHOTO_COLUMNS}
        FROM borrower_remarks br
        LEFT JOIN users u ON u.id = br.created_by

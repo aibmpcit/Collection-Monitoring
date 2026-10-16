@@ -3,7 +3,6 @@ import {
   BarChart3,
   Building2,
   FileText,
-  FileWarning,
   History,
   LogOut,
   Menu,
@@ -76,12 +75,6 @@ const NAV_ITEMS: NavDefinition[] = [
     label: "Branches",
     icon: <Building2 size={18} />,
     visible: (role) => role === "super_admin"
-  },
-  {
-    to: "/reports/overdue",
-    label: "Due Monitoring",
-    icon: <FileWarning size={18} />,
-    visible: (role) => role === "super_admin" || role === "branch_admin"
   },
   {
     to: "/reports",

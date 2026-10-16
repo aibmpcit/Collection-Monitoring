@@ -1,6 +1,7 @@
 import { query, type QueryClient } from "../config/db.js";
 import { toBusinessDateTime } from "../config/time.js";
 import type { RemarkKind } from "./remarkAttachments.js";
+import { placeNameOf } from "./fieldEvidence.js";
 
 // A remark can carry one field photo (taken with the phone camera) in addition to its attachment.
 // The phone's location at capture time is stored with it as the geotag.
@@ -12,6 +13,7 @@ export interface PhotoPayload {
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
+  placeName: string | null;
   capturedAt: string;
 }
 
@@ -29,6 +31,7 @@ export async function ensureRemarkPhotoTable() {
     latitude DECIMAL(9,6) NULL,
     longitude DECIMAL(9,6) NULL,
     accuracy_m INT UNSIGNED NULL,
+    place_name VARCHAR(160) NULL,
     captured_at DATETIME NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -67,7 +70,7 @@ export function parsePhoto(value: unknown): PhotoPayload | null | undefined {
   const capturedAt = toBusinessDateTime(typeof raw.capturedAt === "string" ? raw.capturedAt : undefined);
   if (!capturedAt) throw invalid("Invalid photo time");
   const name = String(raw.name ?? "").trim().slice(0, 255) || "photo.jpg";
-  return { name, type, data, latitude, longitude, accuracy, capturedAt };
+  return { name, type, data, latitude, longitude, accuracy, placeName: latitude === null ? null : placeNameOf(raw.placeName), capturedAt };
 }
 
 export async function saveRemarkPhoto(kind: RemarkKind, remarkId: number, photo: PhotoPayload | null | undefined) {
@@ -77,12 +80,12 @@ export async function saveRemarkPhoto(kind: RemarkKind, remarkId: number, photo:
     return;
   }
   await query(
-    `INSERT INTO remark_photos (remark_kind, remark_id, file_name, mime_type, file_data, latitude, longitude, accuracy_m, captured_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO remark_photos (remark_kind, remark_id, file_name, mime_type, file_data, latitude, longitude, accuracy_m, place_name, captured_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), mime_type = VALUES(mime_type), file_data = VALUES(file_data),
        latitude = VALUES(latitude), longitude = VALUES(longitude), accuracy_m = VALUES(accuracy_m),
-       captured_at = VALUES(captured_at), created_at = CURRENT_TIMESTAMP`,
-    [kind, remarkId, photo.name, photo.type, Buffer.from(photo.data, "base64"), photo.latitude, photo.longitude, photo.accuracy, photo.capturedAt]
+       place_name = VALUES(place_name), captured_at = VALUES(captured_at), created_at = CURRENT_TIMESTAMP`,
+    [kind, remarkId, photo.name, photo.type, Buffer.from(photo.data, "base64"), photo.latitude, photo.longitude, photo.accuracy, photo.placeName, photo.capturedAt]
   );
 }
 
@@ -100,7 +103,7 @@ export async function getRemarkPhoto(kind: RemarkKind, remarkId: number) {
 
 /** Columns to select (with `rp` joined) so remark lists can show the photo and its location. */
 export const PHOTO_COLUMNS = `rp.id AS photo_id, rp.latitude AS photo_latitude, rp.longitude AS photo_longitude,
-  rp.accuracy_m AS photo_accuracy, rp.captured_at AS photo_captured_at`;
+  rp.accuracy_m AS photo_accuracy, rp.place_name AS photo_place, rp.captured_at AS photo_captured_at`;
 
 export function mapPhotoColumns(row: Record<string, unknown>) {
   if (!row.photo_id) return { photo: null };
@@ -109,6 +112,7 @@ export function mapPhotoColumns(row: Record<string, unknown>) {
       latitude: row.photo_latitude == null ? null : Number(row.photo_latitude),
       longitude: row.photo_longitude == null ? null : Number(row.photo_longitude),
       accuracy: row.photo_accuracy == null ? null : Number(row.photo_accuracy),
+      placeName: row.photo_place ? String(row.photo_place) : null,
       capturedAt: String(row.photo_captured_at ?? "")
     }
   };

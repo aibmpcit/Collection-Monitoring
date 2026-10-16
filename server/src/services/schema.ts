@@ -79,6 +79,12 @@ export async function ensureSchema() {
       await query(`ALTER TABLE ${table} ADD COLUMN latitude DECIMAL(9,6) NULL, ADD COLUMN longitude DECIMAL(9,6) NULL, ADD COLUMN location_accuracy INT UNSIGNED NULL`);
     }
   }
+  // Barangay / town shown instead of raw coordinates.
+  for (const table of ["loan_remarks", "borrower_remarks", "payment_proofs", "remark_photos"]) {
+    if (!(await columnExists(table, "place_name"))) {
+      await query(`ALTER TABLE ${table} ADD COLUMN place_name VARCHAR(160) NULL`);
+    }
+  }
   await query(`CREATE TABLE IF NOT EXISTS user_activity_daily (
     user_id INT UNSIGNED NOT NULL,
     day DATE NOT NULL,

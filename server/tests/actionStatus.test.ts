@@ -56,7 +56,7 @@ const post = (path: string, body: unknown, method = "POST") => fetch(`${base}${p
 
 const PROOF = {
   kind: "photo", name: "receipt.jpg", type: "image/jpeg", data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString("base64"),
-  latitude: 11.5841234, longitude: 122.5432109, accuracy: 9, capturedAt: "2026-10-15T09:00:00"
+  latitude: 11.5841234, longitude: 122.5432109, accuracy: 9, placeName: "Brgy. Centro Norte, Culasi, Antique", capturedAt: "2026-10-15T09:00:00"
 };
 
 const ATTACHMENT = { name: "letter.pdf", type: "application/pdf", data: Buffer.from("pdf").toString("base64") };
@@ -69,7 +69,7 @@ describe("loan status from payments", () => {
     expect(insert[1]).toEqual([9, 500, "OR-1", "2026-10-15 09:00:00", "partial", 7]);
     const proof = calls().find(([sql]) => sql.includes("INSERT INTO payment_proofs"))!;
     expect(proof[1][1]).toBe("photo");
-    expect(proof[1].slice(5)).toEqual([11.584123, 122.543211, 9, "2026-10-15 09:00:00"]);
+    expect(proof[1].slice(5)).toEqual([11.584123, 122.543211, 9, "Brgy. Centro Norte, Culasi, Antique", "2026-10-15 09:00:00"]);
     const update = calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))!;
     expect(update[1]).toEqual(["partial", "2026-10-15 09:00:00", 7, 9]);
   });
@@ -99,7 +99,7 @@ describe("loan status from payments", () => {
     const response = await post("/loans/9/remarks", { remark: "At the member's house", remarkCategory: "visited", attachment: ATTACHMENT, location: { latitude: 11.5, longitude: 122.5, accuracy: 12 } });
     expect(response.status).toBe(201);
     const saved = calls().find(([sql]) => sql.includes("UPDATE loan_remarks SET latitude"))!;
-    expect(saved[1]).toEqual([11.5, 122.5, 12, 31]);
+    expect(saved[1]).toEqual([11.5, 122.5, 12, null, 31]);
     expect((await post("/loans/9/remarks", { remark: "x", location: { latitude: 200, longitude: 1 } })).status).toBe(400);
   });
 

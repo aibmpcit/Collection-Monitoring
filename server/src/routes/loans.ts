@@ -1507,7 +1507,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
          lr.created_at,
          COALESCE(u.username, 'System') AS created_by,
          ra.file_name AS attachment_name,
-         lr.latitude, lr.longitude, lr.location_accuracy,
+         lr.latitude, lr.longitude, lr.location_accuracy, lr.place_name,
          ${PHOTO_COLUMNS}
        FROM loan_remarks lr
        LEFT JOIN users u ON u.id = lr.created_by

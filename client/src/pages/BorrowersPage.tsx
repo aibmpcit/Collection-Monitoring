@@ -59,7 +59,7 @@ interface MemberRemarkRow {
   canEdit?: boolean;
   attachmentName?: string | null;
   photo?: { latitude: number | null; longitude: number | null; accuracy: number | null; capturedAt: string } | null;
-  location?: { latitude: number; longitude: number; accuracy: number | null } | null;
+  location?: { latitude: number; longitude: number; accuracy: number | null; placeName?: string | null } | null;
 }
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {

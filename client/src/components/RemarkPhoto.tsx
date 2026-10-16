@@ -1,12 +1,13 @@
 import { MapPin } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiBlobUrl } from "../services/api";
-import { formatCoordinates, mapLink } from "../services/photo";
+import { describeLocation, mapLink } from "../services/photo";
 
 export interface RemarkPhotoInfo {
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
+  placeName?: string | null;
   capturedAt: string;
 }
 
@@ -33,7 +34,7 @@ export function RemarkPhotoView({ path, photo }: { path: string; photo: RemarkPh
       <figcaption className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
         <span>Taken {Number.isNaN(taken.getTime()) ? photo.capturedAt : taken.toLocaleString()}</span>
         {photo.latitude != null && photo.longitude != null ? <>
-          <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden="true" />{formatCoordinates({ latitude: photo.latitude, longitude: photo.longitude, accuracy: photo.accuracy })}</span>
+          <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden="true" />{describeLocation({ latitude: photo.latitude, longitude: photo.longitude, accuracy: photo.accuracy, placeName: photo.placeName })}</span>
           <a className="font-semibold text-brand-700 underline" href={mapLink(photo.latitude, photo.longitude)} target="_blank" rel="noreferrer">View on map</a>
         </> : <span className="text-amber-700">No location recorded</span>}
       </figcaption>

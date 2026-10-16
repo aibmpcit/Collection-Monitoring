@@ -26,20 +26,20 @@ const activitySql = `
     c.amount, c.or_no, NULL AS remark, NULL AS category, l.id AS loan_id,
     l.loan_account_no, b.id AS member_id, COALESCE(b.member_name, b.name) AS member_name,
     b.cif_key, b.branch_id, l.loan_type, l.maturity_date, l.status AS loan_status, b.contact_info, b.address,
-    c.payment_status, pp.latitude AS geo_latitude, pp.longitude AS geo_longitude, pp.accuracy_m AS geo_accuracy, pp.kind AS proof_kind, pp.file_name AS proof_name
+    c.payment_status, pp.latitude AS geo_latitude, pp.longitude AS geo_longitude, pp.accuracy_m AS geo_accuracy, pp.kind AS proof_kind, pp.file_name AS proof_name, pp.place_name AS geo_place
   FROM collections c JOIN loans l ON l.id = c.loan_id JOIN borrowers b ON b.id = l.borrower_id
   LEFT JOIN payment_proofs pp ON pp.payment_id = c.id
   UNION ALL
   SELECT r.id, 'loan_remark', r.created_by, r.created_at, 0, NULL, r.remark_text,
     r.remark_category, l.id, l.loan_account_no, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id,
     l.loan_type, l.maturity_date, l.status, b.contact_info, b.address, NULL,
-    r.latitude, r.longitude, r.location_accuracy, NULL, NULL
+    r.latitude, r.longitude, r.location_accuracy, NULL, NULL, r.place_name
   FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id
   UNION ALL
   SELECT r.id, 'member_remark', r.created_by, r.created_at, 0, NULL, r.remark_text,
     r.remark_category, NULL, NULL, b.id, COALESCE(b.member_name, b.name), b.cif_key, b.branch_id,
     NULL, NULL, NULL, b.contact_info, b.address, NULL,
-    r.latitude, r.longitude, r.location_accuracy, NULL, NULL
+    r.latitude, r.longitude, r.location_accuracy, NULL, NULL, r.place_name
   FROM borrower_remarks r JOIN borrowers b ON b.id = r.borrower_id`;
 
 router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
