@@ -169,7 +169,7 @@ describe("member import", () => {
   });
 });
 
-describe("daily upload rules", () => {
+describe("weekly upload rules", () => {
   const branchLoans = () => {
     borrowers = [{ id: 5, branch_id: 2, cif_key: "MC-1", member_name: "Ana", contact_info: "", address: "North" }];
     loans = [
@@ -275,7 +275,7 @@ describe("first-import remarks (REMARK_IMPORT_ONCE=true)", () => {
     remarkLock = [{ imported_at: "2026-10-01 08:00:00", username: "admin" }];
     const body = await (await post("/loans/bulk", [withRemarks()])).json();
     expect(body).toMatchObject({ inserted: 1, remarksImported: 0, remarksInFile: 1 });
-    expect(body.remarksNote).toBe("Remarks for this branch were already imported on 2026-10-01 by admin; remark columns were ignored.");
+    expect(body.remarksNote).toBe("Actions taken for this branch were already imported on 2026-10-01 by admin; action taken columns were ignored.");
     expect(writes.some(write => write.sql.includes("loan_remarks") || write.sql.includes("branch_remark_imports"))).toBe(false);
   });
 
@@ -283,7 +283,7 @@ describe("first-import remarks (REMARK_IMPORT_ONCE=true)", () => {
     mocks.user = { id: 4, role: "branch_admin", branchId: 2 } as JwtUser;
     const body = await (await post("/loans/bulk", [withRemarks()], {})).json();
     expect(body).toMatchObject({ remarksImported: 0, remarksInFile: 1 });
-    expect(body.remarksNote).toBe("Only a super admin can import remarks, on a branch's first import; remark columns were ignored.");
+    expect(body.remarksNote).toBe("Only a super admin can import actions taken, on a branch's first import; action taken columns were ignored.");
     expect(writes.some(write => write.sql.includes("loan_remarks"))).toBe(false);
   });
 });
@@ -321,7 +321,7 @@ describe("testing phase: remarks on every import", () => {
     mocks.transaction.mockImplementationOnce(handler => handler({ query: withStored }));
     const body = await (await post("/loans/bulk", [withRemarks()])).json();
     expect(body).toMatchObject({ updated: 1, remarksImported: 1, remarksDuplicate: 1 });
-    expect(body.remarksNote).toBe("1 remark(s) were already in the system and were skipped.");
+    expect(body.remarksNote).toBe("1 action(s) taken were already in the system and were skipped.");
     const inserted = writes.filter(write => write.sql.includes("INSERT INTO loan_remarks"));
     expect(inserted.map(write => write.params[2])).toEqual(["demand_letter"]);
   });

@@ -2,7 +2,7 @@ import type { Permission, User } from "../types/models";
 
 export const ACCOUNT_PERMISSIONS: { key: Permission; label: string }[] = [
   { key: "import_collections", label: "Import collections" },
-  { key: "add_remarks", label: "Add loan remarks" },
+  { key: "add_remarks", label: "Add loan actions taken" },
   { key: "add_payments", label: "Add loan payments" }
 ];
 

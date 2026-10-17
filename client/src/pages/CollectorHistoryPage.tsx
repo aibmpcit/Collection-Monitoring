@@ -47,7 +47,7 @@ function shortDateTime(value: string) {
   return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-const ACTIVITY_TABS = [["all", "All"], ["payments", "Payments"], ["remarks", "Remarks"]] as const;
+const ACTIVITY_TABS = [["all", "All"], ["payments", "Payments"], ["remarks", "Actions Taken"]] as const;
 
 function localDateValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -137,8 +137,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const rows = report.items.map(item => ({
         Date: item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""),
         Member: item.member_name, "Loan Account": item.loan_account_no ?? "", "Loan Type": item.loan_type ?? "",
-        Type: item.kind === "payment" ? "Payment" : "Remark", "Collected By": item.collector_name ?? "Unattributed",
-        Amount: item.kind === "payment" ? Number(item.amount) : "", "Remarks / Receipt": item.kind === "payment" ? (item.or_no ?? "") : (item.remark ?? getRemarkCategoryLabel(item.category)), Branch: item.branch_name ?? ""
+        Type: item.kind === "payment" ? "Payment" : "Action Taken", "Collected By": item.collector_name ?? "Unattributed",
+        Amount: item.kind === "payment" ? Number(item.amount) : "", "Actions Taken / Receipt": item.kind === "payment" ? (item.or_no ?? "") : (item.remark ?? getRemarkCategoryLabel(item.category)), Branch: item.branch_name ?? ""
       }));
       const sheet = XLSX.utils.json_to_sheet(rows);
       const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, "Collection History");
@@ -170,7 +170,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const columns = [
         { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
         { label: "Member", width: 38 }, { label: "Loan Account", width: 30 }, { label: "Type", width: 22 },
-        { label: "Remarks / Receipt", width: 55 }, { label: "Amount", width: 30 }
+        { label: "Actions Taken / Receipt", width: 55 }, { label: "Amount", width: 30 }
       ];
       const fit = (value: unknown, width: number) => {
         const text = String(value ?? "");
@@ -204,7 +204,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         if (index % 2 === 0) { pdf.setFillColor(245, 248, 252); pdf.rect(10, y - 5, 255, 7, "F"); }
         const values = [
           item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""), item.collector_name ?? "Unattributed",
-          item.branch_name ?? "", item.member_name, item.loan_account_no ?? "", item.kind === "payment" ? "Payment" : "Remark",
+          item.branch_name ?? "", item.member_name, item.loan_account_no ?? "", item.kind === "payment" ? "Payment" : "Action Taken",
           item.kind === "payment" ? `Receipt: ${item.or_no ?? "Not provided"}` : (item.remark ?? getRemarkCategoryLabel(item.category)),
           item.kind === "payment" ? `PHP ${Number(item.amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""
         ];
@@ -280,7 +280,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         </label>
         <label className="grid min-w-0 gap-1 text-sm">Activity
           <select className="field" value={activeTab} onChange={event => change("type", event.target.value === "all" ? "" : event.target.value)}>
-            <option value="all">All activity</option><option value="payments">Payments</option><option value="remarks">Remarks</option>
+            <option value="all">All activity</option><option value="payments">Payments</option><option value="remarks">Actions Taken</option>
           </select>
         </label>
       </div>}
@@ -294,7 +294,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     {loading ? <p className="panel p-4" role="status">Loading collection history...</p> : data && <>
       <section className="panel p-4">
         {activeTab === "remarks" && <div className="mb-4 grid grid-cols-3 gap-3">
-          <div className="surface-soft p-3"><p className="text-xs text-slate-600">Remarks</p><p className="mt-1 text-xl font-bold">{data.total}</p></div>
+          <div className="surface-soft p-3"><p className="text-xs text-slate-600">Actions Taken</p><p className="mt-1 text-xl font-bold">{data.total}</p></div>
           <div className="surface-soft p-3"><p className="text-xs text-slate-600">Members</p><p className="mt-1 text-xl font-bold">{data.summary.members}</p></div>
           <div className="surface-soft p-3"><p className="text-xs text-slate-600">Attachments</p><p className="mt-1 text-xl font-bold">{Number(data.summary.attachments ?? 0)}</p></div>
         </div>}
@@ -331,7 +331,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           {data.items.length === 0 && <li className="py-8 text-center text-slate-500">No collection activity found for these filters.</li>}
         </ul>
         <div className="hidden overflow-x-auto rounded-xl border border-slate-200 lg:block">
-          <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>Remarks / receipt</span><span>Date</span></div>
+          <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>Actions Taken / receipt</span><span>Date</span></div>
           <div className="grid min-w-[1200px] gap-0">
           {data.items.map(item => <article key={`${item.kind}-${item.id}`} tabIndex={0} role="button"
             onClick={() => setSelectedActivity(item)}
@@ -341,7 +341,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
             <span className="text-brand-700">{item.loan_account_no || "-"}</span>
             <span>{item.loan_type || "-"}</span>
             <span>{item.collector_name || "Unattributed"}</span>
-            <span>{item.kind === "payment" ? "Payment" : "Remark"}</span>
+            <span>{item.kind === "payment" ? "Payment" : "Action Taken"}</span>
             <span>{item.kind === "payment" ? money(Number(item.amount)) : "-"}</span>
             <span className="flex min-w-0 items-center gap-1">
               {item.attachment_name && <Paperclip size={12} className="shrink-0 text-slate-400" aria-label="Has attachment" />}

@@ -67,7 +67,7 @@ export const LOAN_IMPORT_TEMPLATE: [string, string, string][] = [
   ["PAR Age", "Days past due as a whole number; above 0 marks the loan overdue", "15"],
   // Remark history columns; the server decides whether they are imported (see REMARK_IMPORT_ONCE).
   ...IMPORT_REMARK_CATEGORIES.map(({ label }): [string, string, string] => [
-    label, "Optional: what was done or said at this stage. Remarks already in the system are skipped.", ""
+    label, "Optional: what was done or said at this stage. Actions taken already in the system are skipped.", ""
   ])
 ];
 

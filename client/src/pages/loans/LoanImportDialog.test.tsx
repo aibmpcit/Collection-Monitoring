@@ -31,7 +31,7 @@ const branches = [{ id: 2, code: "BR-2", name: "North", address: "" }];
 beforeEach(() => vi.mocked(apiRequest).mockReset());
 
 describe("splitLoanImportRows", () => {
-  it("reads remark columns and explains dropped rows with their spreadsheet row", () => {
+  it("reads action taken columns and explains dropped rows with their spreadsheet row", () => {
     const { rows, dropped } = splitLoanImportRows([
       { "Member Code": "C1", "Loan Product": "Salary", "Release Date": "2026-01-01", "Maturity": "2026-12-01", "Personal Visit": "Visited", "Atty’s Final Demand": "Served", __row: 2 },
       { "Member Code": "", "Loan Acct. No.": "LN-9", "Loan Product": "", "Release Date": "", "Maturity": "2026-12-01", __row: 5 }
@@ -79,13 +79,13 @@ describe("LoanImportDialog", () => {
     expect(await screen.findByText(/1 loan\(s\) will move to Settled Accounts/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Confirm Import" }));
-    await waitFor(() => expect(onImported).toHaveBeenCalledWith("Import complete: 1 new, 1 updated, 1 moved to Settled Accounts, 2 remarks imported."));
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith("Import complete: 1 new, 1 updated, 1 moved to Settled Accounts, 2 actions taken imported."));
     expect((vi.mocked(apiRequest).mock.calls[3][2] as Record<string, unknown>)).toMatchObject({ preview: false, closeMissing: true });
     expect(screen.getByText(/1 loan\(s\) moved to Settled Accounts/)).toBeInTheDocument();
   });
 
   it("warns before closing an unusually large share of the branch", async () => {
-    vi.mocked(apiRequest).mockResolvedValueOnce(result({ closeMissing: true, closed: 6, notInFile: 6, openBefore: 10, remarksImported: 0, remarksNote: "Remarks for this branch were already imported on 2026-10-01 by admin; remark columns were ignored." }));
+    vi.mocked(apiRequest).mockResolvedValueOnce(result({ closeMissing: true, closed: 6, notInFile: 6, openBefore: 10, remarksImported: 0, remarksNote: "Actions taken for this branch were already imported on 2026-10-01 by admin; action taken columns were ignored." }));
     const user = userEvent.setup();
     render(<LoanImportDialog isSuperAdmin={false} branches={[]} importBranchId={0} setImportBranchId={vi.fn()} branchError="" onClose={vi.fn()} onImported={vi.fn()} />);
     await user.upload(screen.getByLabelText("Loan spreadsheet"), csvFile());

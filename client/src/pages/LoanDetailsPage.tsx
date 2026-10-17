@@ -127,7 +127,7 @@ export function LoanDetailsPage() {
       : origin === "payments"
         ? { to: "/loans?tab=payments", label: "Back to Payments" }
         : origin === "remarks"
-        ? { to: "/loans?tab=remarks", label: "Back to Remarks" }
+        ? { to: "/loans?tab=remarks", label: "Back to Actions Taken" }
         : { to: "/loans", label: "Back to Collections" };
 
   async function loadRemarks(targetLoanId: number) {
@@ -191,19 +191,6 @@ export function LoanDetailsPage() {
   }, [numericLoanId]);
 
   useEffect(() => {
-    const requestedRemarkId = Number(searchParams.get("remarkId"));
-    if (loading || loan?.id !== numericLoanId || !Number.isInteger(requestedRemarkId) || requestedRemarkId <= 0) return;
-    const requestedRemark = remarks.find(remark => remark.id === requestedRemarkId);
-    if (requestedRemark) {
-      setHistoryTab("remarks");
-      setSummaryRemark(requestedRemark);
-    }
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete("remarkId");
-    setSearchParams(nextParams, { replace: true });
-  }, [loading, loan, numericLoanId, remarks, searchParams, setSearchParams]);
-
-  useEffect(() => {
     const requestedId = Number(searchParams.get("paymentId"));
     if (loading || loan?.id !== numericLoanId || !Number.isInteger(requestedId) || requestedId <= 0) return;
     const payment = payments.find(item => item.id === requestedId);
@@ -222,7 +209,7 @@ export function LoanDetailsPage() {
 
     const remark = remarkInput.trim();
     if (!remark) {
-      setRemarkError("Enter a remark.");
+      setRemarkError("Enter an action taken.");
       return;
     }
 
@@ -236,15 +223,15 @@ export function LoanDetailsPage() {
       setEditingRemarkId(null);
       setEditingHasEvidence(false);
       setRemarkModalOpen(false);
-      setMessage(editingRemarkId ? "Remark updated." : "Remark added.");
+      setMessage(editingRemarkId ? "Action taken updated." : "Action taken added.");
       try {
         await loadRemarks(loan.id);
         setRemarkPage(1);
       } catch {
-        setError("Remark was added, but the remarks list could not be refreshed. Reload the page to see it.");
+        setError("Action taken was added, but the actions taken list could not be refreshed. Reload the page to see it.");
       }
     } catch (e) {
-      setRemarkError(e instanceof Error ? e.message : "Unable to add remark.");
+      setRemarkError(e instanceof Error ? e.message : "Unable to add action taken.");
     } finally {
       setRemarksSubmitting(false);
     }
@@ -260,11 +247,11 @@ export function LoanDetailsPage() {
       setEditingHasEvidence(false);
       setConfirmingRemarkDelete(false);
       setRemarkModalOpen(false);
-      setMessage("Remark deleted.");
+      setMessage("Action taken deleted.");
       await loadRemarks(loan.id)
-        .catch(() => setError("Remark was deleted, but the list could not be refreshed. Reload the page."));
+        .catch(() => setError("Action taken was deleted, but the list could not be refreshed. Reload the page."));
     } catch (e) {
-      setRemarkError(e instanceof Error ? e.message : "Unable to delete remark.");
+      setRemarkError(e instanceof Error ? e.message : "Unable to delete action taken.");
     } finally {
       setRemarksSubmitting(false);
     }
@@ -453,7 +440,7 @@ export function LoanDetailsPage() {
           className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
           onCancel={event => { event.preventDefault(); if (!remarksSubmitting) { setRemarkModalOpen(false); setEditingRemarkId(null); } }}>
           <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Remark" : "Add Remark"}</h2>
+            <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Action Taken" : "Add Action Taken"}</h2>
             <button type="button" className="btn-muted" disabled={remarksSubmitting} onClick={() => { setRemarkModalOpen(false); setEditingRemarkId(null); }}>Close</button>
           </div>
               <form className="grid gap-3" onSubmit={handleAddRemark}>
@@ -479,23 +466,23 @@ export function LoanDetailsPage() {
                     rows={4}
                     value={remarkInput}
                     onChange={(event) => setRemarkInput(event.target.value)}
-                    placeholder="Add a loan remark..."
+                    placeholder="Describe the action taken..."
                     required
                   />
                 </label>
                 <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} hasExisting={Boolean(editingRemarkId) && editingHasEvidence} disabled={remarksSubmitting} />
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
                   {editingRemarkId && (confirmingRemarkDelete ? (
-                    <div className="flex flex-wrap items-center gap-2 sm:mr-auto" role="group" aria-label="Confirm remark deletion">
-                      <span className="text-sm text-red-700">Delete this remark?</span>
+                    <div className="flex flex-wrap items-center gap-2 sm:mr-auto" role="group" aria-label="Confirm action taken deletion">
+                      <span className="text-sm text-red-700">Delete this action taken?</span>
                       <button type="button" className="btn-danger h-9 px-3" disabled={remarksSubmitting} onClick={() => void handleDeleteRemark()}>Yes, delete</button>
                       <button type="button" className="btn-muted h-9 px-3" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(false)}>Keep</button>
                     </div>
                   ) : (
-                    <button type="button" className="btn-muted w-full text-red-700 sm:mr-auto sm:w-auto" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(true)}>Delete Remark</button>
+                    <button type="button" className="btn-muted w-full text-red-700 sm:mr-auto sm:w-auto" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(true)}>Delete Action Taken</button>
                   ))}
                   <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
-                    {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Save Remark"}
+                    {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Action Taken" : "Save Action Taken"}
                   </button>
                 </div>
               </form>
@@ -696,7 +683,7 @@ export function LoanDetailsPage() {
               <div role="tabpanel">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-slate-900">Loan Remarks</h2>
+                  <h2 className="text-lg font-semibold text-slate-900">Loan Actions Taken</h2>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   {hasPermission(user, "add_remarks") && <button type="button" className="btn-primary" onClick={() => {
@@ -707,15 +694,15 @@ export function LoanDetailsPage() {
                     setRemarkCategory(DEFAULT_REMARK_CATEGORY);
                     setRemarkProof(null);
                     setRemarkModalOpen(true);
-                  }}>Add Remark</button>}
+                  }}>Add Action Taken</button>}
                 </div>
               </div>
 
-              {remarksLoading && <p className="mt-3 text-sm text-slate-600">Loading remarks...</p>}
+              {remarksLoading && <p className="mt-3 text-sm text-slate-600">Loading actions taken...</p>}
 
               <div className="surface-soft mt-3 max-h-[28rem] overflow-y-auto">
                 {remarks.length === 0 && !remarksLoading ? (
-                  <p className="p-3 text-sm text-slate-600">No remarks yet.</p>
+                  <p className="p-3 text-sm text-slate-600">No actions taken yet.</p>
                 ) : (
                   <ul className="divide-y divide-black/10">
                     {remarks.slice((currentRemarkPage - 1) * HISTORY_PAGE_SIZE, currentRemarkPage * HISTORY_PAGE_SIZE).map((item) => (
@@ -747,7 +734,7 @@ export function LoanDetailsPage() {
                   </ul>
                 )}
               </div>
-              <HistoryPagination label="Remarks" page={currentRemarkPage} pages={remarkPages} onChange={setRemarkPage} disabled={remarksLoading} />
+              <HistoryPagination label="Actions Taken" page={currentRemarkPage} pages={remarkPages} onChange={setRemarkPage} disabled={remarksLoading} />
               </div>
             )}
           </section>

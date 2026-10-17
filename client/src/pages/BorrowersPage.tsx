@@ -358,7 +358,7 @@ export function BorrowersPage() {
       const data = await apiRequest<MemberRemarkRow[]>(`/borrowers/${borrowerId}/remarks`);
       setMemberRemarks(data);
     } catch (e) {
-      setRemarksError(e instanceof Error ? e.message : "Unable to load member remarks");
+      setRemarksError(e instanceof Error ? e.message : "Unable to load member actions taken");
     } finally {
       setRemarksLoading(false);
     }
@@ -408,7 +408,7 @@ export function BorrowersPage() {
       setRemarkProof(null);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
-      setRemarksError(e instanceof Error ? e.message : "Unable to add member remark");
+      setRemarksError(e instanceof Error ? e.message : "Unable to add member action taken");
     } finally {
       setRemarksSubmitting(false);
     }
@@ -428,7 +428,7 @@ export function BorrowersPage() {
       setConfirmDeleteRemarkId(null);
       await loadMemberRemarks(remarksBorrower.id);
     } catch (e) {
-      setRemarksError(e instanceof Error ? e.message : "Unable to delete member remark");
+      setRemarksError(e instanceof Error ? e.message : "Unable to delete member action taken");
     } finally {
       setRemarksSubmitting(false);
     }
@@ -790,7 +790,7 @@ export function BorrowersPage() {
           <div className="modal-card max-w-3xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-lg font-semibold">Member Remarks</h3>
+                <h3 className="text-lg font-semibold">Member Actions Taken</h3>
                 <p className="text-xs text-black/70">
                   {remarksBorrower.cifKey} | {remarksBorrower.memberName}
                 </p>
@@ -820,24 +820,24 @@ export function BorrowersPage() {
                 className="field"
                 value={remarkInput}
                 onChange={(event) => setRemarkInput(event.target.value)}
-                placeholder="Add a member remark..."
+                placeholder="Describe the action taken..."
                 rows={3}
                 required
               />
               <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} hasExisting={Boolean(editingRemarkId) && editingHasEvidence} disabled={remarksSubmitting} />
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={remarksSubmitting}>
-                  {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Remark" : "Add Remark"}
+                  {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Action Taken" : "Add Action Taken"}
                 </button>
               </div>
             </form>
 
             {remarksError && <p className="mb-2 text-sm text-red-700">{remarksError}</p>}
-            {remarksLoading && <p className="text-sm text-black/70">Loading remarks...</p>}
+            {remarksLoading && <p className="text-sm text-black/70">Loading actions taken...</p>}
 
             <div className="surface-soft max-h-[50vh] overflow-y-auto">
               {memberRemarks.length === 0 && !remarksLoading ? (
-                <p className="p-3 text-sm text-black/60">No remarks yet.</p>
+                <p className="p-3 text-sm text-black/60">No actions taken yet.</p>
               ) : (
                 <ul className="divide-y divide-black/10">
                   {memberRemarks.map((item) => (
@@ -864,7 +864,7 @@ export function BorrowersPage() {
                           setRemarkProof(null);
                         }}>Edit</button>
                         {confirmDeleteRemarkId === item.id ? <>
-                          <span className="text-xs text-red-700">Delete this remark?</span>
+                          <span className="text-xs text-red-700">Delete this action taken?</span>
                           <button type="button" className="btn-danger h-8 px-3 text-xs" disabled={remarksSubmitting} onClick={() => void handleDeleteMemberRemark(item.id)}>Yes, delete</button>
                           <button type="button" className="btn-muted h-8 px-3 text-xs" onClick={() => setConfirmDeleteRemarkId(null)}>Keep</button>
                         </> : <button type="button" className="btn-muted h-8 px-3 text-xs text-red-700" onClick={() => setConfirmDeleteRemarkId(item.id)}>Delete</button>}

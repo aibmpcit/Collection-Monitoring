@@ -526,7 +526,7 @@ router.post("/:borrowerId/remarks", authenticate, authorizePermission("add_remar
       return res.status(400).json({ message: "Invalid borrower id" });
     }
     if (!remark) {
-      return res.status(400).json({ message: "Remark is required" });
+      return res.status(400).json({ message: "Action taken is required" });
     }
 
     const branchId = await borrowerBranchId(borrowerId);
@@ -566,7 +566,7 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     const borrowerId = Number(req.params.borrowerId);
     const remarkId = Number(req.params.remarkId);
     if (!Number.isInteger(borrowerId) || borrowerId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
-      return res.status(400).json({ message: "Invalid member or remark id" });
+      return res.status(400).json({ message: "Invalid member or action taken id" });
     }
     const existing = await query<{ created_by: number | null; branch_id: number | null }>(
       `SELECT br.created_by, b.branch_id
@@ -577,15 +577,15 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
       [remarkId, borrowerId]
     );
     const existingRemark = existing.rows[0];
-    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
     assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
     if (!canManageRemark(user, existingRemark.created_by)) {
-      return res.status(403).json({ message: "You can only edit your own remarks" });
+      return res.status(403).json({ message: "You can only edit your own actions taken" });
     }
 
     const remark = String(req.body?.remark ?? "").trim();
-    if (!remark) return res.status(400).json({ message: "Remark is required" });
-    if (remark.length > 2000) return res.status(400).json({ message: "Remark is too long" });
+    if (!remark) return res.status(400).json({ message: "Action taken is required" });
+    if (remark.length > 2000) return res.status(400).json({ message: "Action taken is too long" });
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
     const photo = parsePhoto(req.body?.photo);
@@ -606,7 +606,7 @@ router.delete("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_
     const borrowerId = Number(req.params.borrowerId);
     const remarkId = Number(req.params.remarkId);
     if (!Number.isInteger(borrowerId) || borrowerId <= 0 || !Number.isInteger(remarkId) || remarkId <= 0) {
-      return res.status(400).json({ message: "Invalid member or remark id" });
+      return res.status(400).json({ message: "Invalid member or action taken id" });
     }
     const existing = await query<{ created_by: number | null; branch_id: number | null }>(
       `SELECT br.created_by, b.branch_id
@@ -617,17 +617,17 @@ router.delete("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_
       [remarkId, borrowerId]
     );
     const existingRemark = existing.rows[0];
-    if (!existingRemark) return res.status(404).json({ message: "Remark not found" });
+    if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
     assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
     if (!canManageRemark(user, existingRemark.created_by)) {
-      return res.status(403).json({ message: "You can only delete your own remarks" });
+      return res.status(403).json({ message: "You can only delete your own actions taken" });
     }
     await withTransaction(async client => {
       await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'member' AND remark_id = $1", [remarkId]);
       await deleteRemarkPhoto(client, "member", remarkId);
       await client.query("DELETE FROM borrower_remarks WHERE id = $1", [remarkId]);
     });
-    return res.json({ message: "Remark deleted" });
+    return res.json({ message: "Action taken deleted" });
   } catch (error) {
     return next(error);
   }
@@ -644,7 +644,7 @@ router.get("/:borrowerId/remarks/:remarkId/attachment", authenticate, async (req
        WHERE br.id = $1 AND br.borrower_id = $2 LIMIT 1`, [remarkId, borrowerId]
     );
     const remark = existing.rows[0];
-    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    if (!remark) return res.status(404).json({ message: "Action taken not found" });
     assertBranchAccess(user, Number(remark.branch_id ?? 0));
     if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
     const attachment = await getRemarkAttachment("member", remarkId);
@@ -666,7 +666,7 @@ router.get("/:borrowerId/remarks/:remarkId/photo", authenticate, async (req: Aut
        WHERE br.id = $1 AND br.borrower_id = $2 LIMIT 1`, [remarkId, ownerId]
     );
     const remark = existing.rows[0];
-    if (!remark) return res.status(404).json({ message: "Remark not found" });
+    if (!remark) return res.status(404).json({ message: "Action taken not found" });
     assertBranchAccess(user, Number(remark.branch_id ?? 0));
     if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
     const photo = await getRemarkPhoto("member", remarkId);

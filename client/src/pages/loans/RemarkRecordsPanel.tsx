@@ -52,7 +52,7 @@ export function RemarkRecordsPanel({
               className="field pl-9"
               value={remarkQuery}
               onChange={(event) => setRemarkQuery(event.target.value)}
-              placeholder="Search remarks"
+              placeholder="Search actions taken"
             />
           </div>
 
@@ -79,7 +79,7 @@ export function RemarkRecordsPanel({
                   }
                 }}
               >
-                <div className="flex items-start justify-between gap-3">{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}
+                <div className="flex items-start justify-between gap-3">{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select actions taken for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}
                   <div className="min-w-0">
                     <p className="break-words text-sm font-semibold text-slate-900">{row.member_name}</p>
                     <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
@@ -93,7 +93,7 @@ export function RemarkRecordsPanel({
                       <button
                         type="button"
                         className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-                        aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
+                        aria-label={`View ${getRemarkCategoryLabel(remark.category)} action taken for ${row.loan_account_no}`}
                         onClick={event => {
                           event.stopPropagation();
                           openLoanRemarks(remark);
@@ -110,18 +110,18 @@ export function RemarkRecordsPanel({
                 </div>
               </article>
             ))}
-            {remarkTotal === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans with remarks found.</p>}
+            {remarkTotal === 0 && <p className="rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-600">No loans with actions taken found.</p>}
           </div>
 
           <div className="table-shell loan-records-scroll mt-3 hidden w-full min-w-0 max-w-full overflow-x-auto pb-2 lg:block">
             <table className="table-clean w-full min-w-[900px] text-xs">
               <thead className="sticky top-0 z-10 bg-c1">
                 <tr>
-                  {canDeleteRemarks && <th><input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label="Select all remarks on current page" disabled={!paginatedRemarkRecords.length} checked={paginatedRemarkRecords.length > 0 && paginatedRemarkRecords.every(row => selectedRemarkLoans.includes(Number(row.loan_id)))} onChange={event => { const ids = paginatedRemarkRecords.map(row => Number(row.loan_id)); setSelectedRemarkLoans(current => event.target.checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }} /></th>}
+                  {canDeleteRemarks && <th><input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label="Select all actions taken on current page" disabled={!paginatedRemarkRecords.length} checked={paginatedRemarkRecords.length > 0 && paginatedRemarkRecords.every(row => selectedRemarkLoans.includes(Number(row.loan_id)))} onChange={event => { const ids = paginatedRemarkRecords.map(row => Number(row.loan_id)); setSelectedRemarkLoans(current => event.target.checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }} /></th>}
                   <th>Member Name</th>
                   <th>Loan Account No</th>
                   <th>Loan Type</th>
-                  <th>Remarks</th>
+                  <th>Actions Taken</th>
                   <th>Added By</th>
                 </tr>
               </thead>
@@ -140,7 +140,7 @@ export function RemarkRecordsPanel({
                       }
                     }}
                   >
-                    {canDeleteRemarks && <td>{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select remarks for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}</td>}
+                    {canDeleteRemarks && <td>{canDeleteRemarks && <input type="checkbox" className="h-4 w-4 accent-brand-600" aria-label={`Select actions taken for ${row.loan_account_no}`} checked={selectedRemarkLoans.includes(Number(row.loan_id))} onClick={event => event.stopPropagation()} onChange={event => toggleRemarkLoan(Number(row.loan_id), event.target.checked)} />}</td>}
                     <td>{row.member_name}</td>
                     <td>{row.loan_account_no || "-"}</td>
                     <td>{row.loan_type || "-"}</td>
@@ -151,7 +151,7 @@ export function RemarkRecordsPanel({
                       <button
                         type="button"
                         className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 transition hover:border-brand-600 hover:text-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-                        aria-label={`View ${getRemarkCategoryLabel(remark.category)} remark for ${row.loan_account_no}`}
+                        aria-label={`View ${getRemarkCategoryLabel(remark.category)} action taken for ${row.loan_account_no}`}
                         onClick={event => {
                           event.stopPropagation();
                           openLoanRemarks(remark);
@@ -168,7 +168,7 @@ export function RemarkRecordsPanel({
                 ))}
               </tbody>
             </table>
-            {remarkTotal === 0 && <p className="p-3 text-sm text-slate-600">No loans with remarks found.</p>}
+            {remarkTotal === 0 && <p className="p-3 text-sm text-slate-600">No loans with actions taken found.</p>}
           </div>
           <PaginationControls
             currentPage={remarkRecordsPage}

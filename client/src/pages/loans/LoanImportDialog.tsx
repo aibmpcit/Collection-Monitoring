@@ -119,7 +119,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
       const parts = [`${saved.inserted} new`, `${saved.updated} updated`];
       if (saved.reopened) parts.push(`${saved.reopened} reopened`);
       if (saved.closeMissing) parts.push(`${saved.closed} moved to Settled Accounts`);
-      if (saved.remarksImported) parts.push(`${saved.remarksImported} remarks imported`);
+      if (saved.remarksImported) parts.push(`${saved.remarksImported} actions taken imported`);
       onImported(`Import complete: ${parts.join(", ")}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to import this file.");
@@ -188,7 +188,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={closeMissing} disabled={pending}
                 onChange={event => toggleCloseMissing(event.target.checked)} />
-              <span>Move loans that are not in this file to Settled Accounts<span className="block text-xs text-slate-500">On for the branch's complete updated list. Untick only for a partial file. Settled loans keep their payments and remarks, and come back if they appear in a later upload.</span></span>
+              <span>Move loans that are not in this file to Settled Accounts<span className="block text-xs text-slate-500">On for the branch's complete updated list. Untick only for a partial file. Settled loans keep their payments and actions taken, and come back if they appear in a later upload.</span></span>
             </label>
           )}
 
@@ -247,7 +247,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
               <Download size={15} /><span>Download Template</span>
             </button>
           </div>
-          <p className="text-xs text-black/60">Columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age. plus any remark columns (Personal Visit, Demand Letter, …).</p>
+          <p className="text-xs text-black/60">Columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age. plus any action taken columns (Personal Visit, Demand Letter, …).</p>
         </div>
       </div>
     </section>,

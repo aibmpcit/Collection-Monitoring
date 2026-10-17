@@ -43,14 +43,14 @@ describe("collector history on a phone", () => {
     expect(screen.getByText("Total collected")).toBeInTheDocument();
   });
 
-  it("switches between all activity, payments and remarks", async () => {
+  it("switches between all activity, payments and actions taken", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CollectorHistoryPage /></MemoryRouter>);
     await screen.findByRole("list", { name: "Collection activity" });
     expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
-    await user.click(screen.getByRole("tab", { name: "Remarks" }));
+    await user.click(screen.getByRole("tab", { name: "Actions Taken" }));
     await waitFor(() => expect(requests().some(path => path.includes("type=remarks"))).toBe(true));
-    expect(screen.getByRole("tab", { name: "Remarks" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Actions Taken" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens the full detail with links to the loan and the attachment", async () => {

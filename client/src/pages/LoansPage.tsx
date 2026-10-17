@@ -23,6 +23,7 @@ import { PaymentRecordsPanel } from "./loans/PaymentRecordsPanel";
 import { RemarkRecordsPanel } from "./loans/RemarkRecordsPanel";
 import { SettledAccountsPanel } from "./loans/SettledAccountsPanel";
 import type { LoanListPage, LoanQuickRef, LoanRow, PaymentRecordRow, RemarkGroupRow, RemarkRecordRow } from "./loans/types";
+import { weeklyUploadWarning } from "./loans/uploadAge";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -169,14 +170,14 @@ export function LoansPage() {
       setMessage(`Deleted ${result.deleted} remark(s).`);
       await loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to delete remarks");
+      setError(e instanceof Error ? e.message : "Unable to delete actions taken");
     } finally {
       setRemarkDeletePending(false);
     }
   }
 
   function openLoanRemarks(row: RemarkRecordRow) {
-    navigate(`/loan-details/${row.loan_id}?tab=remarks&from=remarks&remarkId=${row.id}`);
+    navigate(`/loan-details/${row.loan_id}?tab=remarks&from=remarks`);
   }
 
   const totalLoanPages = Math.max(1, Math.ceil(loanTotal / rowsPerPage));
@@ -416,7 +417,7 @@ export function LoansPage() {
       const result = await apiRequest<{ ids: number[] }>(`/loans/remarked?${params}`);
       setSelectedRemarkLoans(result.ids);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to select remarks");
+      setError(e instanceof Error ? e.message : "Unable to select actions taken");
     }
   }
 
@@ -426,7 +427,7 @@ export function LoansPage() {
       const result = await apiRequest<{ ids: number[] }>("/loans/remarked/remark-ids", "POST", { loanIds: selectedRemarkLoans });
       setRemarkDeleteIds(result.ids);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to prepare remark deletion");
+      setError(e instanceof Error ? e.message : "Unable to prepare action taken deletion");
     }
   }
 
@@ -595,7 +596,7 @@ export function LoansPage() {
       const data = await apiRequest<LoanRemark[]>(`/loans/${loanId}/remarks`);
       setRemarks(data);
     } catch (e) {
-      setRemarkError(e instanceof Error ? e.message : "Unable to load remarks");
+      setRemarkError(e instanceof Error ? e.message : "Unable to load actions taken");
     } finally {
       setRemarksLoading(false);
     }
@@ -635,7 +636,7 @@ export function LoansPage() {
       setRemarkProof(null);
       await loadRemarks(remarkLoan.id);
     } catch (e) {
-      setRemarkError(e instanceof Error ? e.message : "Unable to add remark");
+      setRemarkError(e instanceof Error ? e.message : "Unable to add action taken");
     }
   }
 
@@ -652,7 +653,7 @@ export function LoansPage() {
     try {
       await apiRequest(`/loans/${loan.id}`, "DELETE");
       setSelectedLoanIds((current) => current.filter((id) => id !== loan.id));
-      setMessage("Loan removed from Collections. Its payments and remarks remain in history.");
+      setMessage("Loan removed from Collections. Its payments and actions taken remain in history.");
       if (editingId === loan.id) {
         closeFormModal();
       }
@@ -1035,7 +1036,7 @@ export function LoansPage() {
             <div className="modal-card max-w-2xl">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-lg font-semibold">Loan Remarks</h3>
+                  <h3 className="text-lg font-semibold">Loan Actions Taken</h3>
                   <p className="text-xs text-black/70">
                     {remarkLoan.loanAccountNo} | {remarkLoan.memberName}
                   </p>
@@ -1065,7 +1066,7 @@ export function LoansPage() {
                   className="field"
                   value={remarkInput}
                   onChange={(event) => setRemarkInput(event.target.value)}
-                  placeholder="Add a new remark..."
+                  placeholder="Describe the action taken..."
                   rows={3}
                   required
                 />
@@ -1078,11 +1079,11 @@ export function LoansPage() {
               </form>
 
               {remarkError && <p className="mb-2 text-sm text-red-700">{remarkError}</p>}
-              {remarksLoading && <p className="text-sm text-black/70">Loading remarks...</p>}
+              {remarksLoading && <p className="text-sm text-black/70">Loading actions taken...</p>}
 
               <div className="surface-soft max-h-[45vh] overflow-y-auto">
                 {remarks.length === 0 && !remarksLoading ? (
-                  <p className="p-3 text-sm text-black/60">No remarks yet.</p>
+                  <p className="p-3 text-sm text-black/60">No actions taken yet.</p>
                 ) : (
                   <ul className="divide-y divide-black/10">
                     {remarks.map((item) => (
@@ -1209,7 +1210,7 @@ export function LoansPage() {
       title="Delete this loan record?"
       description={
         loanPendingDelete
-          ? `Loan account ${loanPendingDelete.loanAccountNo} for ${loanPendingDelete.memberName} will be removed from Collections. Its payments and remarks will remain in history.`
+          ? `Loan account ${loanPendingDelete.loanAccountNo} for ${loanPendingDelete.memberName} will be removed from Collections. Its payments and actions taken will remain in history.`
           : ""
       }
       confirmLabel={isDeletePending ? "Deleting..." : "Delete Loan"}
@@ -1231,7 +1232,7 @@ export function LoansPage() {
       title="Delete selected loan records?"
       description={
         loanBulkDeleteIds.length > 0
-          ? `${loanBulkDeleteIds.length} selected loan record(s) will be removed from Collections. Their payments and remarks will remain in history.`
+          ? `${loanBulkDeleteIds.length} selected loan record(s) will be removed from Collections. Their payments and actions taken will remain in history.`
           : ""
       }
       confirmLabel={isBulkLoanDeletePending ? "Deleting..." : "Delete Selected Loans"}
@@ -1353,9 +1354,9 @@ export function LoansPage() {
       <ConfirmDialog
         open={remarkDeleteIds.length > 0}
         tone="danger"
-        title="Delete selected loans' remarks?"
-        description={`Delete all ${remarkDeleteIds.length} loaded remark(s) and their attachments for the selected loans, including older remarks not shown in the list? Loan records and payments will remain. This cannot be undone.`}
-        confirmLabel={remarkDeletePending ? "Deleting..." : "Delete Remarks"}
+        title="Delete selected loans' actions taken?"
+        description={`Delete all ${remarkDeleteIds.length} loaded actions taken and their attachments for the selected loans, including older actions taken not shown in the list? Loan records and payments will remain. This cannot be undone.`}
+        confirmLabel={remarkDeletePending ? "Deleting..." : "Delete Actions Taken"}
         cancelLabel="Cancel"
         disabled={remarkDeletePending}
         onCancel={() => { if (!remarkDeletePending) setRemarkDeleteIds([]); }}
@@ -1391,6 +1392,9 @@ export function LoansPage() {
                 {lastImport.branch && branchFilterId <= 0 && user?.role === "super_admin" ? ` (${lastImport.branch})` : ""}
               </p>
             ) : latestImportedAt && <p className="mt-1 text-xs text-slate-500">As of: {formatDate(latestImportedAt)}</p>}
+            {lastImport && weeklyUploadWarning(lastImport.uploadedAt) && (
+              <p role="status" className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{weeklyUploadWarning(lastImport.uploadedAt)}</p>
+            )}
           </div>
           {(canAddLoans || canImportLoans) && (
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1437,7 +1441,7 @@ export function LoansPage() {
           <div className="mb-4 flex gap-2 overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Collection records">
             {([
               ["loans", "Loan Records"],
-              ["remarks", "Remarks"],
+              ["remarks", "Actions Taken"],
               ["payments", "Payments"],
               ["settled", "Settled Accounts"]
             ] as const).map(([tab, label]) => (
@@ -1598,7 +1602,7 @@ export function LoansPage() {
                       <LoanRecordField label="PAR Age" value={loan.parAge} />
                       {isBranchManager ? (
                         <LoanRecordField
-                          label="Remarks"
+                          label="Actions Taken"
                           value={loan.latestRemarks.length
                             ? loan.latestRemarks.map(item => getRemarkCategoryLabel(item.remarkCategory)).join(" | ")
                             : "-"}
@@ -1694,7 +1698,7 @@ export function LoansPage() {
                     <th>Fines</th>
                     <th>Total</th>
                     <th>PAR Age</th>
-                    <th>Remarks</th>
+                    <th>Actions Taken</th>
                   </tr>
                 </thead>
                 <tbody>

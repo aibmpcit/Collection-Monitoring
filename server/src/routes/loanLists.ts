@@ -254,7 +254,7 @@ router.get("/remarked", authenticate, async (req: AuthedRequest, res, next) => {
   try {
     const user = getRequestUser(req);
     const parsed = remarkedFilters.safeParse(req.query);
-    if (!parsed.success) return res.status(400).json({ message: "Invalid remark filters" });
+    if (!parsed.success) return res.status(400).json({ message: "Invalid action taken filters" });
     const filter = parsed.data;
     const params: unknown[] = [];
     const conditions = ["l.status != 'closed'"];

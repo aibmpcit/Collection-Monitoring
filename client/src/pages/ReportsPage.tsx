@@ -183,7 +183,7 @@ export function ReportsPage() {
         { Metric: "Payments", Value: s.payments },
         { Metric: "Members paid", Value: s.membersPaid },
         { Metric: "Loans paid", Value: s.loansPaid },
-        { Metric: "Follow-up remarks", Value: s.remarks },
+        { Metric: "Follow-up actions taken", Value: s.remarks },
         { Metric: "Members followed up", Value: s.membersFollowedUp },
         { Metric: "Active loans (current)", Value: s.activeLoans },
         { Metric: "Active balance (current)", Value: s.activeBalance },
@@ -207,7 +207,7 @@ export function ReportsPage() {
       }))), "Daily Collections");
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.byCategory.map(row => ({
         Category: getRemarkCategoryLabel(row.category), Remarks: row.remarks, Members: row.members
-      }))), "Remarks by Category");
+      }))), "Actions Taken by Category");
       if (isSuperAdmin && userReport) {
         XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rankedUsers.map((row, index) => ({
           Rank: index + 1, Account: row.username, Role: ROLE_LABELS[row.role] ?? row.role, Branch: row.branchName,
@@ -310,7 +310,7 @@ export function ReportsPage() {
         ["Payments", String(s.payments)],
         ["Members paid", String(s.membersPaid)],
         ["Loans paid", String(s.loansPaid)],
-        ["Follow-up remarks", String(s.remarks)],
+        ["Follow-up actions taken", String(s.remarks)],
         ["Members followed up", String(s.membersFollowedUp)],
         ["Active loans (current)", `${s.activeLoans} / ${pdfMoney(s.activeBalance)}`],
         ["Overdue loans (current)", `${s.overdueLoans} / ${pdfMoney(s.overdueBalance)}`]
@@ -324,7 +324,7 @@ export function ReportsPage() {
       }
       table("Collections by account", ["Account", "Role", "Collected", "Payments", "Members"],
         data.byCollector.map(row => [row.username, row.role, pdfMoney(row.amount), String(row.payments), String(row.members)]), [3, 1.5, 2, 1, 1]);
-      table("Remarks by category", ["Category", "Remarks", "Members"],
+      table("Actions taken by category", ["Category", "Actions Taken", "Members"],
         data.byCategory.map(row => [getRemarkCategoryLabel(row.category), String(row.remarks), String(row.members)]), [4, 1, 1]);
       table("Daily collections", ["Date", "Collected", "Payments"],
         data.byDay.map(row => [row.day, pdfMoney(row.amount), String(row.payments)]), [2, 2, 1]);
@@ -364,7 +364,7 @@ export function ReportsPage() {
   const cards: [string, string | number, string?][] = s ? [
     ["Total collected", money(s.collected), `${s.payments} payments`],
     ["Members paid", s.membersPaid, `${s.loansPaid} loans`],
-    ["Follow-up remarks", s.remarks, `${s.membersFollowedUp} members`],
+    ["Follow-up actions taken", s.remarks, `${s.membersFollowedUp} members`],
     ["Overdue loans", s.overdueLoans, `${money(s.overdueBalance)} balance`]
   ] : [];
 
@@ -426,9 +426,9 @@ export function ReportsPage() {
           <ReportTable title="Collections by account" headers={["Account", "Collected", "Payments", "Members"]}
             rows={data.byCollector.map(row => [row.role ? `${row.username} (${row.role})` : row.username, money(row.amount), row.payments, row.members])}
             empty="No collections in this period." />
-          <ReportTable title="Remarks by category" headers={["Category", "Remarks", "Members"]}
+          <ReportTable title="Actions taken by category" headers={["Category", "Actions Taken", "Members"]}
             rows={data.byCategory.map(row => [getRemarkCategoryLabel(row.category), row.remarks, row.members])}
-            empty="No remarks in this period." />
+            empty="No actions taken in this period." />
           <ReportTable title="Daily collections" headers={["Date", "Collected", "Payments"]}
             rows={data.byDay.map(row => [row.day, money(row.amount), row.payments])}
             empty="No collections in this period." />

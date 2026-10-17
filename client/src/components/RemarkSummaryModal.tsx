@@ -43,7 +43,7 @@ export function RemarkSummaryModal({
       <div className="modal-card max-w-3xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Remark Summary</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Action Taken Summary</p>
             <h2 id="remark-summary-title" className="mt-1 text-xl font-semibold">{getRemarkCategoryLabel(category)}</h2>
             <p className="mt-1 text-xs text-slate-500">{displayDate} | By: {createdBy}</p>
           </div>
@@ -51,7 +51,7 @@ export function RemarkSummaryModal({
         </div>
 
         <section className="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Remark</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Action Taken</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-900">{remark}</p>
         </section>
 
