@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PaginationControls } from "../../components/PaginationControls";
@@ -8,6 +9,8 @@ import { LoanRecordField } from "./LoanRecordField";
 import type { PaymentRecordRow } from "./types";
 
 interface PaymentRecordsPanelProps {
+  /** Filter icon shown beside the search box. */
+  filters?: ReactNode;
   paymentQuery: string;
   setPaymentQuery: (value: string) => void;
   paginatedPaymentRecords: PaymentRecordRow[];
@@ -27,6 +30,7 @@ interface PaymentRecordsPanelProps {
 
 /** The Collections page's Payments tab: one server page of payments with search and bulk selection. */
 export function PaymentRecordsPanel({
+  filters,
   paymentQuery,
   setPaymentQuery,
   paginatedPaymentRecords,
@@ -52,14 +56,17 @@ export function PaymentRecordsPanel({
   return (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="relative w-full max-w-sm">
-              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                className="field pl-9"
-                value={paymentQuery}
-                onChange={(event) => setPaymentQuery(event.target.value)}
-                placeholder="Search payments"
-              />
+            <div className="flex w-full max-w-md items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="field pl-9"
+                  value={paymentQuery}
+                  onChange={(event) => setPaymentQuery(event.target.value)}
+                  placeholder="Search payments"
+                />
+              </div>
+              {filters}
             </div>
             {canDeletePayments && (
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">

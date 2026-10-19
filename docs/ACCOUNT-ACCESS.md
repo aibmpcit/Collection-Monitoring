@@ -16,6 +16,8 @@ Collectors retain their existing defaults (adding remarks and payments). Branch 
 
 **Loan status (from payments):** when collectors, LAS or admins record a payment they must choose its type, **Partially Paid** or **Settled**, and add proof: a camera photo or an attached file, together with the phone's location (a payment can't be saved without a location). Remarks offer the same two steps (photo or file, and current location) but both are optional.
 
+**Filters and export (Collection Records):** super admins and branch admins get a **Filters** button and an **Export** button on the Loan Records, Actions Taken, Payments and Settled Accounts tabs. Filters apply on the server; Export saves every record matching the current search and filters as Excel or PDF (up to 20,000 rows), listing the filters at the top of the file. Collectors and LAS see the search box only; the Actions Taken export endpoint refuses their accounts.
+
 Changing a role does not delete the account's payment or remark history. Role editing does not offer super-admin promotion, and super-admin accounts cannot be edited through this form.
 
 API requests reload the account's current role, branch, and permissions from the database. Permission revocations apply immediately to new requests, including existing sessions. The UI refreshes account access on window focus and every 30 seconds.

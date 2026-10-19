@@ -1,3 +1,4 @@
+import { periodCondition, periodSchema } from "../services/listPeriods.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
@@ -32,6 +33,8 @@ const paymentListFilters = z.object({
   branchId: z.coerce.number().int().positive().optional(),
   borrowerId: z.coerce.number().int().positive().optional(),
   sort: z.enum(["member", "recent"]).default("member"),
+  paymentStatus: z.enum(["partial", "settled"]).optional(),
+  period: periodSchema.optional(),
   openLoansOnly: z.literal("true").optional(),
   idsOnly: z.literal("true").optional()
 });
@@ -60,6 +63,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (user.role === "staff") add("c.created_by = ?", user.id);
     if (filter.borrowerId) add("l.borrower_id = ?", filter.borrowerId);
     if (filter.openLoansOnly === "true") conditions.push("l.status != 'closed'");
+    if (filter.paymentStatus) add("c.payment_status = ?", filter.paymentStatus);
+    if (filter.period) conditions.push(periodCondition("c.collected_at", filter.period));
     if (filter.search) {
       add(`LOCATE(?, CONCAT_WS(' ', CONCAT('PAY-', LPAD(c.id, 6, '0')), c.or_no, u.username, l.loan_account_no,
         b.cif_key, b.member_name, c.amount, c.collected_at)) > 0`, filter.search);

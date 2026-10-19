@@ -1,3 +1,4 @@
+import { periodCondition, periodSchema } from "../services/listPeriods.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
@@ -117,6 +118,29 @@ function mapLoanListRow(row: Record<string, unknown>) {
   };
 }
 
+const FOLLOW_UP_CONDITIONS = {
+  none: "NOT EXISTS (SELECT 1 FROM loan_remarks fu WHERE fu.loan_id = l.id)",
+  recent: "EXISTS (SELECT 1 FROM loan_remarks fu WHERE fu.loan_id = l.id AND fu.created_at >= NOW() - INTERVAL 7 DAY)",
+  stale: "NOT EXISTS (SELECT 1 FROM loan_remarks fu WHERE fu.loan_id = l.id AND fu.created_at >= NOW() - INTERVAL 30 DAY)"
+} as const;
+const MATURITY_CONDITIONS = {
+  past: "l.maturity_date < CURDATE()",
+  soon: "l.maturity_date BETWEEN CURDATE() AND CURDATE() + INTERVAL 30 DAY",
+  later: "l.maturity_date > CURDATE() + INTERVAL 30 DAY"
+} as const;
+const TOTAL_DUE_CONDITIONS = {
+  "under-10k": "COALESCE(l.total, 0) < 10000",
+  "10k-50k": "COALESCE(l.total, 0) BETWEEN 10000 AND 50000",
+  "over-50k": "COALESCE(l.total, 0) > 50000"
+} as const;
+// Leading sort keys; member name and account number always break ties.
+const SORT_ORDERS = {
+  name: "",
+  par: "COALESCE(l.par_age, 0) DESC, ",
+  total: "COALESCE(l.total, 0) DESC, ",
+  maturity: "l.maturity_date IS NULL, l.maturity_date ASC, "
+} as const;
+
 const loanListFilters = z.object({
   page: z.coerce.number().int().min(1).max(100000).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
@@ -125,6 +149,13 @@ const loanListFilters = z.object({
   parAge: z.enum(PAR_BUCKET_KEYS).optional(),
   // A field status, or "none" for loans nobody has acted on yet.
   actionStatus: z.enum([...PAYMENT_STATUSES, "none"]).optional(),
+  // Field follow-up: no action taken yet, one in the last 7 days, or none in the last 30 days.
+  followUp: z.enum(["none", "recent", "stale"]).optional(),
+  maturity: z.enum(["past", "soon", "later"]).optional(),
+  totalDue: z.enum(["under-10k", "10k-50k", "over-50k"]).optional(),
+  sort: z.enum(["name", "par", "total", "maturity"]).optional(),
+  // Settled Accounts: settled within the last 7, 30 or 90 days.
+  settledWithin: z.enum(["7d", "30d", "90d"]).optional(),
   branchId: z.coerce.number().int().positive().optional(),
   borrowerId: z.coerce.number().int().positive().optional(),
   includeClosed: z.literal("true").optional(),
@@ -164,15 +195,19 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (filter.parAge) conditions.push(parBucketCondition(filter.parAge));
     if (filter.actionStatus === "none") conditions.push("l.action_status IS NULL");
     else if (filter.actionStatus) add(conditions, "l.action_status = ?", filter.actionStatus);
+    if (filter.followUp) conditions.push(FOLLOW_UP_CONDITIONS[filter.followUp]);
+    if (filter.maturity) conditions.push(MATURITY_CONDITIONS[filter.maturity]);
+    if (filter.totalDue) conditions.push(TOTAL_DUE_CONDITIONS[filter.totalDue]);
+    if (filter.settled === "true" && filter.settledWithin) conditions.push(periodCondition("l.closed_at", filter.settledWithin));
     if (filter.search) {
       add(conditions, `LOCATE(?, CONCAT_WS(' ', b.cif_key, l.loan_account_no, b.member_name, l.loan_type, l.status,
         b.contact_info, b.address, l.notes)) > 0`, filter.search);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const order = filter.settled === "true"
+    const order = filter.settled === "true" && !filter.sort
       ? "ORDER BY l.closed_at DESC, COALESCE(b.member_name, ''), l.id"
       : paged
-        ? "ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id"
+        ? `ORDER BY ${SORT_ORDERS[filter.sort ?? "name"]}COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id`
         : "ORDER BY l.id DESC";
     const matching = `FROM loans l INNER JOIN borrowers b ON b.id = l.borrower_id ${where}`;
 
@@ -245,9 +280,17 @@ const remarkedFilters = z.object({
   search: z.string().trim().max(120).optional(),
   // Category keys whose display label matches the search; labels live in the client.
   categories: z.string().max(2000).optional(),
+  // Filters modal: loans with an action taken of this category / in this period, and loan type.
+  category: z.string().trim().max(64).optional(),
+  period: periodSchema.optional(),
+  loanType: z.string().trim().max(120).optional(),
   branchId: z.coerce.number().int().positive().optional(),
-  idsOnly: z.literal("true").optional()
+  idsOnly: z.literal("true").optional(),
+  // Excel/PDF export: every matching action taken as its own row (admins and managers only).
+  export: z.literal("true").optional()
 });
+
+const MAX_EXPORT_ROWS = 20000;
 
 /** Open loans that have remarks, one row per loan with its two newest remarks, for the Remarks tab. */
 router.get("/remarked", authenticate, async (req: AuthedRequest, res, next) => {
@@ -265,6 +308,12 @@ router.get("/remarked", authenticate, async (req: AuthedRequest, res, next) => {
     };
     if (!isSuperAdmin(user)) add(conditions, "b.branch_id = ?", userBranchId(user));
     if (isSuperAdmin(user) && filter.branchId) add(conditions, "b.branch_id = ?", filter.branchId);
+    if (filter.loanType) add(conditions, "l.loan_type = ?", filter.loanType);
+    if (filter.category) {
+      if (!REMARK_CATEGORIES.has(filter.category)) return res.status(400).json({ message: "Invalid action taken filters" });
+      add(remarkConditions, "r.remark_category = ?", filter.category);
+    }
+    if (filter.period) remarkConditions.push(periodCondition("r.created_at", filter.period));
     if (filter.search) {
       const matches: string[] = [];
       add(matches, "LOCATE(?, CONCAT_WS(' ', b.member_name, l.loan_account_no, l.loan_type, r.remark_text, u.username)) > 0", filter.search);
@@ -276,6 +325,29 @@ router.get("/remarked", authenticate, async (req: AuthedRequest, res, next) => {
       WHERE ${conditions.join(" AND ")} AND EXISTS (
         SELECT 1 FROM loan_remarks r LEFT JOIN users u ON u.id = r.created_by WHERE ${remarkConditions.join(" AND ")})`;
     const order = "ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id";
+
+    if (filter.export === "true") {
+      if (user.role !== "super_admin" && user.role !== "branch_admin") return res.status(403).json({ message: "Only admins and managers can export" });
+      const rows = await query<{ id: number; created_at: string; remark_category: string; remark_text: string; recorded_by: string | null;
+        loan_account_no: string | null; loan_type: string | null; cif_key: string | null; member_name: string | null; branch_name: string | null }>(
+        `SELECT r.id, DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i') AS created_at, r.remark_category, r.remark_text, u.username AS recorded_by,
+           l.loan_account_no, l.loan_type, b.cif_key, COALESCE(b.member_name, b.name) AS member_name, br.name AS branch_name
+         FROM loans l
+         INNER JOIN borrowers b ON b.id = l.borrower_id
+         INNER JOIN loan_remarks r ON r.loan_id = l.id
+         LEFT JOIN users u ON u.id = r.created_by
+         LEFT JOIN branches br ON br.id = b.branch_id
+         WHERE ${conditions.join(" AND ")} AND ${remarkConditions.join(" AND ")}
+         ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), r.created_at DESC, r.id DESC
+         LIMIT ${MAX_EXPORT_ROWS}`,
+        params
+      );
+      return res.json({ items: rows.rows.map(row => ({
+        id: Number(row.id), occurredAt: row.created_at, category: row.remark_category, remark: row.remark_text,
+        recordedBy: row.recorded_by ?? "", loanAccountNo: row.loan_account_no ?? "", loanType: row.loan_type ?? "",
+        cifKey: row.cif_key ?? "", memberName: row.member_name ?? "", branchName: row.branch_name ?? ""
+      })) });
+    }
 
     if (filter.idsOnly === "true") {
       const ids = await query<{ id: number }>(`SELECT l.id ${matching} ${order}`, params);

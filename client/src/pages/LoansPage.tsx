@@ -24,12 +24,16 @@ import { RemarkRecordsPanel } from "./loans/RemarkRecordsPanel";
 import { SettledAccountsPanel } from "./loans/SettledAccountsPanel";
 import type { LoanListPage, LoanQuickRef, LoanRow, PaymentRecordRow, RemarkGroupRow, RemarkRecordRow } from "./loans/types";
 import { weeklyUploadWarning } from "./loans/uploadAge";
+import { ExportButton } from "../components/ExportButton";
+import { applyFilters, FilterButton, type FilterField, type FilterValues } from "../components/FilterButton";
+import { describeFilters, fetchAllPages, type TableExport } from "../services/tableExport";
+import { ACTION_TAKEN_EXPORT_COLUMNS, LOAN_EXPORT_COLUMNS, PAYMENT_EXPORT_COLUMNS, type ActionTakenExportRow } from "./loans/exportColumns";
+import { loanFilterFields, PAYMENT_FILTER_FIELDS, remarkFilterFields } from "./loans/filterFields";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
 type RecordsTab = "loans" | "payments" | "remarks" | "settled";
 // Collectors and LAS on phones get just the search box; the extra filters stay on larger screens.
-const COLLECTOR_MOBILE_HIDDEN = "hidden lg:block ";
 const isSecondaryTab = (tab: string | null): tab is Exclude<RecordsTab, "loans"> =>
   tab === "payments" || tab === "remarks" || tab === "settled";
 
@@ -77,9 +81,10 @@ export function LoansPage() {
   const [remarksLoading, setRemarksLoading] = useState(false);
   const [remarkError, setRemarkError] = useState("");
   const [loanQuery, setLoanQuery] = useState("");
-  const [loanTypeFilter, setLoanTypeFilter] = useState("");
-  const [parAgeFilter, setParAgeFilter] = useState("");
-  const [actionStatusFilter, setActionStatusFilter] = useState("");
+  // Filters chosen in each tab's Filters modal, keyed by the server's query parameter names.
+  const [loanFilters, setLoanFilters] = useState<FilterValues>({});
+  const [paymentFilters, setPaymentFilters] = useState<FilterValues>({});
+  const [remarkFilters, setRemarkFilters] = useState<FilterValues>({});
   const [activeRecordsTab, setActiveRecordsTab] = useState<RecordsTab>(
     !isCollector && isSecondaryTab(searchParams.get("tab")) ? searchParams.get("tab") as RecordsTab : "loans"
   );
@@ -148,7 +153,6 @@ export function LoansPage() {
   const debouncedLoanQuery = useDebouncedValue(loanQuery.trim(), SEARCH_DEBOUNCE_MS);
   const debouncedPaymentQuery = useDebouncedValue(paymentQuery.trim(), SEARCH_DEBOUNCE_MS);
   const branchFilterId = user?.role === "super_admin" && selectedBranchId > 0 ? selectedBranchId : 0;
-  const collectorFilterClass = isFieldUser ? COLLECTOR_MOBILE_HIDDEN : "";
 
   const debouncedRemarkQuery = useDebouncedValue(remarkQuery.trim(), SEARCH_DEBOUNCE_MS);
 
@@ -196,15 +200,15 @@ export function LoansPage() {
 
   useEffect(() => {
     setLoanPage(1);
-  }, [debouncedLoanQuery, loanTypeFilter, parAgeFilter, actionStatusFilter, branchFilterId]);
+  }, [debouncedLoanQuery, loanFilters, branchFilterId]);
 
   useEffect(() => {
     setPaymentPage(1);
-  }, [debouncedPaymentQuery, branchFilterId]);
+  }, [debouncedPaymentQuery, paymentFilters, branchFilterId]);
 
   useEffect(() => {
     setRemarkRecordsPage(1);
-  }, [debouncedRemarkQuery, branchFilterId]);
+  }, [debouncedRemarkQuery, remarkFilters, branchFilterId]);
 
   useEffect(() => {
     setLoanPage((current) => Math.min(current, totalLoanPages));
@@ -243,7 +247,7 @@ export function LoansPage() {
 
   useEffect(() => {
     setOpenMenuLoan(null);
-  }, [activeRecordsTab, loanPage, loanQuery, loanTypeFilter, parAgeFilter]);
+  }, [activeRecordsTab, loanPage, loanQuery, loanFilters]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -331,16 +335,60 @@ export function LoansPage() {
   function loanFilterParams() {
     const params = new URLSearchParams();
     if (debouncedLoanQuery) params.set("search", debouncedLoanQuery);
-    if (loanTypeFilter) params.set("loanType", loanTypeFilter);
-    if (parAgeFilter) params.set("parAge", parAgeFilter);
-    if (actionStatusFilter) params.set("actionStatus", actionStatusFilter);
+    applyFilters(params, loanFilters);
     if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
     return params;
+  }
+
+  // Excel/PDF exports (admins and managers): every row matching the tab's search and filters.
+  const canExport = user?.role === "super_admin" || user?.role === "branch_admin";
+
+  function exportDetails(fields: FilterField[], values: FilterValues, search: string) {
+    const branch = branches.find(item => item.id === branchFilterId);
+    return [...(branch ? [`Branch: ${branch.code} - ${branch.name}`] : []), `Filters: ${describeFilters(fields, values, search)}`];
+  }
+
+  function pagedPath(path: string, base: URLSearchParams) {
+    return (page: number, pageSize: number) => {
+      const params = new URLSearchParams(base);
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+      return `${path}?${params}`;
+    };
+  }
+
+  async function prepareLoanExport(): Promise<TableExport<LoanRow>> {
+    const rows = await fetchAllPages(path => apiRequest<LoanListPage>(path), pagedPath("/loans", loanFilterParams()));
+    return {
+      title: "Loan Records", fileBase: "loan-records", columns: LOAN_EXPORT_COLUMNS, rows,
+      details: [...exportDetails(loanFilterFields(loanTypeOptions), loanFilters, debouncedLoanQuery), `Records: ${rows.length}`]
+    };
+  }
+
+  async function preparePaymentExport(): Promise<TableExport<PaymentRecordRow>> {
+    const rows = await fetchAllPages(path => apiRequest<Paged<PaymentRecordRow>>(path), pagedPath("/payments", paymentFilterParams()));
+    const amount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    return {
+      title: "Payments", fileBase: "payments", columns: PAYMENT_EXPORT_COLUMNS, rows,
+      details: [...exportDetails(PAYMENT_FILTER_FIELDS, paymentFilters, debouncedPaymentQuery),
+        `Payments: ${rows.length}    Total amount: PHP ${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]
+    };
+  }
+
+  async function prepareActionTakenExport(): Promise<TableExport<ActionTakenExportRow>> {
+    const params = remarkFilterParams();
+    params.set("export", "true");
+    const { items } = await apiRequest<{ items: ActionTakenExportRow[] }>(`/loans/remarked?${params}`);
+    return {
+      title: "Actions Taken", fileBase: "actions-taken", columns: ACTION_TAKEN_EXPORT_COLUMNS, rows: items,
+      details: [...exportDetails(remarkFilterFields(loanTypeOptions), remarkFilters, debouncedRemarkQuery), `Actions taken: ${items.length}`]
+    };
   }
 
   function paymentFilterParams() {
     const params = new URLSearchParams();
     if (debouncedPaymentQuery) params.set("search", debouncedPaymentQuery);
+    applyFilters(params, paymentFilters);
     if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
     return params;
   }
@@ -390,6 +438,7 @@ export function LoansPage() {
       const categories = REMARK_CATEGORIES.filter(category => category.label.toLowerCase().includes(query)).map(category => category.value);
       if (categories.length) params.set("categories", categories.join(","));
     }
+    applyFilters(params, remarkFilters);
     if (branchFilterId > 0) params.set("branchId", String(branchFilterId));
     return params;
   }
@@ -455,16 +504,16 @@ export function LoansPage() {
 
   useEffect(() => {
     void loadLoanPage();
-  }, [loanPage, rowsPerPage, debouncedLoanQuery, loanTypeFilter, parAgeFilter, actionStatusFilter, branchFilterId, listRefresh]);
+  }, [loanPage, rowsPerPage, debouncedLoanQuery, loanFilters, branchFilterId, listRefresh]);
 
   useEffect(() => {
     void loadPaymentPage();
-  }, [paymentPage, rowsPerPage, debouncedPaymentQuery, branchFilterId, listRefresh]);
+  }, [paymentPage, rowsPerPage, debouncedPaymentQuery, paymentFilters, branchFilterId, listRefresh]);
 
   useEffect(() => {
     if (isCollector) return;
     void loadRemarkPage();
-  }, [remarkRecordsPage, rowsPerPage, debouncedRemarkQuery, branchFilterId, listRefresh, isCollector]);
+  }, [remarkRecordsPage, rowsPerPage, debouncedRemarkQuery, remarkFilters, branchFilterId, listRefresh, isCollector]);
 
   // The list effects already load on first render, so only later reloads ask them to refresh.
   async function loadData(refreshLists = true) {
@@ -1465,8 +1514,8 @@ export function LoansPage() {
         {activeRecordsTab === "loans" ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 md:flex-nowrap">
-              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-row md:min-w-0 md:flex-1">
-                <div className="relative col-span-2 min-w-0 flex-1">
+              <div className="flex w-full max-w-md items-center gap-2">
+                <div className="relative min-w-0 flex-1">
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     className="field pl-9"
@@ -1475,39 +1524,13 @@ export function LoansPage() {
                     placeholder="Search loan records"
                   />
                 </div>
-                <select
-                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-52 md:w-44 md:shrink-0`}
-                  value={loanTypeFilter}
-                  onChange={(event) => setLoanTypeFilter(event.target.value)}
-                  aria-label="Filter by loan type"
-                >
-                  <option value="">All loan types</option>
-                  {loanTypeOptions.map((loanType) => <option key={loanType} value={loanType}>{loanType}</option>)}
-                </select>
-                <select
-                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-48 md:w-40 md:shrink-0`}
-                  value={parAgeFilter}
-                  onChange={(event) => setParAgeFilter(event.target.value)}
-                  aria-label="Filter by PAR age"
-                >
-                  <option value="">All PAR ages</option>
-                  <option value="1-30">PAR 1-30</option>
-                  <option value="31-60">PAR 31-60</option>
-                  <option value="61-90">PAR 61-90</option>
-                  <option value="91-180">PAR 91-180</option>
-                  <option value="181-365">PAR 181-365</option>
-                  <option value="over-365">PAR over 365</option>
-                </select>
-                <select
-                  className={`${collectorFilterClass}field min-w-0 w-full sm:w-44 md:w-40 md:shrink-0`}
-                  value={actionStatusFilter}
-                  onChange={(event) => setActionStatusFilter(event.target.value)}
-                  aria-label="Filter by status"
-                >
-                  <option value="">All statuses</option>
-                  <option value="none">No payment yet</option>
-                  {PAYMENT_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
-                </select>
+                {/* Collectors and LAS work from search alone; filters are for admins. */}
+                {!isFieldUser && <FilterButton
+                  fields={loanFilterFields(loanTypeOptions)}
+                  values={loanFilters}
+                  onChange={change => setLoanFilters(current => ({ ...current, ...change }))}
+                />}
+                {canExport && <ExportButton label="loan records" prepare={prepareLoanExport} />}
               </div>
               {canDeleteLoans && (
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:shrink-0 md:flex-nowrap">
@@ -1809,6 +1832,11 @@ export function LoansPage() {
           <SettledAccountsPanel branchId={branchFilterId} />
         ) : activeRecordsTab === "payments" ? (
           <PaymentRecordsPanel
+            filters={<>
+              {!isFieldUser && <FilterButton fields={PAYMENT_FILTER_FIELDS} values={paymentFilters}
+                onChange={change => setPaymentFilters(current => ({ ...current, ...change }))} />}
+              {canExport && <ExportButton label="payments" prepare={preparePaymentExport} />}
+            </>}
             paymentQuery={paymentQuery}
             setPaymentQuery={setPaymentQuery}
             paginatedPaymentRecords={paginatedPaymentRecords}
@@ -1827,6 +1855,11 @@ export function LoansPage() {
           />
         ) : (
           <RemarkRecordsPanel
+            filters={<>
+              {!isFieldUser && <FilterButton fields={remarkFilterFields(loanTypeOptions)} values={remarkFilters}
+                onChange={change => setRemarkFilters(current => ({ ...current, ...change }))} />}
+              {canExport && <ExportButton label="actions taken" prepare={prepareActionTakenExport} />}
+            </>}
             remarkQuery={remarkQuery}
             setRemarkQuery={setRemarkQuery}
             paginatedRemarkRecords={paginatedRemarkRecords}

@@ -8,6 +8,8 @@ import { LoansPage } from "./LoansPage";
 import { OverdueReportPage } from "./OverdueReportPage";
 
 vi.mock("../services/api", () => ({ apiRequest: vi.fn(), apiDownload: vi.fn() }));
+const writeFile = vi.hoisted(() => vi.fn());
+vi.mock("xlsx", async () => ({ ...await vi.importActual<typeof import("xlsx")>("xlsx"), writeFile }));
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({ user: { id: 3, username: "manager", role: "branch_admin", branchId: 2, permissions: {} } })
 }));
@@ -70,7 +72,15 @@ describe("Collections page", () => {
     // Typing is debounced: no request is sent for the partial words.
     expect(loanPageRequests().some(path => path.includes("search=a&") || path.includes("search=an&"))).toBe(false);
 
+    await user.click(screen.getByRole("button", { name: "Filters" }));
     await user.selectOptions(screen.getByLabelText("Filter by PAR age"), "31-60");
+    expect(screen.getByRole("button", { name: "Filters (1 active)" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Filter by action taken"), "stale");
+    await user.selectOptions(screen.getByLabelText("Sort by"), "par");
+    await waitFor(() => expect(loanPageRequests().some(path => path.includes("followUp=stale") && path.includes("sort=par") && path.includes("parAge=31-60"))).toBe(true));
+    expect(screen.getByRole("button", { name: "Filters (2 active)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(loanPageRequests().at(-1)).not.toMatch(/followUp|sort=|parAge/));
     await waitFor(() => expect(loanPageRequests().some(path => path.includes("parAge=31-60"))).toBe(true));
   });
 
@@ -90,6 +100,7 @@ describe("Collections loan status", () => {
     render(<MemoryRouter><LoansPage /></MemoryRouter>);
     await screen.findAllByText("Member 101");
     expect(screen.getAllByText("Partially Paid").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Filters" }));
     await user.selectOptions(screen.getByLabelText("Filter by status"), "none");
     await waitFor(() => expect(loanPageRequests().some(path => path.includes("actionStatus=none") && path.includes("page=1"))).toBe(true));
     await user.selectOptions(screen.getByLabelText("Filter by status"), "settled");
@@ -119,6 +130,32 @@ describe("Collections settled accounts tab", () => {
     expect(screen.getByRole("tab", { name: "Settled Accounts" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(requests()).toContain("/loans?settled=true&page=1&pageSize=15"));
     expect(await screen.findByRole("list", { name: "Settled accounts" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.selectOptions(screen.getByLabelText("Filter by settled"), "30d");
+    await user.selectOptions(screen.getByLabelText("Sort by"), "total");
+    await waitFor(() => expect(requests().some(path => path.includes("settled=true") && path.includes("settledWithin=30d") && path.includes("sort=total"))).toBe(true));
+  });
+});
+
+describe("Collections tab filters", () => {
+  it("filters payments and actions taken from their Filters modals", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><LoansPage /></MemoryRouter>);
+    await screen.findAllByText("Member 101");
+
+    await user.click(screen.getByRole("tab", { name: "Payments" }));
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.selectOptions(screen.getByLabelText("Filter by payment type"), "settled");
+    await user.selectOptions(screen.getByLabelText("Filter by date"), "7d");
+    await waitFor(() => expect(requests().some(path => path.startsWith("/payments?") && path.includes("paymentStatus=settled") && path.includes("period=7d") && path.includes("page=1"))).toBe(true));
+    expect(screen.getByRole("button", { name: "Filters (2 active)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await user.click(screen.getByRole("tab", { name: "Actions Taken" }));
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.selectOptions(screen.getByLabelText("Filter by category"), "visited");
+    await waitFor(() => expect(requests().some(path => path.startsWith("/loans/remarked?") && path.includes("category=visited"))).toBe(true));
   });
 });
 
@@ -147,5 +184,28 @@ describe("Dashboard", () => {
     expect(requests()).toContain("/loans/due-soon?page=1&pageSize=8");
     expect(requests()).not.toContain("/loans");
     expect(requests()).not.toContain("/payments");
+  });
+});
+
+describe("Collections exports", () => {
+  it("lets a manager export the filtered loan records to Excel", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><LoansPage /></MemoryRouter>);
+    await screen.findAllByText("Member 101");
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.selectOptions(screen.getByLabelText("Filter by PAR age"), "31-60");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await user.click(screen.getByRole("button", { name: "Export loan records" }));
+    await user.click(screen.getByRole("button", { name: /Excel/ }));
+    await waitFor(() => expect(writeFile).toHaveBeenCalled());
+    const exportRequest = requests().find(path => path.includes("pageSize=200"))!;
+    expect(exportRequest).toContain("parAge=31-60");
+    expect(exportRequest).toContain("page=1");
+    // 40 matching loans fit on the first page of 200, so one request is enough.
+    expect(requests().filter(path => path.includes("pageSize=200"))).toHaveLength(1);
+    const [, fileName] = writeFile.mock.calls[0];
+    expect(fileName).toMatch(/^loan-records-.*[.]xlsx$/);
+    expect(await screen.findByText(/Exported 1 loan records/)).toBeInTheDocument();
   });
 });

@@ -1,10 +1,14 @@
 import { Search } from "lucide-react";
+import { useEffect, type ReactNode } from "react";
+import { useActionHistoryHover } from "./ActionHistoryHover";
 import { PaginationControls } from "../../components/PaginationControls";
 import { getRemarkCategoryLabel } from "../../constants/remarkCategories";
 import { LoanRecordField } from "./LoanRecordField";
 import type { RemarkGroupRow, RemarkRecordRow } from "./types";
 
 interface RemarkRecordsPanelProps {
+  /** Filter icon shown beside the search box. */
+  filters?: ReactNode;
   remarkQuery: string;
   setRemarkQuery: (value: string) => void;
   paginatedRemarkRecords: RemarkGroupRow[];
@@ -25,6 +29,7 @@ interface RemarkRecordsPanelProps {
 
 /** The Collections page's Remarks tab: one row per loan with its newest remarks. */
 export function RemarkRecordsPanel({
+  filters,
   remarkQuery,
   setRemarkQuery,
   paginatedRemarkRecords,
@@ -42,18 +47,25 @@ export function RemarkRecordsPanel({
   remarkDeletePending,
   openLoanRemarks
 }: RemarkRecordsPanelProps) {
+  const history = useActionHistoryHover();
+  // A refreshed list may follow added or deleted actions, so hovered lists reload.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => history.reset(), [paginatedRemarkRecords]);
   return (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
           
-          <div className="relative w-full max-w-sm">
-            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              className="field pl-9"
-              value={remarkQuery}
-              onChange={(event) => setRemarkQuery(event.target.value)}
-              placeholder="Search actions taken"
-            />
+          <div className="flex w-full max-w-md items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                className="field pl-9"
+                value={remarkQuery}
+                onChange={(event) => setRemarkQuery(event.target.value)}
+                placeholder="Search actions taken"
+              />
+            </div>
+            {filters}
           </div>
 
           {canDeleteRemarks && <div className="flex flex-wrap items-center gap-2">
@@ -131,6 +143,7 @@ export function RemarkRecordsPanel({
                     key={`${row.kind}-${row.id}`}
                     className="cursor-pointer transition hover:bg-slate-50"
                     tabIndex={0}
+                    {...history.rowProps({ loanId: Number(row.loan_id), loanAccountNo: row.loan_account_no ?? "", memberName: row.member_name, loanType: row.loan_type, cifKey: row.cif_key })}
                     onClick={() => openLoanRemarks(row)}
                     onKeyDown={(event) => {
                   if (event.target !== event.currentTarget) return;
@@ -170,6 +183,7 @@ export function RemarkRecordsPanel({
             </table>
             {remarkTotal === 0 && <p className="p-3 text-sm text-slate-600">No loans with actions taken found.</p>}
           </div>
+          {history.panel}
           <PaginationControls
             currentPage={remarkRecordsPage}
             totalPages={totalRemarkPages}

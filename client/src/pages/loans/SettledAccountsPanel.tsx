@@ -1,6 +1,10 @@
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ExportButton } from "../../components/ExportButton";
+import { applyFilters, FilterButton, type FilterValues } from "../../components/FilterButton";
+import { describeFilters, fetchAllPages, type TableExport } from "../../services/tableExport";
+import { SETTLED_EXPORT_COLUMNS } from "./exportColumns";
 import { PaginationControls } from "../../components/PaginationControls";
 import { ToastNotification } from "../../components/ToastNotification";
 import { actionStatusClass, paymentStatusLabel } from "../../constants/remarkCategories";
@@ -8,6 +12,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { apiRequest } from "../../services/api";
 import type { Branch } from "../../types/models";
+import { settledFilterFields } from "./filterFields";
 import { formatCurrency, formatDateTime } from "./format";
 import type { LoanListPage, LoanRow } from "./types";
 
@@ -25,10 +30,15 @@ export function SettledAccountsPanel({ branchId: fixedBranchId }: {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isSuperAdmin = user?.role === "super_admin";
+  // Collectors and LAS work from search alone; filters are for admins.
+  const isFieldUser = user?.role === "staff" || user?.role === "las";
+  const canExport = user?.role === "super_admin" || user?.role === "branch_admin";
   const ownBranchFilter = isSuperAdmin && fixedBranchId === undefined;
   const [query, setQuery] = useState("");
-  const [ownBranchId, setBranchId] = useState(0);
-  const branchId = fixedBranchId ?? ownBranchId;
+  // Filters from the Filters modal; branchId is among them only when this panel has its own branch filter.
+  const [filters, setFilters] = useState<FilterValues>({});
+  const [loanTypes, setLoanTypes] = useState<string[]>([]);
+  const branchId = fixedBranchId ?? Number(filters.branchId || 0);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ items: LoanRow[]; total: number } | null>(null);
@@ -42,23 +52,48 @@ export function SettledAccountsPanel({ branchId: fixedBranchId }: {
     apiRequest<Branch[]>("/branches").then(setBranches).catch(() => undefined);
   }, [ownBranchFilter]);
 
-  useEffect(() => { setPage(1); }, [search, branchId]);
+  useEffect(() => { setPage(1); }, [search, branchId, filters]);
+
+  function listParams() {
+    const params = new URLSearchParams({ settled: "true" });
+    if (search) params.set("search", search);
+    applyFilters(params, { ...filters, branchId: "" });
+    if (isSuperAdmin && branchId > 0) params.set("branchId", String(branchId));
+    return params;
+  }
+
+  const filterFields = settledFilterFields(loanTypes, ownBranchFilter ? branches.map(branch => [String(branch.id), `${branch.code} - ${branch.name}`] as const) : null);
+
+  async function prepareExport(): Promise<TableExport<LoanRow>> {
+    const base = listParams();
+    const rows = await fetchAllPages(path => apiRequest<LoanListPage>(path), (exportPage, pageSize) => {
+      const params = new URLSearchParams(base);
+      params.set("page", String(exportPage));
+      params.set("pageSize", String(pageSize));
+      return `/loans?${params}`;
+    });
+    return {
+      title: "Settled Accounts", fileBase: "settled-accounts", columns: SETTLED_EXPORT_COLUMNS, rows,
+      details: [`Filters: ${describeFilters(filterFields, filters, search)}`, `Settled accounts: ${rows.length}`]
+    };
+  }
 
   useEffect(() => {
     const request = ++requestRef.current;
-    const params = new URLSearchParams({ settled: "true", page: String(page), pageSize: String(PAGE_SIZE) });
-    if (search) params.set("search", search);
-    if (isSuperAdmin && branchId > 0) params.set("branchId", String(branchId));
+    const params = listParams();
+    params.set("page", String(page));
+    params.set("pageSize", String(PAGE_SIZE));
     setLoading(true);
     apiRequest<LoanListPage>(`/loans?${params}`)
       .then(result => {
         if (request !== requestRef.current) return;
         setData({ items: result.items, total: result.total });
+        setLoanTypes(result.loanTypes ?? []);
         if (result.page !== page) setPage(result.page);
       })
       .catch(e => { if (request === requestRef.current) setError(e instanceof Error ? e.message : "Unable to load settled accounts"); })
       .finally(() => { if (request === requestRef.current) setLoading(false); });
-  }, [page, search, branchId, isSuperAdmin]);
+  }, [page, search, branchId, filters, isSuperAdmin]);
 
   const total = data?.total ?? 0;
   const open = (loan: LoanRow) => navigate(`/loan-details/${loan.id}?from=settled`);
@@ -70,18 +105,17 @@ export function SettledAccountsPanel({ branchId: fixedBranchId }: {
     <>
       {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
       <div className="grid gap-3">
-        <p className="text-sm text-slate-600">
-          Loans that were not in their branch's latest uploaded list. They keep their payments and remarks, and move back to Collections if they appear in a later upload.
-        </p>
-        <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="flex w-full max-w-md items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="field pl-9" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search member, code or loan account" aria-label="Search settled accounts" />
           </div>
-          {ownBranchFilter && <select className="field sm:w-56" value={branchId} onChange={event => setBranchId(Number(event.target.value))} aria-label="Filter by branch">
-            <option value={0}>All branches</option>
-            {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
-          </select>}
+          {!isFieldUser && <FilterButton
+            fields={filterFields}
+            values={filters}
+            onChange={change => setFilters(current => ({ ...current, ...change }))}
+          />}
+          {canExport && <ExportButton label="settled accounts" prepare={prepareExport} />}
         </div>
         <p className="text-sm text-slate-600" aria-live="polite">{loading ? "Loading..." : `${total} settled account(s)`}</p>
 

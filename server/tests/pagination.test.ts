@@ -63,6 +63,72 @@ describe("paged loan list", () => {
     expect(calls().find(([sql]) => sql.includes("DISTINCT TRIM(l.loan_type)"))![1]).toEqual([2]);
   });
 
+  it("filters by follow-up, maturity and total due, and sorts on request", async () => {
+    const pageSql = async (query: string) => {
+      mocks.query.mockClear();
+      expect((await fetch(`${base}/loans?page=1&${query}`)).status).toBe(200);
+      return calls().find(([sql]) => sql.includes("WITH page_loans"))![0];
+    };
+    expect(await pageSql("followUp=none")).toContain("NOT EXISTS (SELECT 1 FROM loan_remarks fu WHERE fu.loan_id = l.id)");
+    expect(await pageSql("followUp=recent")).toContain("fu.created_at >= NOW() - INTERVAL 7 DAY");
+    expect(await pageSql("followUp=stale")).toContain("NOT EXISTS (SELECT 1 FROM loan_remarks fu WHERE fu.loan_id = l.id AND fu.created_at >= NOW() - INTERVAL 30 DAY)");
+    expect(await pageSql("maturity=past")).toContain("l.maturity_date < CURDATE()");
+    expect(await pageSql("maturity=soon")).toContain("BETWEEN CURDATE() AND CURDATE() + INTERVAL 30 DAY");
+    expect(await pageSql("totalDue=10k-50k")).toContain("COALESCE(l.total, 0) BETWEEN 10000 AND 50000");
+    expect(await pageSql("sort=par")).toContain("ORDER BY COALESCE(l.par_age, 0) DESC, COALESCE(b.member_name, '')");
+    expect(await pageSql("sort=maturity")).toContain("ORDER BY l.maturity_date IS NULL, l.maturity_date ASC,");
+    expect(await pageSql("")).toContain("ORDER BY COALESCE(b.member_name, ''), COALESCE(l.loan_account_no, ''), l.id");
+    expect((await fetch(`${base}/loans?page=1&sort=balance; DROP TABLE loans`)).status).toBe(400);
+    expect((await fetch(`${base}/loans?page=1&followUp=week`)).status).toBe(400);
+  });
+
+  it("filters each Collection Records tab from its Filters modal", async () => {
+    const firstSql = async (path: string, marker: string) => {
+      mocks.query.mockClear();
+      expect((await fetch(`${base}${path}`)).status).toBe(200);
+      return calls().find(([sql]) => sql.includes(marker))!;
+    };
+    // Payments: payment type and date.
+    const [paymentSql, paymentParams] = await firstSql("/payments?page=1&paymentStatus=settled&period=7d&sort=recent", "COUNT(*) AS total");
+    expect(paymentSql).toContain("c.payment_status = $2");
+    expect(paymentSql).toContain("c.collected_at >= CURDATE() - INTERVAL 6 DAY");
+    expect(paymentParams).toEqual([2, "settled"]);
+    // Actions taken: category and date apply to the matching action; loan type to the loan.
+    const [remarkSql, remarkParams] = await firstSql("/loans/remarked?page=1&category=visited&period=today&loanType=Salary", "COUNT(*) AS total");
+    expect(remarkSql).toContain("l.loan_type = $2");
+    expect(remarkSql).toContain("r.remark_category = $3");
+    expect(remarkSql).toContain("r.created_at >= CURDATE() - INTERVAL 0 DAY");
+    expect(remarkParams).toEqual([2, "Salary", "visited"]);
+    expect((await fetch(`${base}/loans/remarked?page=1&category=not_a_category`)).status).toBe(400);
+    // Settled Accounts: settled within, and sort replaces the newest-first default.
+    const [settledSql] = await firstSql("/loans?settled=true&page=1&settledWithin=30d&sort=total", "WITH page_loans");
+    expect(settledSql).toContain("l.closed_at >= CURDATE() - INTERVAL 29 DAY");
+    expect(settledSql).toContain("ORDER BY COALESCE(l.total, 0) DESC,");
+    expect((await firstSql("/loans?settled=true&page=1", "WITH page_loans"))[0]).toContain("ORDER BY l.closed_at DESC");
+    expect((await fetch(`${base}/payments?page=1&period=year`)).status).toBe(400);
+  });
+
+  it("exports every matching action taken as its own row, for admins and managers only", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: 5, created_at: "2026-10-18 09:30", remark_category: "visited", remark_text: "Met the member",
+      recorded_by: "ana", loan_account_no: "LN-1", loan_type: "Salary", cif_key: "C-1", member_name: "Juan", branch_name: "North" }] });
+    const body = await (await fetch(`${base}/loans/remarked?export=true&category=visited&period=7d`)).json();
+    expect(body.items).toEqual([{ id: 5, occurredAt: "2026-10-18 09:30", category: "visited", remark: "Met the member", recordedBy: "ana",
+      loanAccountNo: "LN-1", loanType: "Salary", cifKey: "C-1", memberName: "Juan", branchName: "North" }]);
+    const [sql, params] = calls()[0];
+    expect(sql).toContain("INNER JOIN loan_remarks r ON r.loan_id = l.id");
+    expect(sql).toContain("b.branch_id = $1");
+    expect(sql).toContain("r.remark_category = $2");
+    expect(sql).toContain("r.created_at >= CURDATE() - INTERVAL 6 DAY");
+    expect(sql).toContain("LIMIT 20000");
+    expect(params).toEqual([2, "visited"]);
+    expect(calls()).toHaveLength(1);
+
+    for (const role of ["staff", "las"] as const) {
+      mocks.user = { id: 4, role, branchId: 2 } as JwtUser;
+      expect((await fetch(`${base}/loans/remarked?export=true`)).status).toBe(403);
+    }
+  });
+
   it("clamps a page past the end to the last page", async () => {
     mocks.query.mockImplementation(async (sql: string) => sql.includes("COUNT(*)") ? { rows: [{ total: 5 }] } : { rows: [] });
     const body = await (await fetch(`${base}/loans?page=9&pageSize=10`)).json();
