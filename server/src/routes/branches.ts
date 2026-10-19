@@ -31,7 +31,9 @@ router.get("/", authenticate, authorize(["super_admin", "branch_admin"]), async 
          ON u.branch_id = b.id
         AND u.role = 'branch_admin'
        GROUP BY b.id, b.code, b.name, b.address
-       ORDER BY b.name ASC`
+       -- By branch number (BR-001, BR-002, ... BR-0013 sorts as 13); codes without a number go last.
+       ORDER BY CAST(REGEXP_SUBSTR(b.code, '[0-9]+') AS UNSIGNED) IS NULL,
+         CAST(REGEXP_SUBSTR(b.code, '[0-9]+') AS UNSIGNED), b.code`
     );
 
     return res.json(

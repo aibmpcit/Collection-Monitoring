@@ -129,6 +129,24 @@ describe("paged loan list", () => {
     }
   });
 
+  it("applies a date range to each tab's own date, as whole days", async () => {
+    const sqlFor = async (path: string, marker = "COUNT(*) AS total") => {
+      mocks.query.mockClear();
+      expect((await fetch(`${base}${path}`)).status).toBe(200);
+      return calls().find(([sql]) => sql.includes(marker))!;
+    };
+    const [loanSql, loanParams] = await sqlFor("/loans?page=1&dateFrom=2026-09-01&dateTo=2026-09-30");
+    expect(loanSql).toContain("l.date_release >= $2 AND l.date_release < DATE_ADD($3, INTERVAL 1 DAY)");
+    expect(loanParams).toEqual([2, "2026-09-01", "2026-09-30"]);
+    expect((await sqlFor("/loans?settled=true&page=1&dateFrom=2026-09-01", "WITH page_loans"))[0]).toContain("l.closed_at >= $2");
+    expect((await sqlFor("/loans/remarked?page=1&dateTo=2026-09-30"))[0]).toContain("r.created_at < DATE_ADD($2, INTERVAL 1 DAY)");
+    const [paymentSql, paymentParams] = await sqlFor("/payments?page=1&dateFrom=2026-10-01&dateTo=2026-10-19");
+    expect(paymentSql).toContain("c.collected_at >= $2 AND c.collected_at < DATE_ADD($3, INTERVAL 1 DAY)");
+    expect(paymentParams).toEqual([2, "2026-10-01", "2026-10-19"]);
+    expect((await fetch(`${base}/payments?page=1&dateFrom=2026-13-45`)).status).toBe(400);
+    expect((await fetch(`${base}/loans?page=1&dateTo=yesterday`)).status).toBe(400);
+  });
+
   it("clamps a page past the end to the last page", async () => {
     mocks.query.mockImplementation(async (sql: string) => sql.includes("COUNT(*)") ? { rows: [{ total: 5 }] } : { rows: [] });
     const body = await (await fetch(`${base}/loans?page=9&pageSize=10`)).json();

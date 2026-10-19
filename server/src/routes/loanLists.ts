@@ -1,4 +1,4 @@
-import { periodCondition, periodSchema } from "../services/listPeriods.js";
+import { addDateRange, dayParam, periodCondition, periodSchema } from "../services/listPeriods.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
@@ -156,6 +156,9 @@ const loanListFilters = z.object({
   sort: z.enum(["name", "par", "total", "maturity"]).optional(),
   // Settled Accounts: settled within the last 7, 30 or 90 days.
   settledWithin: z.enum(["7d", "30d", "90d"]).optional(),
+  // Date filter (a month or custom range): release date for open loans, settled date for Settled Accounts.
+  dateFrom: dayParam,
+  dateTo: dayParam,
   branchId: z.coerce.number().int().positive().optional(),
   borrowerId: z.coerce.number().int().positive().optional(),
   includeClosed: z.literal("true").optional(),
@@ -199,6 +202,8 @@ router.get("/", authenticate, async (req: AuthedRequest, res, next) => {
     if (filter.maturity) conditions.push(MATURITY_CONDITIONS[filter.maturity]);
     if (filter.totalDue) conditions.push(TOTAL_DUE_CONDITIONS[filter.totalDue]);
     if (filter.settled === "true" && filter.settledWithin) conditions.push(periodCondition("l.closed_at", filter.settledWithin));
+    addDateRange((expression, value) => add(conditions, expression, value),
+      filter.settled === "true" ? "l.closed_at" : "l.date_release", filter.dateFrom, filter.dateTo);
     if (filter.search) {
       add(conditions, `LOCATE(?, CONCAT_WS(' ', b.cif_key, l.loan_account_no, b.member_name, l.loan_type, l.status,
         b.contact_info, b.address, l.notes)) > 0`, filter.search);
@@ -283,6 +288,8 @@ const remarkedFilters = z.object({
   // Filters modal: loans with an action taken of this category / in this period, and loan type.
   category: z.string().trim().max(64).optional(),
   period: periodSchema.optional(),
+  dateFrom: dayParam,
+  dateTo: dayParam,
   loanType: z.string().trim().max(120).optional(),
   branchId: z.coerce.number().int().positive().optional(),
   idsOnly: z.literal("true").optional(),
@@ -314,6 +321,7 @@ router.get("/remarked", authenticate, async (req: AuthedRequest, res, next) => {
       add(remarkConditions, "r.remark_category = ?", filter.category);
     }
     if (filter.period) remarkConditions.push(periodCondition("r.created_at", filter.period));
+    addDateRange((expression, value) => add(remarkConditions, expression, value), "r.created_at", filter.dateFrom, filter.dateTo);
     if (filter.search) {
       const matches: string[] = [];
       add(matches, "LOCATE(?, CONCAT_WS(' ', b.member_name, l.loan_account_no, l.loan_type, r.remark_text, u.username)) > 0", filter.search);

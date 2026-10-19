@@ -1,4 +1,4 @@
-import type { FilterField, FilterValues } from "../components/FilterButton";
+import { describeDate, type FilterField, type FilterValues } from "../components/FilterButton";
 
 // Excel and PDF exports of a filtered list. Each export carries its filters so the file explains itself.
 
@@ -42,6 +42,10 @@ export function describeFilters(fields: FilterField[], values: FilterValues, sea
   const parts = fields.flatMap(field => {
     const value = values[field.key];
     if (!value) return [];
+    if (field.isDate) {
+      const words = describeDate(values, field.key);
+      return words ? [`${field.label}: ${words}`] : [];
+    }
     const label = field.options.find(([option]) => option === value)?.[1] ?? value;
     return [`${field.label}: ${label}`];
   });

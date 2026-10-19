@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -132,9 +132,13 @@ describe("Collections settled accounts tab", () => {
     expect(await screen.findByRole("list", { name: "Settled accounts" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
-    await user.selectOptions(screen.getByLabelText("Filter by settled"), "30d");
+    // Custom range: From/To appear and are sent as whole days.
+    await user.selectOptions(screen.getByLabelText("Filter by settled"), "custom");
+    fireEvent.change(screen.getByLabelText("Settled from"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Settled to"), { target: { value: "2026-09-15" } });
     await user.selectOptions(screen.getByLabelText("Sort by"), "total");
-    await waitFor(() => expect(requests().some(path => path.includes("settled=true") && path.includes("settledWithin=30d") && path.includes("sort=total"))).toBe(true));
+    await waitFor(() => expect(requests().some(path => path.includes("settled=true") && path.includes("dateFrom=2026-09-01")
+      && path.includes("dateTo=2026-09-15") && path.includes("sort=total"))).toBe(true));
   });
 });
 
@@ -147,8 +151,13 @@ describe("Collections tab filters", () => {
     await user.click(screen.getByRole("tab", { name: "Payments" }));
     await user.click(screen.getByRole("button", { name: "Filters" }));
     await user.selectOptions(screen.getByLabelText("Filter by payment type"), "settled");
-    await user.selectOptions(screen.getByLabelText("Filter by date"), "7d");
-    await waitFor(() => expect(requests().some(path => path.startsWith("/payments?") && path.includes("paymentStatus=settled") && path.includes("period=7d") && path.includes("page=1"))).toBe(true));
+    // A month is sent as its first and last day.
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    await user.selectOptions(screen.getByLabelText("Filter by date"), month);
+    await waitFor(() => expect(requests().some(path => path.startsWith("/payments?") && path.includes("paymentStatus=settled")
+      && path.includes(`dateFrom=${month}-01`) && path.includes(`dateTo=${month}-${lastDay}`) && path.includes("page=1"))).toBe(true));
     expect(screen.getByRole("button", { name: "Filters (2 active)" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Done" }));
 

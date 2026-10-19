@@ -27,14 +27,14 @@ export async function createBranch(request: APIRequestContext, token: string, ta
 
 export interface TestLoan {
   cifKey: string; loanAccountNo: string; memberName: string;
-  loanType?: string; parAge?: number; total?: number; maturityDate?: string;
+  loanType?: string; parAge?: number; total?: number; maturityDate?: string; dateRelease?: string;
 }
 
 /** Imports loans for a branch like a manager's upload. closeMissing settles the branch's loans that aren't listed. */
 export async function importLoans(request: APIRequestContext, token: string, branchId: number, loans: TestLoan[], closeMissing = false) {
   const rows = loans.map((loan, index) => ({
     row: index + 2, cifKey: loan.cifKey, loanAccountNo: loan.loanAccountNo, memberName: loan.memberName,
-    loanType: loan.loanType ?? "Salary Loan", dateRelease: "2026-01-15", maturityDate: loan.maturityDate ?? "2027-01-15",
+    loanType: loan.loanType ?? "Salary Loan", dateRelease: loan.dateRelease ?? "2026-01-15", maturityDate: loan.maturityDate ?? "2027-01-15",
     loanAmount: 50000, loanBalance: 20000, principalDue: 5000, penaltyDue: 0, interest: 500,
     total: loan.total ?? 5500, parAge: loan.parAge ?? 0, address: "Barbaza, Antique"
   }));
@@ -68,7 +68,7 @@ export async function seedBranch(request: APIRequestContext, tag = uniqueTag()) 
   const loans: TestLoan[] = [
     { cifKey: `C-${tag}-1`, loanAccountNo: `LN-${tag}-1`, memberName: `Ana Garcia ${tag}`, parAge: 45, total: 8000, maturityDate: "2026-09-30" },
     { cifKey: `C-${tag}-2`, loanAccountNo: `LN-${tag}-2`, memberName: `Ben Reyes ${tag}`, parAge: 120, total: 62000 },
-    { cifKey: `C-${tag}-3`, loanAccountNo: `LN-${tag}-3`, memberName: `Cora Santos ${tag}`, parAge: 10, total: 15000, loanType: "Emergency Loan" }
+    { cifKey: `C-${tag}-3`, loanAccountNo: `LN-${tag}-3`, memberName: `Cora Santos ${tag}`, parAge: 10, total: 15000, loanType: "Emergency Loan", dateRelease: "2026-03-10" }
   ];
   await importLoans(request, token, branch.id, loans);
   return { tag, token, branch, loans };
