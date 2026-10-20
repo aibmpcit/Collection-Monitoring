@@ -1,3 +1,4 @@
+import { ModalShell } from "../components/ModalShell";
 import { Eye, EyeOff, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -366,10 +367,10 @@ export function StaffPage() {
   const modal =
     isModalOpen &&
     createPortal(
-      <section className="modal-shell">
+      <ModalShell labelledBy="account-form-title" onClose={closeModal}>
         <div className="modal-card max-w-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold">{modalTitle}</h3>
+            <h3 id="account-form-title" className="text-lg font-semibold">{modalTitle}</h3>
             <button type="button" className="btn-muted" onClick={closeModal}>
               Close
             </button>
@@ -507,7 +508,7 @@ export function StaffPage() {
             </div>
           </form>
         </div>
-      </section>,
+      </ModalShell>,
       document.body
     );
 

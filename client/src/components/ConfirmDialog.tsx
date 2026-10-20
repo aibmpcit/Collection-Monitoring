@@ -1,6 +1,7 @@
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { createPortal } from "react-dom";
 
 type ConfirmTone = "danger" | "warning";
@@ -33,16 +34,7 @@ export function ConfirmDialog({
   const isDanger = tone === "danger";
   const Icon = isDanger ? AlertTriangle : ShieldAlert;
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !disabled) {
-        onCancel();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [disabled, onCancel, open]);
+  useEscapeToClose(open, onCancel, disabled);
 
   if (typeof document === "undefined") return null;
 
@@ -50,7 +42,7 @@ export function ConfirmDialog({
     <AnimatePresence>
       {open && (
         <motion.section
-          className="fixed inset-0 z-[130] grid place-items-center bg-slate-900/55 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[130] grid place-items-center bg-slate-900/50 p-4 backdrop-blur-[3px]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

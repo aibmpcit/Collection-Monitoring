@@ -1,3 +1,4 @@
+import { ModalShell } from "../components/ModalShell";
 import { hasPermission } from "../services/permissions";
 import { MoreVertical, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -939,10 +940,10 @@ export function LoansPage() {
   const loanFormModal =
     canEditLoans && isFormOpen
       ? createPortal(
-          <section className="modal-shell">
+          <ModalShell labelledBy="loan-form-title" onClose={closeFormModal}>
             <div className="modal-card max-h-[90vh] max-w-2xl overflow-y-auto">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold">{editingId ? "Edit Loan" : "Add Loan"}</h3>
+                <h3 id="loan-form-title" className="text-lg font-semibold">{editingId ? "Edit Loan" : "Add Loan"}</h3>
                 <button type="button" className="btn-muted" onClick={closeFormModal}>
                   Close
                 </button>
@@ -1060,7 +1061,7 @@ export function LoansPage() {
                 </div>
               </form>
             </div>
-          </section>,
+          </ModalShell>,
           document.body
         )
       : null;
@@ -1081,11 +1082,11 @@ export function LoansPage() {
   const remarksModal =
     isRemarksOpen && remarkLoan
       ? createPortal(
-          <section className="modal-shell">
+          <ModalShell labelledBy="loan-actions-title" onClose={closeRemarksModal}>
             <div className="modal-card max-w-2xl">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-lg font-semibold">Loan Actions Taken</h3>
+                  <h3 id="loan-actions-title" className="text-lg font-semibold">Loan Actions Taken</h3>
                   <p className="text-xs text-black/70">
                     {remarkLoan.loanAccountNo} | {remarkLoan.memberName}
                   </p>
@@ -1122,7 +1123,7 @@ export function LoansPage() {
                 <RemarkEvidenceField proof={remarkProof} onChange={setRemarkProof} />
                 <div className="flex justify-end">
                   <button type="submit" className="btn-primary">
-                    Add Remark
+                    Add Action Taken
                   </button>
                 </div>
               </form>
@@ -1152,7 +1153,7 @@ export function LoansPage() {
                 )}
               </div>
             </div>
-          </section>,
+          </ModalShell>,
           document.body
         )
       : null;
@@ -1160,11 +1161,11 @@ export function LoansPage() {
   const paymentModal =
     isPaymentOpen && paymentLoan
       ? createPortal(
-          <section className="modal-shell">
+          <ModalShell labelledBy="loan-update-title" onClose={closePaymentModal}>
             <div className="modal-card max-w-2xl">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-lg font-semibold">Update</h3>
+                  <h3 id="loan-update-title" className="text-lg font-semibold">Update</h3>
                   <p className="text-xs text-black/70">
                     {paymentLoan.loanAccountNo} | {paymentLoan.memberName}
                   </p>
@@ -1247,7 +1248,7 @@ export function LoansPage() {
                 )}
               </div>
             </div>
-          </section>,
+          </ModalShell>,
           document.body
         )
       : null;

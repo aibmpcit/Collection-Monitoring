@@ -1,3 +1,4 @@
+import { ModalShell } from "../components/ModalShell";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -181,10 +182,10 @@ export function BranchesPage() {
   const createModal =
     isCreateOpen &&
     createPortal(
-      <section className="modal-shell">
+      <ModalShell labelledBy="branch-form-title" onClose={closeCreateModal}>
         <div className="modal-card max-w-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold">{editingBranch ? "Edit Branch" : "Create Branch"}</h3>
+            <h3 id="branch-form-title" className="text-lg font-semibold">{editingBranch ? "Edit Branch" : "Create Branch"}</h3>
             <button type="button" className="btn-muted" onClick={closeCreateModal}>
               Close
             </button>
@@ -227,7 +228,7 @@ export function BranchesPage() {
             </div>
           </form>
         </div>
-      </section>,
+      </ModalShell>,
       document.body
     );
 

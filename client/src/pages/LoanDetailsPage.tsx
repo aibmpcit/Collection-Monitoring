@@ -1,3 +1,4 @@
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { motion } from "framer-motion";
 import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -325,6 +326,10 @@ export function LoanDetailsPage() {
     }
   }
 
+  // Escape closes the payment summary and the loan details window (the forms are native dialogs).
+  useEscapeToClose(Boolean(summaryPayment), () => setSummaryPayment(null));
+  useEscapeToClose(detailsExpanded, () => setDetailsExpanded(false));
+
   if (loading) {
     return (
       <main className="page-shell">
@@ -337,8 +342,7 @@ export function LoanDetailsPage() {
     <main className="page-shell">
       {loan && summaryPayment && createPortal(
         <section className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="payment-summary-title"
-          onMouseDown={event => { if (event.target === event.currentTarget) setSummaryPayment(null); }}
-          onKeyDown={event => { if (event.key === "Escape") setSummaryPayment(null); }}>
+          onMouseDown={event => { if (event.target === event.currentTarget) setSummaryPayment(null); }}>
           <div className="modal-card max-w-3xl">
             <div className="flex items-center justify-between gap-3">
               <h2 id="payment-summary-title" className="text-xl font-semibold">Payment Summary</h2>
@@ -376,7 +380,7 @@ export function LoanDetailsPage() {
       />}
       {paymentModalOpen && createPortal(
         <dialog ref={paymentDialogRef} aria-labelledby="payment-modal-title"
-          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
+          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
           onCancel={event => { event.preventDefault(); if (!paymentsSubmitting) { setPaymentModalOpen(false); setEditingPaymentId(null); } }}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 id="payment-modal-title" className="text-lg font-semibold">{editingPaymentId ? "Edit Payment" : "Add Payment"}</h2>
@@ -437,7 +441,7 @@ export function LoanDetailsPage() {
       )}
       {remarkModalOpen && createPortal(
         <dialog ref={remarkDialogRef} aria-labelledby="remark-modal-title"
-          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/40"
+          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
           onCancel={event => { event.preventDefault(); if (!remarksSubmitting) { setRemarkModalOpen(false); setEditingRemarkId(null); } }}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Action Taken" : "Add Action Taken"}</h2>
@@ -538,9 +542,7 @@ export function LoanDetailsPage() {
 
           {/* Loan details live in a window opened from the member's name, keeping the page short on phones. */}
           {detailsExpanded && createPortal(
-            <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-end justify-center bg-slate-950/45 sm:items-center sm:p-4" role="presentation"
-              onMouseDown={() => setDetailsExpanded(false)}
-              onKeyDown={event => { if (event.key === "Escape") setDetailsExpanded(false); }}>
+            <div className="modal-sheet-shell" role="presentation" onMouseDown={() => setDetailsExpanded(false)}>
               <section className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6"
                 role="dialog" aria-modal="true" aria-labelledby="loan-details-title" onMouseDown={event => event.stopPropagation()}>
                 <div className="mb-4 flex items-start justify-between gap-3">
@@ -587,7 +589,7 @@ export function LoanDetailsPage() {
                 }`}
                 onClick={() => setHistoryTab("remarks")}
               >
-                Remarks
+                Actions Taken
               </button>
               <button
                 type="button"

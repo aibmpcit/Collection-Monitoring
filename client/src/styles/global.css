@@ -362,6 +362,14 @@
     animation: pop-in 240ms ease both;
   }
 
+  /* Same backdrop as .modal-shell, for popups that rise from the bottom on phones. */
+  .modal-sheet-shell {
+    @apply fixed inset-0 z-[100] flex items-end justify-center overflow-y-auto bg-slate-900/50 sm:items-center sm:p-4;
+    overscroll-behavior: contain;
+    backdrop-filter: blur(3px);
+    animation: fade-in 220ms ease both;
+  }
+
   .mobile-record-list {
     @apply grid gap-3 lg:hidden;
   }

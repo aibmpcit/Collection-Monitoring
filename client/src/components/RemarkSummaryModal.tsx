@@ -1,3 +1,4 @@
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { createPortal } from "react-dom";
 import { getRemarkCategoryLabel } from "../constants/remarkCategories";
 import { RemarkPhotoView, type RemarkPhotoInfo } from "./RemarkPhoto";
@@ -34,6 +35,7 @@ export function RemarkSummaryModal({
   photoPath?: string;
   onClose: () => void;
 }) {
+  useEscapeToClose(open, onClose);
   if (!open || typeof document === "undefined") return null;
   const displayDate = Number.isNaN(new Date(createdAt).getTime()) ? createdAt : new Date(createdAt).toLocaleString();
   return createPortal(

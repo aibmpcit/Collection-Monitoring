@@ -1,3 +1,5 @@
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
+import { createPortal } from "react-dom";
 import { Camera, Paperclip } from "lucide-react";
 import { RemarkPhotoView } from "../components/RemarkPhoto";
 import { MapLink } from "../components/FieldEvidence";
@@ -84,6 +86,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  useEscapeToClose(Boolean(selectedActivity), () => setSelectedActivity(null));
   const activeTab = params.get("type") ?? "all";
   const requestParams = new URLSearchParams(params);
   requestParams.delete("type");
@@ -363,7 +366,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     <ExportChoiceDialog open={exportChoiceOpen} title="Export collection history"
       description={`${exportFrom} to ${exportTo} · uses your current filters`}
       onExcel={() => void exportExcelReport()} onPdf={() => void exportPaymentReport()} onClose={() => setExportChoiceOpen(false)} />
-    {selectedActivity && <div className="fixed left-0 top-0 z-[200] flex h-[100dvh] w-screen items-end justify-center overflow-y-auto bg-slate-950/45 sm:items-center sm:p-4" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
+    {selectedActivity && typeof document !== "undefined" && createPortal(<div className="modal-sheet-shell" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
       <section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -415,6 +418,6 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           }}><Paperclip size={14} aria-hidden="true" /><span className="truncate">Download {selectedActivity.attachment_name}</span></button>}
         </div>}
       </section>
-    </div>}
+    </div>, document.body)}
   </main>;
 }

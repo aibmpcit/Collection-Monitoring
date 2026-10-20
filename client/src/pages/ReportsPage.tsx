@@ -211,7 +211,7 @@ export function ReportsPage() {
       if (isSuperAdmin && userReport) {
         XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rankedUsers.map((row, index) => ({
           Rank: index + 1, Account: row.username, Role: ROLE_LABELS[row.role] ?? row.role, Branch: row.branchName,
-          Actions: row.actions, Payments: row.payments, Remarks: row.remarks, Collected: row.collected,
+          Actions: row.actions, Payments: row.payments, "Actions Taken": row.remarks, Collected: row.collected,
           Logins: row.logins, Visits: row.visits, "Screen time (minutes)": Math.floor(row.screenSeconds / 60),
           "Last seen": lastSeen(row.lastSeenAt)
         }))), "User Activity");

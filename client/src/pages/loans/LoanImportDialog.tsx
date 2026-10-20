@@ -1,3 +1,4 @@
+import { ModalShell } from "../../components/ModalShell";
 import { Download, Upload } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
@@ -155,8 +156,8 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
   }
 
   return createPortal(
-    <section className="modal-shell">
-      <div className="modal-card max-w-xl" role="dialog" aria-modal="true" aria-labelledby="loan-import-title">
+    <ModalShell labelledBy="loan-import-title" onClose={onClose} busy={pending}>
+      <div className="modal-card max-w-xl">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h3 id="loan-import-title" className="text-lg font-semibold">Import Loans</h3>
           <button type="button" className="btn-muted" onClick={onClose} disabled={pending}>Close</button>
@@ -250,7 +251,7 @@ export function LoanImportDialog({ isSuperAdmin, branches, importBranchId, setIm
           <p className="text-xs text-black/60">Columns: Member Code, Member Name, Address, Contact No., Loan Account Number, Loan Product, Release Date, Maturity, Loan Amount, Loan Balance, Principal Arrears, Interest, Fines, Total, PAR Age. plus any action taken columns (Personal Visit, Demand Letter, …).</p>
         </div>
       </div>
-    </section>,
+    </ModalShell>,
     document.body
   );
 }

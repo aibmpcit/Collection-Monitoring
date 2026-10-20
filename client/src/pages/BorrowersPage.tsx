@@ -1,3 +1,4 @@
+import { ModalShell } from "../components/ModalShell";
 import { Camera, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -499,10 +500,10 @@ export function BorrowersPage() {
 
   const memberFormModal = isFormOpen && canManageMembers
     ? createPortal(
-        <section className="modal-shell">
+        <ModalShell labelledBy="member-form-title" onClose={closeForm}>
           <div className="modal-card max-w-xl">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-lg font-semibold">{editingId ? "Edit Member" : "Add Member"}</h3>
+              <h3 id="member-form-title" className="text-lg font-semibold">{editingId ? "Edit Member" : "Add Member"}</h3>
               <button type="button" className="btn-muted" onClick={closeForm}>
                 Close
               </button>
@@ -549,17 +550,17 @@ export function BorrowersPage() {
               </div>
             </form>
           </div>
-        </section>,
+        </ModalShell>,
         document.body
       )
     : null;
 
   const memberImportModal = isImportOpen && canImportMembers
     ? createPortal(
-        <section className="modal-shell">
+        <ModalShell labelledBy="member-import-title" onClose={closeImportModal}>
           <div className="modal-card max-w-xl">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-lg font-semibold">Import Members</h3>
+              <h3 id="member-import-title" className="text-lg font-semibold">Import Members</h3>
               <button type="button" className="btn-muted" onClick={closeImportModal}>
                 Close
               </button>
@@ -586,18 +587,18 @@ export function BorrowersPage() {
               <p className="text-xs text-black/60">CSV/Excel: CIF Key, Member Name, Contact Info, Address</p>
             </div>
           </div>
-        </section>,
+        </ModalShell>,
         document.body
       )
     : null;
 
   const memberHistoryModal = historyBorrower
     ? createPortal(
-        <section className="modal-shell">
+        <ModalShell labelledBy="member-history-title" onClose={closeHistoryModal}>
           <div className="modal-card max-w-6xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-lg font-semibold">Member History</h3>
+                <h3 id="member-history-title" className="text-lg font-semibold">Member History</h3>
                 <p className="text-xs text-black/70">
                   {historyBorrower.cifKey} | {historyBorrower.memberName}
                 </p>
@@ -779,18 +780,18 @@ export function BorrowersPage() {
               </div>
             )}
           </div>
-        </section>,
+        </ModalShell>,
         document.body
       )
     : null;
 
   const memberRemarksModal = remarksBorrower
     ? createPortal(
-        <section className="modal-shell">
+        <ModalShell labelledBy="member-actions-title" onClose={closeRemarksModal} busy={remarksSubmitting}>
           <div className="modal-card max-w-3xl">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h3 className="text-lg font-semibold">Member Actions Taken</h3>
+                <h3 id="member-actions-title" className="text-lg font-semibold">Member Actions Taken</h3>
                 <p className="text-xs text-black/70">
                   {remarksBorrower.cifKey} | {remarksBorrower.memberName}
                 </p>
@@ -875,7 +876,7 @@ export function BorrowersPage() {
               )}
             </div>
           </div>
-        </section>,
+        </ModalShell>,
         document.body
       )
     : null;

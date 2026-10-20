@@ -1,5 +1,6 @@
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { SlidersHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 
 export interface FilterField {
@@ -33,12 +34,7 @@ export function FilterButton({ fields, values, onChange }: {
   const active = fields.filter(field => !field.isSort && values[field.key]).length;
   const hasChanges = fields.some(field => values[field.key]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
+  useEscapeToClose(open, () => setOpen(false));
 
   function clearAll() {
     onChange({ ...Object.fromEntries(fields.map(field => [field.key, ""])), dateFrom: "", dateTo: "" });
