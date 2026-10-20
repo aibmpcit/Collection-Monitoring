@@ -169,7 +169,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       try {
         assertBranchAccess(user, Number(branchId));
       } catch {
-        skipped.push({ id: paymentId, reason: "forbidden" });
+        skipped.push({ id: paymentId, reason: "not_found" }); // another branch's record counts as missing
         continue;
       }
 
@@ -203,7 +203,7 @@ router.delete("/:paymentId", authenticate, authorize(["super_admin", "branch_adm
     if (branchId == null) {
       return res.status(404).json({ message: "Payment not found" });
     }
-    assertBranchAccess(user, Number(branchId));
+    assertBranchAccess(user, Number(branchId), "Payment not found");
 
     const loanId = await paymentLoanId(paymentId);
     await query("DELETE FROM payment_proofs WHERE payment_id = $1", [paymentId]);

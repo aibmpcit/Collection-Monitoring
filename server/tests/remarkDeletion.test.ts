@@ -36,10 +36,12 @@ it("deletes remarks and attachments once per id in a transaction", async () => {
   expect(mocks.query).toHaveBeenNthCalledWith(3, "DELETE FROM remark_photos WHERE remark_kind = $1 AND remark_id = $2", ["loan", 4]);
   expect(mocks.query).toHaveBeenNthCalledWith(4, "DELETE FROM loan_remarks WHERE id = $1", [4]);
 });
-it("rejects another branch without deleting", async () => {
+it("skips another branch's action like a missing one, without deleting", async () => {
   mocks.query.mockResolvedValue({ rows: [{ branch_id: 3 }] });
-  expect((await remove([4])).status).toBe(403);
+  const response = await remove([4]);
+  expect(response.status).toBe(200);
   expect(mocks.query).toHaveBeenCalledTimes(1);
+  expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("DELETE"))).toBe(false);
 });
 it("rejects staff", async () => {
   mocks.role = "staff";

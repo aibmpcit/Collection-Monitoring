@@ -1,3 +1,4 @@
+import { detectFileType, PHOTO_TYPES } from "./fileTypes.js";
 import { query, type QueryClient } from "../config/db.js";
 import { toBusinessDateTime } from "../config/time.js";
 import type { RemarkKind } from "./remarkAttachments.js";
@@ -17,7 +18,6 @@ export interface PhotoPayload {
   capturedAt: string;
 }
 
-const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 export async function ensureRemarkPhotoTable() {
@@ -56,12 +56,15 @@ export function parsePhoto(value: unknown): PhotoPayload | null | undefined {
   if (value === null) return null;
   if (typeof value !== "object") throw invalid("Invalid photo");
   const raw = value as Record<string, unknown>;
-  const type = String(raw.type ?? "").trim().toLowerCase();
-  if (!PHOTO_TYPES.has(type)) throw invalid("Photo must be a JPEG, PNG or WebP image");
   const data = String(raw.data ?? "").replace(/^data:[^;]+;base64,/, "");
-  const bytes = Buffer.from(data, "base64").length;
-  if (!data || bytes === 0) throw invalid("Invalid photo");
-  if (bytes > MAX_PHOTO_BYTES) throw invalid("Photo must be 5 MB or smaller");
+  // Size is known from the base64 length before decoding anything.
+  if (!data || Math.floor(data.length * 3 / 4) > MAX_PHOTO_BYTES + 3) throw invalid(data ? "Photo must be 5 MB or smaller" : "Invalid photo");
+  const buffer = Buffer.from(data, "base64");
+  if (buffer.length === 0) throw invalid("Invalid photo");
+  if (buffer.length > MAX_PHOTO_BYTES) throw invalid("Photo must be 5 MB or smaller");
+  // The file's own bytes decide its type, not the type the browser claims.
+  const type = detectFileType(buffer);
+  if (!type || !PHOTO_TYPES.has(type)) throw invalid("Photo must be a JPEG, PNG or WebP image");
   const latitude = coordinate(raw.latitude, 90);
   const longitude = coordinate(raw.longitude, 180);
   if ((latitude === null) !== (longitude === null)) throw invalid("Invalid photo location");

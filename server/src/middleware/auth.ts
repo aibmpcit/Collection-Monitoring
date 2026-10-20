@@ -10,6 +10,8 @@ interface AuthedRequest extends Request {
 }
 
 export async function authenticate(req: AuthedRequest, res: Response, next: NextFunction) {
+  // Already verified for this request (the default-deny guard in app.ts runs first).
+  if (req.user) return next();
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {

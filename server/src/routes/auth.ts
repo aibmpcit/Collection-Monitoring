@@ -3,11 +3,12 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { requiredEnv } from "../config/env.js";
 import { query } from "../config/db.js";
-import { verifyPassword } from "../services/access.js";
+import { spendPasswordCheckTime, verifyPassword } from "../services/access.js";
 import type { Role } from "../types/models.js";
 import { authenticate, type AuthedRequest } from "../middleware/auth.js";
 import { parsePermissions } from "../services/permissions.js";
 import { recordActivity } from "../services/activity.js";
+import { recordAudit } from "../services/audit.js";
 import { loginRetryAfter, recordLoginFailure, recordLoginSuccess } from "../services/loginLimiter.js";
 
 const router = Router();
@@ -60,9 +61,14 @@ router.post("/login", async (req, res, next) => {
     );
 
     const user = result.rows[0];
-    const matches = user ? await verifyPassword(parsed.data.password, user.password_hash) : false;
+    const matches = user ? await verifyPassword(parsed.data.password, user.password_hash) : (await spendPasswordCheckTime(parsed.data.password), false);
     if (!user || !matches) {
       recordLoginFailure(username, ip);
+      // This failure reached the limit: someone may be guessing. Warn in the server log and audit it.
+      if (loginRetryAfter(username, ip) > 0) {
+        console.warn(`Sign-in locked for 15 minutes after repeated failures: username "${username.slice(0, 60)}"${ip ? ` from ${ip}` : ""}`);
+        void recordAudit({ action: "auth.lockout", details: { username: username.slice(0, 120) }, ip: ip ?? req.socket.remoteAddress ?? null });
+      }
       return res.status(401).json({ message: "Invalid credentials" });
     }
     recordLoginSuccess(username);

@@ -49,7 +49,7 @@ router.post("/:loanId/draft", authenticate, async (req: AuthedRequest, res, next
     if (!loan) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(loan.branch_id ?? 0));
+    assertBranchAccess(user, Number(loan.branch_id ?? 0), "Loan not found");
 
     const total =
       toNumber(loan.principal_due ?? loan.principal ?? 0) +

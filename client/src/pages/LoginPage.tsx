@@ -94,6 +94,7 @@ export function LoginPage() {
                   className="field h-12 pl-11 text-base sm:text-sm"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Enter your username"
                   autoComplete="username"
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -116,6 +117,7 @@ export function LoginPage() {
                   onKeyUp={(event) => setCapsLock(event.getModifierState("CapsLock"))}
                   onBlur={() => setCapsLock(false)}
                   type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
                   autoComplete="current-password"
                   required
                   disabled={pending}

@@ -42,4 +42,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+# Keep Node's heap under the container's 1 GB memory limit (compose mem_limit).
+ENV NODE_OPTIONS=--max-old-space-size=768
 CMD ["sh", "-c", "node server/dist/scripts/migrate.js && node server/dist/index.js"]

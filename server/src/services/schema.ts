@@ -1,3 +1,4 @@
+import { ensureAuditTable } from "./audit.js";
 import { query } from "../config/db.js";
 import { ensureRemarkAttachmentTable } from "./remarkAttachments.js";
 import { ensureRemarkPhotoTable } from "./remarkPhotos.js";
@@ -27,6 +28,7 @@ async function ensureIndex(tableName: string, indexName: string, columns: string
 }
 
 export async function ensureSchema() {
+  await ensureAuditTable();
   await query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     id VARCHAR(190) NOT NULL,
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -48,6 +50,11 @@ export async function ensureSchema() {
   // Payment type (partial / settled); the newest one is the loan's field status.
   if (!(await columnExists("collections", "payment_status"))) {
     await query("ALTER TABLE collections ADD COLUMN payment_status VARCHAR(16) NULL");
+  }
+
+  // One id per save attempt, so a double tap or a retry can't record the same payment twice.
+  if (!(await columnExists("collections", "request_id"))) {
+    await query("ALTER TABLE collections ADD COLUMN request_id VARCHAR(64) NULL, ADD UNIQUE KEY uq_collections_request (request_id)");
   }
 
   // Field status from the newest payment's type.

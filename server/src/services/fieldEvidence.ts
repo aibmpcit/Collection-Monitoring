@@ -1,3 +1,4 @@
+import { detectFileType, storedAttachmentType } from "./fileTypes.js";
 import { query, type QueryClient } from "../config/db.js";
 import { toBusinessDateTime } from "../config/time.js";
 
@@ -72,12 +73,17 @@ export function parsePaymentProof(value: unknown): PaymentProofPayload | undefin
   const raw = value as Record<string, unknown>;
   const kind = raw.kind === "photo" ? "photo" : raw.kind === "attachment" ? "attachment" : null;
   if (!kind) throw invalid("Payment proof must be a photo or an attachment");
-  const type = String(raw.type ?? "").trim().toLowerCase().slice(0, 120) || "application/octet-stream";
-  if (kind === "photo" && !type.startsWith("image/")) throw invalid("The payment photo must be an image");
   const data = String(raw.data ?? "").replace(/^data:[^;]+;base64,/, "");
-  const bytes = Buffer.from(data, "base64").length;
-  if (!data || bytes === 0) throw invalid("Payment proof file is empty");
-  if (bytes > MAX_PROOF_BYTES) throw invalid("Payment proof must be 5 MB or smaller");
+  if (!data) throw invalid("Payment proof file is empty");
+  // Size is known from the base64 length before decoding anything.
+  if (Math.floor(data.length * 3 / 4) > MAX_PROOF_BYTES + 3) throw invalid("Payment proof must be 5 MB or smaller");
+  const buffer = Buffer.from(data, "base64");
+  if (buffer.length === 0) throw invalid("Payment proof file is empty");
+  if (buffer.length > MAX_PROOF_BYTES) throw invalid("Payment proof must be 5 MB or smaller");
+  // The file's own bytes decide its type, not the type the browser claims.
+  const detected = detectFileType(buffer);
+  if (kind === "photo" && !detected?.startsWith("image/")) throw invalid("The payment photo must be an image");
+  const type = kind === "photo" ? detected! : storedAttachmentType(buffer);
   const point = parseGeoPoint(raw, "Payment proof needs a location. Allow location access and try again.");
   const capturedAt = toBusinessDateTime(typeof raw.capturedAt === "string" ? raw.capturedAt : undefined);
   if (!capturedAt) throw invalid("Invalid payment proof time");

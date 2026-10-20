@@ -1,3 +1,4 @@
+import { newRequestId } from "../services/requestId";
 import { ModalShell } from "../components/ModalShell";
 import { hasPermission } from "../services/permissions";
 import { MoreVertical, Search } from "lucide-react";
@@ -106,6 +107,8 @@ export function LoansPage() {
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "">("");
   const [paymentProof, setPaymentProof] = useState<PaymentProofUpload | null>(null);
+  // One id per payment form: a double tap or retry returns the saved payment instead of a second one.
+  const paymentRequestId = useRef(newRequestId());
   const [paymentDateTime, setPaymentDateTime] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
@@ -869,6 +872,7 @@ export function LoansPage() {
   }
 
   async function openPaymentModal(loan: LoanQuickRef) {
+    paymentRequestId.current = newRequestId();
     setPaymentLoan({ id: loan.id, loanAccountNo: loan.loanAccountNo, memberName: loan.memberName });
     setPayments([]);
     setPaymentAmount("");
@@ -922,8 +926,10 @@ export function LoansPage() {
         orNo,
         collectedAt: paymentDateTime,
         paymentStatus,
-        proof: proofPayload(paymentProof)
+        proof: proofPayload(paymentProof),
+        requestId: paymentRequestId.current
       });
+      paymentRequestId.current = newRequestId();
       setPaymentAmount("");
       setPaymentOrNo("");
       setPaymentStatus("");

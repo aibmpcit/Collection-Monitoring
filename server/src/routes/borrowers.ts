@@ -1,3 +1,4 @@
+import { canShowInline, servedContentType } from "../services/fileTypes.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query, withTransaction } from "../config/db.js";
@@ -356,7 +357,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       try {
         assertBranchAccess(user, Number(owner.rows[0].branch_id ?? 0));
       } catch {
-        skipped.push({ id: borrowerId, reason: "forbidden" });
+        skipped.push({ id: borrowerId, reason: "not_found" }); // another branch's record counts as missing
         continue;
       }
 
@@ -393,7 +394,7 @@ router.patch("/:borrowerId", authenticate, authorize(["super_admin", "branch_adm
     if (branchId == null) {
       return res.status(404).json({ message: "Borrower not found" });
     }
-    assertBranchAccess(user, branchId);
+    assertBranchAccess(user, branchId, "Borrower not found");
 
     await query(
       `UPDATE borrowers
@@ -438,7 +439,7 @@ router.delete("/:borrowerId", authenticate, authorize(["super_admin", "branch_ad
     if (branchId == null) {
       return res.status(404).json({ message: "Borrower not found" });
     }
-    assertBranchAccess(user, branchId);
+    assertBranchAccess(user, branchId, "Borrower not found");
 
     const loanCount = await query<{ total: string }>("SELECT COUNT(*) AS total FROM loans WHERE borrower_id = $1", [borrowerId]);
     if (Number(loanCount.rows[0]?.total ?? 0) > 0) {
@@ -464,7 +465,7 @@ router.get("/:borrowerId/remarks", authenticate, async (req: AuthedRequest, res,
     if (branchId == null) {
       return res.status(404).json({ message: "Borrower not found" });
     }
-    assertBranchAccess(user, branchId);
+    assertBranchAccess(user, branchId, "Borrower not found");
 
     const result = await query<{
       id: number;
@@ -533,7 +534,7 @@ router.post("/:borrowerId/remarks", authenticate, authorizePermission("add_remar
     if (branchId == null) {
       return res.status(404).json({ message: "Borrower not found" });
     }
-    assertBranchAccess(user, branchId);
+    assertBranchAccess(user, branchId, "Borrower not found");
 
     const category = normalizeRemarkCategory(typeof req.body?.remarkCategory === "string" ? req.body.remarkCategory : undefined);
     const attachment = parseAttachment(req.body?.attachment);
@@ -578,7 +579,7 @@ router.patch("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_a
     );
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0), "Action taken not found");
     if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only edit your own actions taken" });
     }
@@ -618,7 +619,7 @@ router.delete("/:borrowerId/remarks/:remarkId", authenticate, authorize(["super_
     );
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0), "Action taken not found");
     if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only delete your own actions taken" });
     }
@@ -645,11 +646,11 @@ router.get("/:borrowerId/remarks/:remarkId/attachment", authenticate, async (req
     );
     const remark = existing.rows[0];
     if (!remark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    assertBranchAccess(user, Number(remark.branch_id ?? 0), "Action taken not found");
     if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
     const attachment = await getRemarkAttachment("member", remarkId);
     if (!attachment) return res.status(404).json({ message: "Attachment not found" });
-    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Type", servedContentType(attachment.mime_type));
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
     return res.send(attachment.file_data);
   } catch (error) { return next(error); }
@@ -667,13 +668,13 @@ router.get("/:borrowerId/remarks/:remarkId/photo", authenticate, async (req: Aut
     );
     const remark = existing.rows[0];
     if (!remark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    assertBranchAccess(user, Number(remark.branch_id ?? 0), "Action taken not found");
     if (user.role === "staff" && Number(remark.created_by) !== user.id) return res.status(403).json({ message: "Forbidden" });
     const photo = await getRemarkPhoto("member", remarkId);
     if (!photo) return res.status(404).json({ message: "Photo not found" });
-    res.setHeader("Content-Type", photo.mime_type);
+    res.setHeader("Content-Type", servedContentType(photo.mime_type));
     res.setHeader("Cache-Control", "private, max-age=3600");
-    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
+    res.setHeader("Content-Disposition", `${canShowInline(photo.mime_type) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
     return res.send(photo.file_data);
   } catch (error) { return next(error); }
 });

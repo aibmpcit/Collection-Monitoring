@@ -60,6 +60,13 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, normalizePasswordHash(hash));
 }
 
+// A real bcrypt hash (cost 10) of a random value, compared when the username doesn't exist so a
+// sign-in takes as long for unknown usernames as for wrong passwords (no username discovery by timing).
+const UNKNOWN_USER_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8.rWIrDx5yqBOqZQXH9Ya0Z5Y5Vb3W";
+export async function spendPasswordCheckTime(password: string) {
+  await bcrypt.compare(password, UNKNOWN_USER_HASH);
+}
+
 export function formatPaymentId(id: number): string {
   return `PAY-${String(id).padStart(6, "0")}`;
 }
@@ -94,11 +101,16 @@ export function requireRole(user: JwtUser | undefined, roles: Role[]) {
   return Boolean(user && roles.includes(user.role));
 }
 
-export function assertBranchAccess(user: JwtUser, resourceBranchId: number) {
+/**
+ * Another branch's record answers 404 like a missing one: with sequential ids, a 403 would confirm
+ * that the record exists.
+ */
+export function assertBranchAccess(user: JwtUser, resourceBranchId: number, notFoundMessage = "Not found") {
   if (isSuperAdmin(user)) return;
   if (userBranchId(user) <= 0 || resourceBranchId <= 0 || userBranchId(user) !== resourceBranchId) {
-    const error = new Error("Forbidden");
-    (error as Error & { status?: number }).status = 403;
+    // Same message the route gives for a missing record, so the two can't be told apart.
+    const error = new Error(notFoundMessage);
+    (error as Error & { status?: number }).status = 404;
     throw error;
   }
 }

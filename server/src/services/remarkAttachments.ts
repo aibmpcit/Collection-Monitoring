@@ -1,3 +1,4 @@
+import { storedAttachmentType } from "./fileTypes.js";
 import { query } from "../config/db.js";
 
 export type RemarkKind = "loan" | "member";
@@ -28,14 +29,16 @@ export function parseAttachment(value: unknown): AttachmentPayload | null | unde
   if (!value || typeof value !== "object") throw Object.assign(new Error("Invalid attachment"), { status: 400 });
   const raw = value as Record<string, unknown>;
   const name = String(raw.name ?? "").trim().slice(0, 255);
-  const type = String(raw.type ?? "application/octet-stream").trim().slice(0, 120) || "application/octet-stream";
   const data = String(raw.data ?? "").replace(/^data:[^;]+;base64,/, "");
   if (!name || !data) throw Object.assign(new Error("Invalid attachment"), { status: 400 });
+  // Size is known from the base64 length before decoding anything.
+  if (Math.floor(data.length * 3 / 4) > 5 * 1024 * 1024 + 3) throw Object.assign(new Error("Attachment must be 5 MB or smaller"), { status: 400 });
   const buffer = Buffer.from(data, "base64");
   if (buffer.length === 0 || buffer.length > 5 * 1024 * 1024) {
     throw Object.assign(new Error("Attachment must be 5 MB or smaller"), { status: 400 });
   }
-  return { name, type, data };
+  // Stored by the type its bytes show; anything unrecognised is kept as a plain download.
+  return { name, type: storedAttachmentType(buffer), data };
 }
 
 export async function saveRemarkAttachment(kind: RemarkKind, remarkId: number, attachment: AttachmentPayload | null | undefined) {

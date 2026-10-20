@@ -1,3 +1,4 @@
+import { canShowInline, servedContentType } from "../services/fileTypes.js";
 import { Router } from "express";
 import { z } from "zod";
 import { query, withTransaction } from "../config/db.js";
@@ -361,7 +362,7 @@ router.post("/", authenticate, authorize(["super_admin", "branch_admin"]), async
     if (!borrower) {
       return res.status(404).json({ message: "Borrower not found" });
     }
-    assertBranchAccess(user, Number(borrower.branch_id ?? 0));
+    assertBranchAccess(user, Number(borrower.branch_id ?? 0), "Borrower not found");
 
     const created = await withTransaction(async (client) => {
       const loanAccountNo = parsed.data.loanAccountNo.trim() || (await nextLoanAccountNo(client));
@@ -1087,7 +1088,8 @@ router.delete("/remarks/bulk", authenticate, authorize(["super_admin", "branch_a
           "SELECT b.branch_id, r.loan_id FROM loan_remarks r JOIN loans l ON l.id = r.loan_id JOIN borrowers b ON b.id = l.borrower_id WHERE r.id = $1 FOR UPDATE", [id]
         );
         if (!existing.rows[0]) continue;
-        assertBranchAccess(user, Number(existing.rows[0].branch_id));
+        // Another branch's action is skipped exactly like an id that doesn't exist.
+        try { assertBranchAccess(user, Number(existing.rows[0].branch_id)); } catch { continue; }
         await client.query("DELETE FROM remark_attachments WHERE remark_kind = 'loan' AND remark_id = $1", [id]);
         await deleteRemarkPhoto(client, "loan", id);
         await client.query("DELETE FROM loan_remarks WHERE id = $1", [id]);
@@ -1124,7 +1126,7 @@ router.delete("/bulk", authenticate, authorize(["super_admin", "branch_admin"]),
       try {
         assertBranchAccess(user, Number(context.branch_id ?? 0));
       } catch {
-        skipped.push({ id: loanId, reason: "forbidden" });
+        skipped.push({ id: loanId, reason: "not_found" }); // another branch's record counts as missing
         continue;
       }
 
@@ -1192,7 +1194,7 @@ router.get("/:loanId", authenticate, async (req: AuthedRequest, res, next) => {
     if (!row) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(row.branch_id ?? 0));
+    assertBranchAccess(user, Number(row.branch_id ?? 0), "Loan not found");
 
     return res.json({
       ...mapLoanRow(row),
@@ -1218,7 +1220,7 @@ router.patch("/:loanId", authenticate, authorize(["super_admin", "branch_admin",
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     const parsed = loanSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1273,7 +1275,7 @@ router.delete("/:loanId", authenticate, authorize(["super_admin", "branch_admin"
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     await query("UPDATE loans SET status = 'closed', closed_reason = 'deleted', closed_at = NOW() WHERE id = $1", [loanId]);
 
@@ -1291,7 +1293,7 @@ router.get("/:loanId/payments", authenticate, async (req: AuthedRequest, res, ne
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     const result = await query<{
       id: number;
@@ -1353,7 +1355,7 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ message: "Payment amount must be greater than 0" });
@@ -1378,15 +1380,46 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
     if (!collectedAt) {
       return res.status(400).json({ message: "Invalid payment date/time" });
     }
-    const created = await withTransaction(async client => {
-      const inserted = await client.query<{ id: number }>(
-        "INSERT INTO collections (loan_id, amount, or_no, collected_at, payment_status, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        [loanId, amount, orNo || null, collectedAt, paymentStatus, user.id]
-      );
-      await savePaymentProof(client, inserted.rows[0].id, proof);
-      await refreshLoanActionStatus(client, loanId);
-      return inserted;
-    });
+    // Idempotency: the same request id (a double tap or a retry) returns the payment already saved.
+    const rawRequestId = req.body?.requestId;
+    const requestId = typeof rawRequestId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(rawRequestId) ? rawRequestId : null;
+    const findSaved = async () => requestId ? (await query<{ id: number; loan_id: number; amount: number; or_no: string | null;
+      collected_at: string; payment_status: string; created_by: number | null }>(
+      "SELECT id, loan_id, amount, or_no, collected_at, payment_status, created_by FROM collections WHERE request_id = $1 LIMIT 1", [requestId]
+    )).rows[0] : undefined;
+    const replay = (saved: NonNullable<Awaited<ReturnType<typeof findSaved>>>) => {
+      // An id belongs to the payment it first saved; reuse by anyone else, or for another loan, is refused.
+      if (Number(saved.loan_id) !== loanId || Number(saved.created_by) !== user.id) {
+        return res.status(409).json({ message: "This payment request was already used" });
+      }
+      return res.status(200).json({
+        id: saved.id, paymentId: formatPaymentId(saved.id), loanId, amount: Number(saved.amount), orNo: saved.or_no ?? "",
+        paymentStatus: saved.payment_status, collectedBy: user.username, collectedAt: saved.collected_at, replayed: true
+      });
+    };
+    const already = await findSaved();
+    if (already) return replay(already);
+
+    let created: { rows: Array<{ id: number }> };
+    try {
+      created = await withTransaction(async client => {
+        const inserted = await client.query<{ id: number }>(
+          "INSERT INTO collections (loan_id, amount, or_no, collected_at, payment_status, created_by, request_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+          [loanId, amount, orNo || null, collectedAt, paymentStatus, user.id, requestId]
+        );
+        await savePaymentProof(client, inserted.rows[0].id, proof);
+        await refreshLoanActionStatus(client, loanId);
+        return inserted;
+      });
+    } catch (error) {
+      // Two copies arrived at once: the other one saved it.
+      const duplicate = error as { code?: string; sqlMessage?: string };
+      if (duplicate.code === "ER_DUP_ENTRY" && duplicate.sqlMessage?.includes("uq_collections_request")) {
+        const saved = await findSaved();
+        if (saved) return replay(saved);
+      }
+      throw error;
+    }
 
     return res.status(201).json({
       id: created.rows[0].id,
@@ -1423,7 +1456,7 @@ router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_adm
     );
     const payment = existing.rows[0];
     if (!payment) return res.status(404).json({ message: "Payment not found" });
-    assertBranchAccess(user, Number(payment.branch_id ?? 0));
+    assertBranchAccess(user, Number(payment.branch_id ?? 0), "Payment not found");
     if ((user.role === "staff" || user.role === "las") && Number(payment.created_by) !== user.id) {
       return res.status(403).json({ message: "You can only edit your own payments" });
     }
@@ -1464,7 +1497,7 @@ router.patch("/:loanId/penalty", authenticate, authorize(["super_admin", "branch
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     if (!Number.isFinite(penalty) || penalty < 0) {
       return res.status(400).json({ message: "Penalty must be a positive number" });
@@ -1485,7 +1518,7 @@ router.get("/:loanId/remarks", authenticate, async (req: AuthedRequest, res, nex
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     const result = await query<{
       id: number;
@@ -1551,7 +1584,7 @@ router.post("/:loanId/remarks", authenticate, authorizePermission("add_remarks")
     if (!context) {
       return res.status(404).json({ message: "Loan not found" });
     }
-    assertBranchAccess(user, Number(context.branch_id ?? 0));
+    assertBranchAccess(user, Number(context.branch_id ?? 0), "Loan not found");
 
     if (!remark) {
       return res.status(400).json({ message: "Action taken is required" });
@@ -1600,7 +1633,7 @@ router.patch("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admin
     );
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0), "Action taken not found");
     if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only edit your own actions taken" });
     }
@@ -1641,7 +1674,7 @@ router.delete("/:loanId/remarks/:remarkId", authenticate, authorize(["super_admi
     );
     const existingRemark = existing.rows[0];
     if (!existingRemark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0));
+    assertBranchAccess(user, Number(existingRemark.branch_id ?? 0), "Action taken not found");
     if (!canManageRemark(user, existingRemark.created_by)) {
       return res.status(403).json({ message: "You can only delete your own actions taken" });
     }
@@ -1668,11 +1701,11 @@ router.get("/:loanId/remarks/:remarkId/attachment", authenticate, async (req: Au
     );
     const remark = existing.rows[0];
     if (!remark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    assertBranchAccess(user, Number(remark.branch_id ?? 0), "Action taken not found");
 
     const attachment = await getRemarkAttachment("loan", remarkId);
     if (!attachment) return res.status(404).json({ message: "Attachment not found" });
-    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Type", servedContentType(attachment.mime_type));
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.file_name)}`);
     return res.send(attachment.file_data);
   } catch (error) { return next(error); }
@@ -1690,12 +1723,12 @@ router.get("/:loanId/remarks/:remarkId/photo", authenticate, async (req: AuthedR
     );
     const remark = existing.rows[0];
     if (!remark) return res.status(404).json({ message: "Action taken not found" });
-    assertBranchAccess(user, Number(remark.branch_id ?? 0));
+    assertBranchAccess(user, Number(remark.branch_id ?? 0), "Action taken not found");
     const photo = await getRemarkPhoto("loan", remarkId);
     if (!photo) return res.status(404).json({ message: "Photo not found" });
-    res.setHeader("Content-Type", photo.mime_type);
+    res.setHeader("Content-Type", servedContentType(photo.mime_type));
     res.setHeader("Cache-Control", "private, max-age=3600");
-    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
+    res.setHeader("Content-Disposition", `${canShowInline(photo.mime_type) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
     return res.send(photo.file_data);
   } catch (error) { return next(error); }
 });
@@ -1711,12 +1744,12 @@ router.get("/:loanId/payments/:paymentId/proof", authenticate, async (req: Authe
        WHERE c.id = $1 AND c.loan_id = $2 LIMIT 1`, [paymentId, loanId]
     );
     if (!existing.rows[0]) return res.status(404).json({ message: "Payment not found" });
-    assertBranchAccess(user, Number(existing.rows[0].branch_id ?? 0));
+    assertBranchAccess(user, Number(existing.rows[0].branch_id ?? 0), "Payment not found");
     const proof = await getPaymentProof(paymentId);
     if (!proof) return res.status(404).json({ message: "No proof for this payment" });
-    res.setHeader("Content-Type", proof.mime_type);
+    res.setHeader("Content-Type", servedContentType(proof.mime_type));
     res.setHeader("Cache-Control", "private, max-age=3600");
-    const disposition = proof.mime_type.startsWith("image/") ? "inline" : "attachment";
+    const disposition = canShowInline(proof.mime_type) ? "inline" : "attachment";
     res.setHeader("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(proof.file_name)}`);
     return res.send(proof.file_data);
   } catch (error) { return next(error); }

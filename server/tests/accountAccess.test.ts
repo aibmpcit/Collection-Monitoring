@@ -93,8 +93,8 @@ it("guards collection imports and loan additions independently", async () => {
   // Reaching payload validation proves access was granted for import only.
   expect((await request("/loans/bulk", "POST", { rows: [] })).status).toBe(400);
   expect((await request("/loans", "POST", {})).status).toBe(403);
-  expect((await request("/loans/9/remarks", "POST", { remark: "note" })).status).toBe(403);
-  expect((await request("/loans/9/payments", "POST", { amount: 10 })).status).toBe(403);
+  expect((await request("/loans/9/remarks", "POST", { remark: "note" })).status).toBe(404); // another branch's loan answers like a missing one
+  expect((await request("/loans/9/payments", "POST", { amount: 10 })).status).toBe(404);
 });
 
 it("does not let an import-enabled LAS modify an existing loan in another branch", async () => {

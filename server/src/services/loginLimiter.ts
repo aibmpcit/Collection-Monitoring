@@ -1,6 +1,7 @@
 // Failed sign-ins are limited per username (stops guessing one account from many addresses)
 // and, when the client address is trustworthy, per IP (stops one address trying many accounts).
-// Kept in memory, so limits reset when the server restarts; the app runs as a single process.
+// Counters live in memory and, once useDatabaseLoginStore() runs at startup, are also saved in the
+// database, so a restart or redeploy doesn't wipe them.
 const WINDOW_MS = 15 * 60_000;
 const MAX_FAILURES_PER_USERNAME = 10;
 const MAX_FAILURES_PER_IP = 30;
@@ -8,6 +9,40 @@ const MAX_TRACKED_KEYS = 10_000;
 
 interface Bucket { failures: number; resetAt: number }
 const buckets = new Map<string, Bucket>();
+
+interface LoginStore {
+  save(key: string, bucket: Bucket): Promise<unknown>;
+  remove(key: string): Promise<unknown>;
+}
+let store: LoginStore | null = null;
+
+function persist(key: string) {
+  if (!store) return;
+  const bucket = buckets.get(key);
+  // Saving must never block or fail a sign-in.
+  (bucket ? store.save(key, bucket) : store.remove(key)).catch(error =>
+    console.error("Unable to save sign-in limit", error instanceof Error ? error.message : error));
+}
+
+/** Loads saved counters and saves future changes to the login_failures table. */
+export async function useDatabaseLoginStore(now = Date.now()) {
+  const { query } = await import("../config/db.js");
+  await query(`CREATE TABLE IF NOT EXISTS login_failures (
+    bucket_key VARCHAR(191) NOT NULL,
+    failures INT UNSIGNED NOT NULL,
+    reset_at BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (bucket_key)
+  ) ENGINE=InnoDB`);
+  await query("DELETE FROM login_failures WHERE reset_at <= $1", [now]);
+  const saved = await query<{ bucket_key: string; failures: number; reset_at: number }>("SELECT bucket_key, failures, reset_at FROM login_failures");
+  for (const row of saved.rows) buckets.set(row.bucket_key, { failures: Number(row.failures), resetAt: Number(row.reset_at) });
+  store = {
+    save: (key, bucket) => query(
+      `INSERT INTO login_failures (bucket_key, failures, reset_at) VALUES ($1, $2, $3)
+       ON DUPLICATE KEY UPDATE failures = VALUES(failures), reset_at = VALUES(reset_at)`, [key, bucket.failures, bucket.resetAt]),
+    remove: key => query("DELETE FROM login_failures WHERE bucket_key = $1", [key])
+  };
+}
 
 // Without a known client address (behind a proxy with TRUST_PROXY unset) every visitor shares the
 // proxy's address, so an IP limit would let one person lock everyone out; only usernames count then.
@@ -49,13 +84,18 @@ export function recordLoginFailure(username: string, ip: string | undefined, now
     const bucket = current(key, now);
     if (bucket) bucket.failures += 1;
     else buckets.set(key, { failures: 1, resetAt: now + WINDOW_MS });
+    persist(key);
   }
 }
 
 export function recordLoginSuccess(username: string) {
-  buckets.delete(`user:${username.trim().toLowerCase()}`);
+  const key = `user:${username.trim().toLowerCase()}`;
+  buckets.delete(key);
+  persist(key);
 }
 
+/** Clears the counters and stops saving them (tests). */
 export function resetLoginLimiter() {
   buckets.clear();
+  store = null;
 }

@@ -92,7 +92,7 @@ describe("collector history access and filters", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
     });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(404);
     expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 
@@ -253,6 +253,6 @@ it.each(["payments", "remarks"])("lets collectors read all branch loan %s with o
 it.each(["payments", "remarks"])("blocks collectors from reading other branch loan %s", async type => {
   mocks.query.mockReset();
   mocks.query.mockResolvedValueOnce({ rows: [{ id: 9, branch_id: 3 }] });
-  expect((await fetch(base + "/loans/9/" + type)).status).toBe(403);
+  expect((await fetch(base + "/loans/9/" + type)).status).toBe(404);
   expect(mocks.query).toHaveBeenCalledTimes(1);
 });

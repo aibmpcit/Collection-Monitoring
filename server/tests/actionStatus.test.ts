@@ -61,12 +61,43 @@ const PROOF = {
 
 const ATTACHMENT = { name: "letter.pdf", type: "application/pdf", data: Buffer.from("pdf").toString("base64") };
 
+describe("payment double-submit protection", () => {
+  const body = { amount: 500, collectedAt: "2026-10-15T09:00", paymentStatus: "partial", proof: PROOF, requestId: "req-1234-abcd" };
+  const savedRow = { id: 55, loan_id: 9, amount: 500, or_no: null, collected_at: "2026-10-15 09:00:00", payment_status: "partial", created_by: 7 };
+
+  it("saves once; the same request again returns the saved payment without a second insert", async () => {
+    let saved = false;
+    const base = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("WHERE request_id = $1")) return { rows: saved ? [savedRow] : [], rowCount: saved ? 1 : 0 };
+      if (sql.includes("INSERT INTO collections")) { saved = true; return { rows: [{ id: 55 }], rowCount: 1 }; }
+      return base(sql, params);
+    });
+    const first = await post("/loans/9/payments", body);
+    expect(first.status).toBe(201);
+    expect(calls().find(([sql]) => sql.includes("INSERT INTO collections"))![1].at(-1)).toBe("req-1234-abcd");
+    mocks.query.mockClear();
+    const again = await post("/loans/9/payments", body);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ id: 55, paymentId: "PAY-000055", replayed: true });
+    expect(calls().some(([sql]) => sql.includes("INSERT INTO collections"))).toBe(false);
+  });
+
+  it("refuses a request id that someone else already used", async () => {
+    const base = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.includes("WHERE request_id = $1") ? { rows: [{ ...savedRow, created_by: 99 }], rowCount: 1 } : base(sql, params));
+    expect((await post("/loans/9/payments", body)).status).toBe(409);
+    expect(calls().some(([sql]) => sql.includes("INSERT INTO collections"))).toBe(false);
+  });
+});
+
 describe("loan status from payments", () => {
   it("records the payment type and sets the loan's status from the newest payment", async () => {
     const response = await post("/loans/9/payments", { amount: 500, orNo: "OR-1", collectedAt: "2026-10-15T09:00", paymentStatus: "partial", proof: PROOF });
     expect(response.status).toBe(201);
     const insert = calls().find(([sql]) => sql.includes("INSERT INTO collections"))!;
-    expect(insert[1]).toEqual([9, 500, "OR-1", "2026-10-15 09:00:00", "partial", 7]);
+    expect(insert[1]).toEqual([9, 500, "OR-1", "2026-10-15 09:00:00", "partial", 7, null]);
     const proof = calls().find(([sql]) => sql.includes("INSERT INTO payment_proofs"))!;
     expect(proof[1][1]).toBe("photo");
     expect(proof[1].slice(5)).toEqual([11.584123, 122.543211, 9, "Brgy. Centro Norte, Culasi, Antique", "2026-10-15 09:00:00"]);

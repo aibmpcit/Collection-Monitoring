@@ -83,7 +83,9 @@ CREATE TABLE IF NOT EXISTS collections (
   collected_at DATETIME NOT NULL,
   payment_status VARCHAR(16) NULL,
   created_by INT UNSIGNED NULL,
+  request_id VARCHAR(64) NULL,
   PRIMARY KEY (id), KEY idx_collections_loan (loan_id), KEY idx_collections_user (created_by), KEY idx_collections_collected_at (collected_at),
+  UNIQUE KEY uq_collections_request (request_id),
   CONSTRAINT fk_collections_loan FOREIGN KEY (loan_id) REFERENCES loans(id),
   CONSTRAINT fk_collections_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -202,4 +204,28 @@ CREATE TABLE IF NOT EXISTS payment_proofs (
   captured_at DATETIME NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (payment_id)
+) ENGINE=InnoDB;
+
+-- Who changed what, when (every successful change through the API, plus sign-in lockouts).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actor_id INT UNSIGNED NULL,
+  actor_username VARCHAR(120) NULL,
+  actor_role VARCHAR(32) NULL,
+  action VARCHAR(160) NOT NULL,
+  target_ids VARCHAR(255) NULL,
+  details TEXT NULL,
+  ip VARCHAR(64) NULL,
+  PRIMARY KEY (id),
+  KEY idx_audit_log_time (occurred_at),
+  KEY idx_audit_log_actor (actor_id, occurred_at)
+) ENGINE=InnoDB;
+
+-- Failed sign-in counters, kept across restarts.
+CREATE TABLE IF NOT EXISTS login_failures (
+  bucket_key VARCHAR(191) NOT NULL,
+  failures INT UNSIGNED NOT NULL,
+  reset_at BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (bucket_key)
 ) ENGINE=InnoDB;

@@ -51,7 +51,11 @@ describe("parsePhoto", () => {
   });
 
   it("rejects non-images, impossible coordinates and half a location", () => {
-    expect(() => parsePhoto(photo({ type: "application/pdf" }))).toThrow("Photo must be a JPEG, PNG or WebP image");
+    // The bytes decide: a PDF or an HTML page is refused even when it claims to be a JPEG.
+    expect(() => parsePhoto(photo({ data: Buffer.from("%PDF-1.4 x").toString("base64") }))).toThrow("Photo must be a JPEG, PNG or WebP image");
+    expect(() => parsePhoto(photo({ type: "image/jpeg", data: Buffer.from("<html><script>alert(1)</script>").toString("base64") }))).toThrow("Photo must be a JPEG, PNG or WebP image");
+    // A real JPEG is stored as image/jpeg whatever type was claimed.
+    expect(parsePhoto(photo({ type: "text/html" }))).toMatchObject({ type: "image/jpeg" });
     expect(() => parsePhoto(photo({ latitude: 95 }))).toThrow("Invalid photo location");
     expect(() => parsePhoto(photo({ longitude: null }))).toThrow("Invalid photo location");
     expect(() => parsePhoto(photo({ data: "" }))).toThrow("Invalid photo");
@@ -83,7 +87,7 @@ describe("remark photos", () => {
   });
 
   it("rejects an invalid photo before saving the remark", async () => {
-    const response = await send("/loans/9/remarks", { remark: "x", photo: photo({ type: "text/plain" }) });
+    const response = await send("/loans/9/remarks", { remark: "x", photo: photo({ type: "image/jpeg", data: Buffer.from("not an image").toString("base64") }) });
     expect(response.status).toBe(400);
     expect(calls().some(([sql]) => sql.includes("INSERT INTO loan_remarks"))).toBe(false);
   });
@@ -100,6 +104,6 @@ describe("remark photos", () => {
     expect(response.headers.get("content-type")).toBe("image/jpeg");
     expect(response.headers.get("content-disposition")).toContain("inline");
     mocks.branch = 3;
-    expect((await fetch(`${base}/loans/9/remarks/31/photo`)).status).toBe(403);
+    expect((await fetch(`${base}/loans/9/remarks/31/photo`)).status).toBe(404);
   });
 });

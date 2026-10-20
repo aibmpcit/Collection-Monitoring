@@ -1,3 +1,4 @@
+import { newRequestId } from "../services/requestId";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { motion } from "framer-motion";
 import { Camera } from "lucide-react";
@@ -91,6 +92,8 @@ export function LoanDetailsPage() {
   const [paymentOrNo, setPaymentOrNo] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "">("");
   const [paymentProof, setPaymentProof] = useState<PaymentProofUpload | null>(null);
+  // One id per payment form: a double tap or retry returns the saved payment instead of a second one.
+  const paymentRequestId = useRef(newRequestId());
   const [editingPaymentHasProof, setEditingPaymentHasProof] = useState(false);
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -302,8 +305,10 @@ export function LoanDetailsPage() {
         orNo,
         collectedAt: paymentDateTime,
         paymentStatus,
-        proof: proofPayload(paymentProof)
+        proof: proofPayload(paymentProof),
+        ...(editingPaymentId ? {} : { requestId: paymentRequestId.current })
       });
+      paymentRequestId.current = newRequestId();
       setPaymentAmount("");
       setPaymentProof(null);
       setPaymentOrNo("");
@@ -629,6 +634,7 @@ export function LoanDetailsPage() {
                     setPaymentProof(null);
                     setEditingPaymentHasProof(false);
                     setPaymentDateTime(getLocalDateTimeInputValue());
+                    paymentRequestId.current = newRequestId();
                     setPaymentModalOpen(true);
                   }}>Add Payment</button>}
                 </div>
@@ -663,6 +669,7 @@ export function LoanDetailsPage() {
                               setEditingPaymentHasProof(Boolean(item.proof));
                               setPaymentDateTime(toLocalDateTimeInputValue(item.collectedAt));
                               setPaymentError("");
+                              paymentRequestId.current = newRequestId();
                               setPaymentModalOpen(true);
                             }}>Edit</button>}
                           </div>
