@@ -1,6 +1,8 @@
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { createPortal } from "react-dom";
-import { Camera, Paperclip } from "lucide-react";
+import { Camera, Download, Paperclip, Search } from "lucide-react";
+import { dateFilterOptions, dateRangeOf, FilterButton, type FilterField, type FilterValues } from "../components/FilterButton";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { RemarkPhotoView } from "../components/RemarkPhoto";
 import { MapLink } from "../components/FieldEvidence";
 import { useEffect, useState } from "react";
@@ -78,8 +80,9 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState(params.get("search") ?? "");
   const initialDates = initialExportDates();
-  const [exportFrom, setExportFrom] = useState(params.get("from") ?? initialDates.from);
-  const [exportTo, setExportTo] = useState(params.get("to") ?? initialDates.to);
+  const anyDate = params.get("period") === "any";
+  const [exportFrom, setExportFrom] = useState(params.get("from") ?? (anyDate ? "" : initialDates.from));
+  const [exportTo, setExportTo] = useState(params.get("to") ?? (anyDate ? "" : initialDates.to));
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportChoiceOpen, setExportChoiceOpen] = useState(false);
@@ -117,7 +120,53 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       .catch(() => undefined);
   }, [user?.role, refresh]);
 
-  useEffect(() => { setSearch(params.get("search") ?? ""); }, [query]);
+  // Search applies as you type (after a short pause), like Collection Records.
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
+  useEffect(() => {
+    if (debouncedSearch !== (params.get("search") ?? "")) change("search", debouncedSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
+  // Follow the address bar (back/forward) without undoing what is being typed.
+  useEffect(() => {
+    const fromUrl = params.get("search") ?? "";
+    setSearch(current => current.trim() === fromUrl ? current : fromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  // Admins and managers filter from the Filters popup: date (quick ranges, months, custom), branch, account, activity.
+  const thisMonth = initialDates.from.slice(0, 7);
+  const storedPeriod = params.get("period");
+  const period = storedPeriod === "any" ? "" : storedPeriod ?? (params.get("from") || params.get("to") ? "custom" : thisMonth);
+  const filterValues: FilterValues = {
+    date: period, dateFrom: period === "custom" ? exportFrom : "", dateTo: period === "custom" ? exportTo : "",
+    branchId: params.get("branchId") ?? "", userId: params.get("userId") ?? "", type: activeTab === "all" ? "" : activeTab
+  };
+  const filterFields: FilterField[] = [
+    { key: "date", label: "Date", ariaLabel: "Filter by date", allLabel: "Any date", options: dateFilterOptions(), isDate: true },
+    ...(user?.role === "super_admin"
+      ? [{ key: "branchId", label: "Branch", allLabel: "All branches", options: branches.map(branch => [String(branch.id), `${branch.code} - ${branch.name}`] as const) }]
+      : []),
+    { key: "userId", label: "User account", allLabel: "All users", options: accounts.map(account => [String(account.id), `${account.username} (${account.role})`] as const) },
+    { key: "type", label: "Activity", allLabel: "All activity", options: [["payments", "Payments"], ["remarks", "Actions Taken"]] }
+  ];
+
+  function changeFilters(changes: FilterValues) {
+    const merged = { ...filterValues, ...changes };
+    const next = new URLSearchParams(params);
+    const set = (key: string, value: string) => { if (value) next.set(key, value); else next.delete(key); };
+    if ("date" in changes || "dateFrom" in changes || "dateTo" in changes) {
+      const range = dateRangeOf(merged);
+      setExportFrom(range?.from ?? "");
+      setExportTo(range?.to ?? "");
+      // "Any date" is remembered as such, so it doesn't fall back to this month.
+      next.set("period", merged.date || "any");
+      set("from", range?.from ?? "");
+      set("to", range?.to ?? "");
+    }
+    for (const key of ["branchId", "userId", "type"]) if (key in changes) set(key, changes[key]);
+    next.delete("page");
+    setParams(next);
+  }
 
   function change(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -128,7 +177,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
 
   async function exportExcelReport() {
     if (exporting) return;
-    if (!exportFrom || !exportTo || exportFrom > exportTo) { setExportError("Select a valid export date range."); return; }
+    if (!exportFrom || !exportTo || exportFrom > exportTo) { setExportError(isFieldUser ? "Select a valid export date range." : "Choose a date range under Filters before exporting."); return; }
     setExporting(true); setExportError("");
     try {
       const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
@@ -141,7 +190,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         Date: item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""),
         Member: item.member_name, "Loan Account": item.loan_account_no ?? "", "Loan Type": item.loan_type ?? "",
         Type: item.kind === "payment" ? "Payment" : "Action Taken", "Collected By": item.collector_name ?? "Unattributed",
-        Amount: item.kind === "payment" ? Number(item.amount) : "", "Actions Taken / Receipt": item.kind === "payment" ? (item.or_no ?? "") : (item.remark ?? getRemarkCategoryLabel(item.category)), Branch: item.branch_name ?? ""
+        Amount: item.kind === "payment" ? Number(item.amount) : "", "OR Number": item.kind === "payment" ? (item.or_no ?? "") : "", Branch: item.branch_name ?? ""
       }));
       const sheet = XLSX.utils.json_to_sheet(rows);
       const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, "Collection History");
@@ -153,7 +202,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   async function exportPaymentReport() {
     if (exporting) return;
     if (!exportFrom || !exportTo || exportFrom > exportTo) {
-      setExportError("Select a valid export date range.");
+      setExportError(isFieldUser ? "Select a valid export date range." : "Choose a date range under Filters before exporting.");
       return;
     }
     setExporting(true);
@@ -173,7 +222,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       const columns = [
         { label: "Date", width: 35 }, { label: "Collector", width: 30 }, { label: "Branch", width: 30 },
         { label: "Member", width: 38 }, { label: "Loan Account", width: 30 }, { label: "Type", width: 22 },
-        { label: "Actions Taken / Receipt", width: 55 }, { label: "Amount", width: 30 }
+        { label: "OR Number", width: 55 }, { label: "Amount", width: 30 }
       ];
       const fit = (value: unknown, width: number) => {
         const text = String(value ?? "");
@@ -208,7 +257,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         const values = [
           item.occurred_at.replace("T", " ").replace(/\.\d+Z?$/, ""), item.collector_name ?? "Unattributed",
           item.branch_name ?? "", item.member_name, item.loan_account_no ?? "", item.kind === "payment" ? "Payment" : "Action Taken",
-          item.kind === "payment" ? `Receipt: ${item.or_no ?? "Not provided"}` : (item.remark ?? getRemarkCategoryLabel(item.category)),
+          item.kind === "payment" ? (item.or_no || "-") : "-",
           item.kind === "payment" ? `PHP ${Number(item.amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""
         ];
         let x = 10;
@@ -245,51 +294,43 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           </section>)}
       </div>
     )}
-    <section className="panel p-4 lg:flex lg:flex-wrap lg:items-end lg:gap-3">
-      {isFieldUser && <div role="tablist" aria-label="Activity type" className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 lg:mb-0 lg:w-full lg:max-w-sm">
+    <section className="panel p-4">
+      {isFieldUser && <div role="tablist" aria-label="Activity type" className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 lg:w-full lg:max-w-sm">
         {ACTIVITY_TABS.map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value}
           className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${activeTab === value ? "bg-white text-brand-700 shadow-sm" : "text-slate-600"}`}
           onClick={() => change("type", value === "all" ? "" : value)}>{label}</button>)}
       </div>}
-      <div className="flex flex-col gap-4 lg:contents">
-        <form onSubmit={event => { event.preventDefault(); change("search", search.trim()); }} className="grid min-w-0 flex-1 gap-1 text-sm">
-          <label htmlFor="history-search">Search activity</label>
-          <div className="flex gap-2"><input id="history-search" className="field min-w-0" value={search} maxLength={120}
-            placeholder={isFieldUser ? "Member, loan, receipt, note" : "Member, collector, loan, receipt, note"} onChange={event => setSearch(event.target.value)} />
-            <button className="btn-muted" type="submit">Search</button></div>
-        </form>
-        <div className="grid min-w-0 grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap lg:shrink-0 lg:flex-nowrap">
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">From
+      <div className="flex flex-wrap items-end gap-3">
+        {/* Same toolbar as Collection Records: search as you type, then Filters and Export. */}
+        <div className="flex w-full max-w-md items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input id="history-search" className="field pl-9" value={search} maxLength={120} aria-label="Search activity"
+              placeholder={isFieldUser ? "Search member, loan, receipt, note" : "Search member, collector, loan, receipt, note"}
+              onChange={event => setSearch(event.target.value)} />
+          </div>
+          {!isFieldUser && <>
+            <FilterButton fields={filterFields} values={filterValues} onChange={changeFilters} />
+            <button type="button" disabled={exporting} onClick={() => { setExportError(""); setExportChoiceOpen(true); }}
+              aria-label={exporting ? "Exporting collection history..." : "Export collection history"} title="Export to Excel or PDF"
+              className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-60">
+              <Download size={16} aria-hidden="true" className={exporting ? "animate-pulse" : ""} />
+              {exporting ? "Exporting..." : "Export"}
+            </button>
+          </>}
+        </div>
+        {isFieldUser && <div className="grid w-full grid-cols-2 items-end gap-3 sm:flex sm:w-auto">
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40">From
             <input type="date" className="field min-w-0 w-full" value={exportFrom} max={exportTo || undefined} onChange={event => { setExportFrom(event.target.value); change("from", event.target.value); }} />
           </label>
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40 sm:flex-none lg:min-w-32">To
+          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40">To
             <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
           </label>
-          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto lg:hidden" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
+          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
             {exporting ? "Exporting..." : "Export"}
           </button>
-        </div>
+        </div>}
       </div>
-      {(user?.role === "super_admin" || user?.role === "branch_admin") && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:mt-0 lg:contents">
-        {user?.role === "super_admin" && <label className="grid gap-1 text-sm">Branch
-          <select className="field" value={params.get("branchId") ?? ""} onChange={event => change("branchId", event.target.value)}>
-            <option value="">All branches</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code} - {branch.name}</option>)}
-          </select>
-        </label>}
-        <label className="grid min-w-0 gap-1 text-sm">User account
-          <select className="field" value={params.get("userId") ?? ""} onChange={event => change("userId", event.target.value)}>
-            <option value="">All users</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.username} ({account.role})</option>)}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">Activity
-          <select className="field" value={activeTab} onChange={event => change("type", event.target.value === "all" ? "" : event.target.value)}>
-            <option value="all">All activity</option><option value="payments">Payments</option><option value="remarks">Actions Taken</option>
-          </select>
-        </label>
-      </div>}
-      <button type="button" className="btn-primary mt-3 hidden w-full lg:mt-0 lg:ml-auto lg:block lg:w-auto" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
-        {exporting ? "Exporting..." : "Export"}
-      </button>
       {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
     <div id="history-panel" aria-busy={loading} className="grid gap-4">
@@ -322,7 +363,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
                 </span>
               </span>
               {item.kind === "payment"
-                ? <span className="mt-2 block text-xs text-slate-600">Receipt: {item.or_no || "Not provided"}{item.payment_status ? ` · ${paymentStatusLabel(item.payment_status)}` : ""}</span>
+                ? <span className="mt-2 block text-xs text-slate-600">OR Number: {item.or_no || "Not provided"}{item.payment_status ? ` · ${paymentStatusLabel(item.payment_status)}` : ""}</span>
                 : item.remark && <span className="mt-2 block line-clamp-2 whitespace-pre-wrap break-words text-sm text-slate-700">{item.remark}</span>}
               {(!isFieldUser || item.attachment_name || item.photo_id) && <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 {!isFieldUser && <span>By {item.collector_name || "Unattributed"}</span>}
@@ -334,7 +375,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           {data.items.length === 0 && <li className="py-8 text-center text-slate-500">No collection activity found for these filters.</li>}
         </ul>
         <div className="hidden overflow-x-auto rounded-xl border border-slate-200 lg:block">
-          <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>Actions Taken / receipt</span><span>Date</span></div>
+          <div className="grid min-w-[1200px] grid-cols-[1.2fr_1.3fr_1.1fr_1fr_0.8fr_1fr_1.5fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"><span>Member</span><span>Loan account</span><span>Loan type</span><span>Added by</span><span>Type</span><span>Amount</span><span>OR Number</span><span>Date</span></div>
           <div className="grid min-w-[1200px] gap-0">
           {data.items.map(item => <article key={`${item.kind}-${item.id}`} tabIndex={0} role="button"
             onClick={() => setSelectedActivity(item)}
@@ -348,7 +389,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
             <span>{item.kind === "payment" ? money(Number(item.amount)) : "-"}</span>
             <span className="flex min-w-0 items-center gap-1">
               {item.attachment_name && <Paperclip size={12} className="shrink-0 text-slate-400" aria-label="Has attachment" />}
-              <span className="truncate">{item.kind === "payment" ? `Receipt: ${item.or_no || "Not provided"}` : (item.remark || getRemarkCategoryLabel(item.category))}</span>
+              <span className="truncate">{item.kind === "payment" ? (item.or_no || "-") : "-"}</span>
             </span>
             <span className="text-slate-500">{plainDateTime(item.occurred_at)}</span>
           </article>)}
@@ -376,7 +417,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
           <button className="btn-muted shrink-0" type="button" onClick={() => setSelectedActivity(null)}>Close</button>
         </div>
         {selectedActivity.kind === "payment"
-          ? <div className="mt-4 grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">Receipt</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div>
+          ? <div className="mt-4 grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Amount</p><p className="text-lg font-semibold">{money(Number(selectedActivity.amount))}</p></div><div><p className="text-xs text-slate-500">OR Number</p><p>{selectedActivity.or_no || "Not provided"}</p></div></div>
           : <div className="mt-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getRemarkCategoryLabel(selectedActivity.category)}</p><p className="mt-2 whitespace-pre-wrap break-words">{selectedActivity.remark || "No description"}</p></div>}
         {selectedActivity.geo_latitude != null && selectedActivity.geo_longitude != null && <div className="mt-3">
           <MapLink point={{ latitude: Number(selectedActivity.geo_latitude), longitude: Number(selectedActivity.geo_longitude), accuracy: toNumberOrNull(selectedActivity.geo_accuracy), placeName: selectedActivity.geo_place ?? null }}

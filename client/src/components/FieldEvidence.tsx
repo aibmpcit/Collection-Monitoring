@@ -11,7 +11,12 @@ export interface GeoPoint {
   placeName?: string | null;
 }
 
-export interface PaymentProofUpload extends GeoPoint {
+/** Payment proof: the photo or file is required, the location optional (empty coordinates). */
+export interface PaymentProofUpload {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  placeName?: string | null;
   kind: "photo" | "attachment";
   name: string;
   type: string;
@@ -55,13 +60,16 @@ export interface RemarkEvidence {
   location: GeoPoint | null;
 }
 
-/** Payment proof field: photo or file AND current location, both required. */
+/** Payment proof field: a photo or file is required; adding the current location is optional. */
 export function PaymentProofField({ proof, onChange, ...rest }: Omit<EvidenceFieldProps, "label" | "required" | "value" | "onEvidence"> & {
   proof: PaymentProofUpload | null;
   onChange: (proof: PaymentProofUpload | null) => void;
 }) {
   return <EvidenceField {...rest} label="Proof of payment" required value={proof}
-    onEvidence={evidence => onChange(evidence?.file && evidence.location ? { ...evidence.file, ...evidence.location } : null)} />;
+    onEvidence={evidence => onChange(evidence?.file
+      ? { ...evidence.file, latitude: evidence.location?.latitude ?? null, longitude: evidence.location?.longitude ?? null,
+        accuracy: evidence.location?.accuracy ?? null, placeName: evidence.location?.placeName ?? null }
+      : null)} />;
 }
 
 /** Remark evidence field: the same two steps, both optional. */
@@ -96,7 +104,7 @@ export function remarkEvidencePayload(evidence: RemarkEvidence | null, replacing
 
 interface EvidenceFieldProps {
   label: string;
-  /** Payments: both steps needed. Remarks: either step is enough. */
+  /** Payments: the photo or file is required (location optional). Remarks: everything optional. */
   required: boolean;
   /** The parent's current value; when it is cleared (after saving) the field starts over. */
   value: unknown;
@@ -107,9 +115,8 @@ interface EvidenceFieldProps {
 }
 
 /**
- * Two required steps: (1) take a photo or attach a file, (2) add the current location.
- * Photos are stamped with time and place once both are done. `proof` is only reported when
- * both steps are complete.
+ * Two steps: (1) take a photo or attach a file, (2) add the current location (always optional).
+ * Photos are stamped with the time, and the place once a location is added.
  */
 export function EvidenceField({ label, required, value, onEvidence, hasExisting = false, disabled = false }: EvidenceFieldProps) {
   const [file, setFile] = useState<{ file: File; kind: PaymentProofUpload["kind"]; previewUrl?: string } | null>(null);
@@ -130,10 +137,10 @@ export function EvidenceField({ label, required, value, onEvidence, hasExisting 
     }
   }, [value]);
 
-  // Report evidence once enough is there: both steps for payments, either step for remarks.
+  // Report evidence once enough is there: the photo or file for payments, either step for remarks.
   // Photos are stamped with time (and place, once a location is added).
   useEffect(() => {
-    const enough = required ? Boolean(file && point) : Boolean(file || point);
+    const enough = required ? Boolean(file) : Boolean(file || point);
     if (!enough) {
       if (reported.current) { reported.current = null; onEvidence(null); }
       return;
@@ -206,7 +213,7 @@ export function EvidenceField({ label, required, value, onEvidence, hasExisting 
       {hasExisting && !file && !point && <span className="text-xs text-slate-500">Anything already saved is kept.</span>}
 
       <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2">
-        <p className="text-xs font-semibold text-slate-600">{required ? "1. " : ""}Photo or file {file ? "✓" : ""}</p>
+        <p className="text-xs font-semibold text-slate-600">{required ? "1. " : ""}Photo or file{required ? " (required)" : ""} {file ? "✓" : ""}</p>
         {file && (preview
           ? <img src={preview} alt={`${label} preview`} className="max-h-56 w-full rounded-lg object-contain" />
           : <p className="flex items-center gap-1 break-all text-sm text-slate-700"><Paperclip size={14} aria-hidden="true" />{file.file.name}</p>)}
@@ -216,10 +223,10 @@ export function EvidenceField({ label, required, value, onEvidence, hasExisting 
           {file && <button type="button" className="btn-muted" disabled={disabled || busy} onClick={() => setFile(null)}>Remove</button>}
         </div>
 
-        <p className="mt-1 text-xs font-semibold text-slate-600">{required ? "2. " : ""}Current location {point ? "✓" : ""}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-600">{required ? "2. " : ""}Current location{required ? " (optional)" : ""} {point ? "✓" : ""}</p>
         <div className="flex flex-wrap items-center gap-2">
           {point && <MapLink point={point} />}
-          {point && !required && <button type="button" className="btn-muted" disabled={disabled || busy} onClick={() => setPoint(null)}>Remove location</button>}
+          {point && <button type="button" className="btn-muted" disabled={disabled || busy} onClick={() => setPoint(null)}>Remove location</button>}
           <button type="button" className="btn-muted inline-flex items-center gap-1.5" disabled={disabled || busy} onClick={() => void addLocation()}>
             <MapPin size={16} aria-hidden="true" />
             <span>{locating ? "Getting location..." : point ? "Update location" : "Add current location"}</span>

@@ -13,7 +13,12 @@ export interface GeoPoint {
   placeName: string | null;
 }
 
-export interface PaymentProofPayload extends GeoPoint {
+/** Payment proof: the photo or file is required; the location is optional. */
+export interface PaymentProofPayload {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  placeName: string | null;
   kind: "photo" | "attachment";
   name: string;
   type: string;
@@ -84,7 +89,11 @@ export function parsePaymentProof(value: unknown): PaymentProofPayload | undefin
   const detected = detectFileType(buffer);
   if (kind === "photo" && !detected?.startsWith("image/")) throw invalid("The payment photo must be an image");
   const type = kind === "photo" ? detected! : storedAttachmentType(buffer);
-  const point = parseGeoPoint(raw, "Payment proof needs a location. Allow location access and try again.");
+  // Location is optional: none at all is fine, but a half or impossible location is refused.
+  const hasLocation = [raw.latitude, raw.longitude].some(value => value !== null && value !== undefined && value !== "");
+  const point = hasLocation
+    ? parseGeoPoint(raw, "Invalid payment proof location")
+    : { latitude: null, longitude: null, accuracy: null, placeName: null };
   const capturedAt = toBusinessDateTime(typeof raw.capturedAt === "string" ? raw.capturedAt : undefined);
   if (!capturedAt) throw invalid("Invalid payment proof time");
   const name = String(raw.name ?? "").trim().slice(0, 255) || (kind === "photo" ? "payment-photo.jpg" : "payment-proof");
@@ -98,8 +107,8 @@ export async function ensureFieldEvidenceTables() {
     file_name VARCHAR(255) NOT NULL,
     mime_type VARCHAR(120) NOT NULL,
     file_data LONGBLOB NOT NULL,
-    latitude DECIMAL(9,6) NOT NULL,
-    longitude DECIMAL(9,6) NOT NULL,
+    latitude DECIMAL(9,6) NULL,
+    longitude DECIMAL(9,6) NULL,
     accuracy_m INT UNSIGNED NULL,
     place_name VARCHAR(160) NULL,
     captured_at DATETIME NOT NULL,
@@ -137,8 +146,8 @@ export function mapProofColumns(row: Record<string, unknown>) {
     proof: {
       kind: String(row.proof_kind),
       fileName: String(row.proof_name ?? ""),
-      latitude: Number(row.proof_latitude),
-      longitude: Number(row.proof_longitude),
+      latitude: row.proof_latitude == null ? null : Number(row.proof_latitude),
+      longitude: row.proof_longitude == null ? null : Number(row.proof_longitude),
       accuracy: row.proof_accuracy == null ? null : Number(row.proof_accuracy),
       placeName: row.proof_place ? String(row.proof_place) : null,
       capturedAt: String(row.proof_captured_at ?? "")

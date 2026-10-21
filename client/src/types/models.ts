@@ -133,7 +133,7 @@ export interface LoanRemark {
 export interface LoanPayment {
   canEdit?: boolean;
   /** Photo or file proving the payment, with where it was recorded. */
-  proof?: { kind: string; fileName: string; latitude: number; longitude: number; accuracy: number | null; placeName?: string | null; capturedAt: string } | null;
+  proof?: { kind: string; fileName: string; latitude: number | null; longitude: number | null; accuracy: number | null; placeName?: string | null; capturedAt: string } | null;
   /** "partial" or "settled"; older payments may have none. */
   paymentStatus?: string | null;
   id: number;

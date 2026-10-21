@@ -906,8 +906,12 @@ export function LoansPage() {
       setPaymentError("Enter a valid payment amount.");
       return;
     }
+    if (!orNo) {
+      setPaymentError("Enter the OR number.");
+      return;
+    }
     if (orNo.length > 80) {
-      setPaymentError("OR No is too long.");
+      setPaymentError("OR number is too long.");
       return;
     }
     if (!paymentStatus) {
@@ -1196,7 +1200,7 @@ export function LoansPage() {
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  OR No
+                  OR Number
                   <input
                     className="field"
                     type="text"
@@ -1204,6 +1208,7 @@ export function LoansPage() {
                     onChange={(event) => setPaymentOrNo(event.target.value)}
                     placeholder="Official receipt number"
                     maxLength={80}
+                    required
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -1244,7 +1249,7 @@ export function LoansPage() {
                     {payments.map((item) => (
                       <li key={item.id} className="p-3">
                         <p className="text-xs font-semibold text-black/70">{item.paymentId}</p>
-                        <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
+                        <p className="text-xs text-black/60">OR Number: {item.orNo || "-"}</p>
                         <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
                         <p className="text-sm font-semibold">{formatCurrency(item.amount)}</p>
                         <p className="mt-1 text-xs text-black/60">{formatDateTime(item.collectedAt)}</p>

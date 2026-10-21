@@ -1368,11 +1368,14 @@ router.post("/:loanId/payments", authenticate, authorizePermission("add_payments
     // Every payment needs proof from the field: a photo or a file, with where it was recorded.
     const proof = parsePaymentProof(req.body?.proof);
     if (!proof) {
-      return res.status(400).json({ message: "Add a photo or an attachment, with location, as proof of payment" });
+      return res.status(400).json({ message: "Add a photo or an attachment as proof of payment" });
     }
 
+    if (!orNo) {
+      return res.status(400).json({ message: "Enter the OR number" });
+    }
     if (orNo.length > 80) {
-      return res.status(400).json({ message: "OR No is too long" });
+      return res.status(400).json({ message: "OR number is too long" });
     }
 
     // Blank means now; stored as business wall-clock time like every other timestamp.
@@ -1465,7 +1468,8 @@ router.patch("/:loanId/payments/:paymentId", authenticate, authorize(["super_adm
     const orNo = String(req.body?.orNo ?? req.body?.or_no ?? "").trim();
     const collectedAtRaw = String(req.body?.collectedAt ?? "").trim();
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Payment amount must be greater than 0" });
-    if (orNo.length > 80) return res.status(400).json({ message: "OR No is too long" });
+    if (!orNo) return res.status(400).json({ message: "Enter the OR number" });
+    if (orNo.length > 80) return res.status(400).json({ message: "OR number is too long" });
     const collectedAt = collectedAtRaw ? toBusinessDateTime(collectedAtRaw) : null;
     if (!collectedAt) return res.status(400).json({ message: "Invalid payment date/time" });
     const paymentStatus = req.body?.paymentStatus;

@@ -78,7 +78,7 @@ describe("collector history access and filters", () => {
     const response = await fetch(`${base}/loans/9/payments/11`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+      body: JSON.stringify({ amount: 125, orNo: "OR-11", collectedAt: "2026-09-23T08:00:00.000Z" })
     });
     expect(response.status).toBe(200);
   });
@@ -90,7 +90,7 @@ describe("collector history access and filters", () => {
     const response = await fetch(`${base}/loans/9/payments/11`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+      body: JSON.stringify({ amount: 125, orNo: "OR-11", collectedAt: "2026-09-23T08:00:00.000Z" })
     });
     expect(response.status).toBe(404);
     expect(mocks.query).toHaveBeenCalledTimes(1);
@@ -104,7 +104,7 @@ describe("collector history access and filters", () => {
     const response = await fetch(`${base}/loans/9/payments/11`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount: 125, collectedAt: "2026-09-23T08:00:00.000Z" })
+      body: JSON.stringify({ amount: 125, orNo: "OR-11", collectedAt: "2026-09-23T08:00:00.000Z" })
     });
     expect(response.status).toBe(200);
   });

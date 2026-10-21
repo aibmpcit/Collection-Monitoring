@@ -32,17 +32,18 @@ const file = (name: string, type: string) => {
 };
 
 describe("PaymentProofField", () => {
-  it("needs a photo or file and the current location, as two steps", async () => {
+  it("needs a photo or file; the current location is optional and can be added after", async () => {
     stubGeolocation(["ok"]);
     const onChange = vi.fn();
     render(<PaymentProofField proof={null} onChange={onChange} />);
     expect(screen.getByLabelText("Take Photo")).toHaveAttribute("capture", "environment");
+    expect(screen.getByText(/Current location \(optional\)/)).toBeInTheDocument();
     await userEvent.upload(screen.getByLabelText("Attach File"), file("receipt.pdf", "application/pdf"));
     expect(screen.getByText("receipt.pdf")).toBeInTheDocument();
-    // A file alone is not enough.
-    expect(onChange).not.toHaveBeenCalled();
+    // A file alone is enough, with an empty location.
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: "attachment", latitude: null, longitude: null })));
     await userEvent.click(screen.getByRole("button", { name: "Add current location" }));
-    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ latitude: 11.5 })));
     const proof = onChange.mock.calls.at(-1)![0] as PaymentProofUpload;
     expect(proof).toMatchObject({ kind: "attachment", name: "receipt.pdf", type: "application/pdf", latitude: 11.5, longitude: 122.5, accuracy: 8 });
     expect(screen.getByText("Brgy. Centro Norte, Culasi, Antique")).toBeInTheDocument();
@@ -53,6 +54,7 @@ describe("PaymentProofField", () => {
     const onChange = vi.fn();
     render(<PaymentProofField proof={null} onChange={onChange} />);
     await userEvent.click(screen.getByRole("button", { name: "Add current location" }));
+    // A location alone is not proof.
     expect(onChange).not.toHaveBeenCalled();
     await userEvent.upload(screen.getByLabelText("Take Photo"), file("camera.jpg", "image/jpeg"));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: "photo", latitude: 11.5 })));
@@ -65,9 +67,10 @@ describe("PaymentProofField", () => {
     await userEvent.upload(screen.getByLabelText("Attach File"), file("receipt.pdf", "application/pdf"));
     await userEvent.click(screen.getByRole("button", { name: "Add current location" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't get the current location.");
-    expect(onChange).not.toHaveBeenCalled();
+    // The file still counts as proof without the location.
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "attachment", latitude: null }));
     await userEvent.click(screen.getByRole("button", { name: "Add current location" }));
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: "attachment", latitude: 11.5 })));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "attachment", latitude: 11.5 })));
   });
 
   it("never uploads the preview copy", () => {

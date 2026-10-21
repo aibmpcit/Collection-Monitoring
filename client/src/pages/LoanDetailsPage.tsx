@@ -283,8 +283,12 @@ export function LoanDetailsPage() {
       setPaymentError("Enter a valid payment amount.");
       return;
     }
+    if (!orNo) {
+      setPaymentError("Enter the OR number.");
+      return;
+    }
     if (orNo.length > 80) {
-      setPaymentError("OR No is too long.");
+      setPaymentError("OR number is too long.");
       return;
     }
     if (!paymentStatus) {
@@ -356,7 +360,7 @@ export function LoanDetailsPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Detail label="Amount" value={formatCurrency(summaryPayment.amount)} />
               <Detail label="Payment ID" value={summaryPayment.paymentId} />
-              <Detail label="OR No" value={summaryPayment.orNo || "-"} />
+              <Detail label="OR Number" value={summaryPayment.orNo || "-"} />
               <Detail label="Collected By" value={summaryPayment.collectedBy || "System"} />
               <Detail label="Collected At" value={formatDateTime(summaryPayment.collectedAt)} />
               <Detail label="Member Name" value={loan.memberName} />
@@ -405,12 +409,14 @@ export function LoanDetailsPage() {
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  OR No
+                  OR Number
                   <input
                     className="field"
                     value={paymentOrNo}
                     onChange={(event) => setPaymentOrNo(event.target.value)}
-                    placeholder="Optional OR number"
+                    placeholder="Official receipt number"
+                    maxLength={80}
+                    required
                   />
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
@@ -655,7 +661,7 @@ export function LoanDetailsPage() {
                               {formatCurrency(item.amount)}
                               {item.paymentStatus && <span className={`ml-2 align-middle ${actionStatusClass(item.paymentStatus)}`}>{paymentStatusLabel(item.paymentStatus)}</span>}
                             </p>
-                            <p className="text-xs text-black/60">OR No: {item.orNo || "-"}</p>
+                            <p className="text-xs text-black/60">OR Number: {item.orNo || "-"}</p>
                             <p className="text-xs text-black/60">Collected By: {item.collectedBy || "System"}</p>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
@@ -679,7 +685,8 @@ export function LoanDetailsPage() {
                           <button type="button" className="text-xs font-semibold text-brand-700 underline" onClick={() => void openPaymentProof(item.id, item.proof!)}>
                             {item.proof.kind === "photo" ? "View photo" : `Open ${item.proof.fileName}`}
                           </button>
-                          <MapLink point={item.proof} />
+                          {item.proof.latitude != null && item.proof.longitude != null
+                            && <MapLink point={{ ...item.proof, latitude: item.proof.latitude, longitude: item.proof.longitude }} />}
                         </div>}
                       </li>
                     ))}

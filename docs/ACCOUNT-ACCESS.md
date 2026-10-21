@@ -14,7 +14,7 @@ Remark columns: during testing (`REMARK_IMPORT_ONCE=false`) every import brings 
 
 Collectors retain their existing defaults (adding remarks and payments). Branch admins retain all three permissions by default. A super admin can override these defaults for an individual account or use **Use role defaults** to clear overrides. Other existing permissions still follow the selected role.
 
-**Loan status (from payments):** when collectors, LAS or admins record a payment they must choose its type, **Partially Paid** or **Settled**, and add proof: a camera photo or an attached file, together with the phone's location (a payment can't be saved without a location). Remarks offer the same two steps (photo or file, and current location) but both are optional.
+**Loan status (from payments):** when collectors, LAS or admins record a payment they must choose its type, **Partially Paid** or **Settled**, enter the **OR number**, and add proof: a camera photo or an attached file. Adding the phone's current location is optional. Remarks offer the same two steps (photo or file, and current location), both optional.
 
 **Filters and export (Collection Records):** super admins and branch admins get a **Filters** button and an **Export** button on the Loan Records, Actions Taken, Payments and Settled Accounts tabs. Filters apply on the server; Export saves every record matching the current search and filters as Excel or PDF (up to 20,000 rows), listing the filters at the top of the file. Collectors and LAS see the search box only; the Actions Taken export endpoint refuses their accounts.
 

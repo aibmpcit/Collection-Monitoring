@@ -40,7 +40,7 @@ export const PAYMENT_EXPORT_COLUMNS: ExportColumn<PaymentRecordRow>[] = [
   { label: "Loan Account", value: row => row.loanAccountNo, width: 1.1 },
   { label: "Payment Type", value: row => status(row.paymentStatus) },
   { label: "Amount", value: row => row.amount, width: 1.1, money: true },
-  { label: "Receipt No.", value: row => row.orNo },
+  { label: "OR Number", value: row => row.orNo },
   { label: "Collected By", value: row => row.collectedBy }
 ];
 

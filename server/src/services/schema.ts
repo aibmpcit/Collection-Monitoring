@@ -80,6 +80,14 @@ export async function ensureSchema() {
   await ensureRemarkAttachmentTable();
   await ensureRemarkPhotoTable();
   await ensureFieldEvidenceTables();
+  // Payment proof location became optional.
+  const proofLatitude = await query<{ nullable: string }>(
+    `SELECT is_nullable AS nullable FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'payment_proofs' AND column_name = 'latitude'`
+  );
+  if (proofLatitude.rows[0]?.nullable === "NO") {
+    await query("ALTER TABLE payment_proofs MODIFY latitude DECIMAL(9,6) NULL, MODIFY longitude DECIMAL(9,6) NULL");
+  }
   // "Add location" on remarks.
   for (const table of ["loan_remarks", "borrower_remarks"]) {
     if (!(await columnExists(table, "latitude"))) {

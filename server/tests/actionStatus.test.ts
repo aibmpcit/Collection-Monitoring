@@ -62,7 +62,7 @@ const PROOF = {
 const ATTACHMENT = { name: "letter.pdf", type: "application/pdf", data: Buffer.from("pdf").toString("base64") };
 
 describe("payment double-submit protection", () => {
-  const body = { amount: 500, collectedAt: "2026-10-15T09:00", paymentStatus: "partial", proof: PROOF, requestId: "req-1234-abcd" };
+  const body = { amount: 500, orNo: "OR-55", collectedAt: "2026-10-15T09:00", paymentStatus: "partial", proof: PROOF, requestId: "req-1234-abcd" };
   const savedRow = { id: 55, loan_id: 9, amount: 500, or_no: null, collected_at: "2026-10-15 09:00:00", payment_status: "partial", created_by: 7 };
 
   it("saves once; the same request again returns the saved payment without a second insert", async () => {
@@ -105,17 +105,24 @@ describe("loan status from payments", () => {
     expect(update[1]).toEqual(["partial", "2026-10-15 09:00:00", 7, 9]);
   });
 
-  it("requires a payment type and proof with a location", async () => {
-    const base = { amount: 100, collectedAt: "2026-10-15T09:00" };
+  it("requires a payment type, an OR number and a photo or file; the location is optional", async () => {
+    const base = { amount: 100, orNo: "OR-100", collectedAt: "2026-10-15T09:00" };
     const noType = await post("/loans/9/payments", { ...base, proof: PROOF });
     expect(noType.status).toBe(400);
     expect((await noType.json()).message).toBe("Choose the payment type: partially paid or settled");
     expect((await post("/loans/9/payments", { ...base, paymentStatus: "visited", proof: PROOF })).status).toBe(400);
     const noProof = await post("/loans/9/payments", { ...base, paymentStatus: "settled" });
-    expect((await noProof.json()).message).toBe("Add a photo or an attachment, with location, as proof of payment");
-    const noLocation = await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, latitude: null, longitude: null } });
-    expect(noLocation.status).toBe(400);
-    expect((await noLocation.json()).message).toMatch(/needs a location/);
+    expect((await noProof.json()).message).toBe("Add a photo or an attachment as proof of payment");
+    const noOr = await post("/loans/9/payments", { ...base, orNo: "  ", paymentStatus: "settled", proof: PROOF });
+    expect(noOr.status).toBe(400);
+    expect((await noOr.json()).message).toBe("Enter the OR number");
+    // Saved without a location: the proof row keeps empty coordinates.
+    const noLocation = await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, latitude: null, longitude: null, accuracy: null, placeName: null } });
+    expect(noLocation.status).toBe(201);
+    const proofRow = calls().filter(([sql]) => sql.includes("INSERT INTO payment_proofs")).at(-1)!;
+    expect(proofRow[1].slice(5, 9)).toEqual([null, null, null, null]);
+    // A half location is still refused.
+    expect((await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, longitude: null } })).status).toBe(400);
     const attachment = await post("/loans/9/payments", { ...base, paymentStatus: "settled", proof: { ...PROOF, kind: "attachment", name: "receipt.pdf", type: "application/pdf" } });
     expect(attachment.status).toBe(201);
   });
@@ -140,12 +147,12 @@ describe("loan status from payments", () => {
       if (sql.includes("payment_status IS NOT NULL")) return { rows: [{ payment_status: "settled", collected_at: "2026-10-15 10:00:00", created_by: 7 }], rowCount: 1 };
       return { rows: [], rowCount: 1 };
     });
-    await post("/loans/9/payments/5", { amount: 900, collectedAt: "2026-10-15T10:00", paymentStatus: "settled" }, "PATCH");
+    await post("/loans/9/payments/5", { amount: 900, orNo: "OR-5", collectedAt: "2026-10-15T10:00", paymentStatus: "settled" }, "PATCH");
     const edit = calls().find(([sql]) => sql.includes("UPDATE collections"))!;
-    expect(edit[1]).toEqual([900, null, "2026-10-15 10:00:00", "settled", 5]);
+    expect(edit[1]).toEqual([900, "OR-5", "2026-10-15 10:00:00", "settled", 5]);
     expect(calls().find(([sql]) => sql.includes("UPDATE loans SET action_status"))![1][0]).toBe("settled");
     mocks.query.mockClear();
-    await post("/loans/9/payments/5", { amount: 900, collectedAt: "2026-10-15T10:00" }, "PATCH");
+    await post("/loans/9/payments/5", { amount: 900, orNo: "OR-5", collectedAt: "2026-10-15T10:00" }, "PATCH");
     expect(calls().find(([sql]) => sql.includes("UPDATE collections"))![1][3]).toBeNull();
   });
 
@@ -193,7 +200,7 @@ describe("LAS field work", () => {
     mocks.user = { id: 8, role: "las", branchId: 2 } as JwtUser;
     mocks.query.mockImplementation(async (sql: string) => sql.includes("SELECT c.created_by")
       ? { rows: [{ created_by: 99, branch_id: 2 }], rowCount: 1 } : { rows: [], rowCount: 1 });
-    const body = { amount: 100, collectedAt: "2026-10-15T08:00" };
+    const body = { amount: 100, orNo: "OR-5", collectedAt: "2026-10-15T08:00" };
     expect((await post("/loans/9/payments/5", body, "PATCH")).status).toBe(403);
     mocks.query.mockImplementation(async (sql: string) => sql.includes("SELECT c.created_by")
       ? { rows: [{ created_by: 8, branch_id: 2 }], rowCount: 1 } : { rows: [], rowCount: 1 });

@@ -35,7 +35,7 @@ describe("collector history on a phone", () => {
     const cards = within(list).getAllByRole("button");
     expect(cards).toHaveLength(2);
     expect(cards[0]).toHaveTextContent("Juan Dela Cruz");
-    expect(cards[0]).toHaveTextContent("Receipt: OR-77");
+    expect(cards[0]).toHaveTextContent("OR Number: OR-77");
     expect(cards[1]).toHaveTextContent("Promised to pay on Friday");
     expect(cards[1]).toHaveTextContent("Attachment");
     // Collectors see their own work, so cards don't repeat "By ana".
