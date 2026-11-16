@@ -43,6 +43,31 @@ describe("collector history on a phone", () => {
     expect(screen.getByText("Total collected")).toBeInTheDocument();
   });
 
+  it("keeps the date range, refresh and export within reach, with the totals in one card", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><CollectorHistoryPage /></MemoryRouter>);
+    await screen.findByRole("list", { name: "Collection activity" });
+    expect(screen.getByRole("heading", { level: 1, name: "My Collection History" })).toBeInTheDocument();
+    expect(screen.getByLabelText("From")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("To")).toHaveAttribute("type", "date");
+    // All time by default: empty dates, and no date limits sent to the server.
+    expect(screen.getByLabelText("From")).toHaveValue("");
+    expect(screen.getByLabelText("To")).toHaveValue("");
+    expect(requests().some(path => /[?&](from|to)=/.test(path))).toBe(false);
+
+    const totals = screen.getByRole("region", { name: "Totals for this date range" });
+    expect(totals).toHaveTextContent("Payments");
+    expect(totals).toHaveTextContent("Members reached");
+    expect(totals).toHaveTextContent("Follow-up notes");
+
+    const before = requests().length;
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(requests().length).toBeGreaterThan(before));
+
+    await user.click(screen.getByRole("button", { name: "Export collection history" }));
+    expect(screen.getByRole("dialog", { name: "Export collection history" })).toHaveTextContent("All time");
+  });
+
   it("switches between all activity, payments and actions taken", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CollectorHistoryPage /></MemoryRouter>);

@@ -1436,12 +1436,16 @@ export function LoansPage() {
         <ToastNotification message={message} tone="success" onClose={() => setMessage("")} />
       ) : null}
 
-      <PageHeader
-        title="Collections"
-        eyebrow="Loan Operations"
-        actionsTopRight
-        actions={<PageMetaStamp />}
-      />
+      {isFieldUser ? (
+        <header><h1 className="page-title">Collections</h1></header>
+      ) : (
+        <PageHeader
+          title="Collections"
+          eyebrow="Loan Operations"
+          actionsTopRight
+          actions={<PageMetaStamp />}
+        />
+      )}
 
       <section className="panel min-w-0 p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -1530,7 +1534,7 @@ export function LoansPage() {
                 <div className="relative min-w-0 flex-1">
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
-                    className="field pl-9"
+                    className={`field pl-9 ${isFieldUser ? "h-11" : ""}`}
                     value={loanQuery}
                     onChange={(event) => setLoanQuery(event.target.value)}
                     placeholder="Search loan records"
@@ -1579,7 +1583,7 @@ export function LoansPage() {
                   <button
                     key={loan.id}
                     type="button"
-                    className="collector-loan-list-item text-left"
+                    className="collector-loan-list-item bg-white text-left"
                     onClick={() => openLoanDetails(loan.id)}
                   >
                     <div className="min-w-0">
@@ -1591,7 +1595,8 @@ export function LoansPage() {
                       {loan.actionStatus
                         ? <span className={actionStatusClass(loan.actionStatus)}>{paymentStatusLabel(loan.actionStatus)}</span>
                         : <span className={loanStatusClass(loan.status)}>{loan.status}</span>}
-                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(loan.loanAmount)}</span>
+                      {/* What the member owes now, not the original loan amount. */}
+                      <span className="text-sm font-semibold text-slate-900"><span className="font-normal text-slate-600">Due </span>{formatCurrency(loan.total)}</span>
                     </div>
                   </button>
                 ))}

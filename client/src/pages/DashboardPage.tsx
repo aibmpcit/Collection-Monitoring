@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Activity, AlertTriangle, BarChart3, TrendingUp, Users, WalletCards } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, ChevronRight, Search, TrendingUp, Users, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageMetaStamp } from "../components/PageMetaStamp";
 import { PageHeader } from "../components/PageHeader";
@@ -166,6 +166,46 @@ function KpiCard({
   );
 }
 
+/** One tappable account on the collector's phone dashboard. */
+function CollectorRow({ to, name, detail, badge, amount }: {
+  to: string;
+  name: string;
+  detail: string;
+  badge: JSX.Element;
+  amount: string;
+}) {
+  return (
+    <li>
+      <Link to={to} className="collector-loan-list-item bg-white">
+        <span className="min-w-0">
+          <span className="block break-words text-sm font-semibold text-slate-900">{name}</span>
+          <span className="mt-0.5 block break-all text-xs text-slate-600">{detail}</span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          {badge}
+          <span className="text-sm font-semibold text-slate-900">{amount}</span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+function CollectorSection({ title, action, children }: { title: string; action?: JSX.Element; children: React.ReactNode }) {
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-bold text-slate-900">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const COLLECTOR_LIST_SIZE = 5;
+const collectorEmpty = "rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600";
+const collectorLink = "inline-flex min-h-[2.75rem] items-center text-sm font-semibold text-brand-700";
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -312,6 +352,90 @@ export function DashboardPage() {
     }
 
     navigate("/analytics");
+  }
+
+  // Collectors work from a phone: today's figure, a way into the loan list, then who to visit.
+  if (isCollector) {
+    const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    const count = (value: number) => (loading ? "…" : value.toLocaleString());
+    return (
+      <main className="page-shell">
+        <header>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-slate-600">{today}</p>
+        </header>
+
+        {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
+
+        <section className="rounded-3xl bg-brand-600 p-4 text-white" aria-label="Collections today">
+          <p className="text-sm font-semibold text-brand-100">Collections today</p>
+          <p className="mt-1 break-words text-[2rem] font-bold leading-tight tracking-tight">
+            {metrics ? formatCurrency(metrics.collectionsToday) : loading ? "Loading..." : "-"}
+          </p>
+          <p className="mt-1 text-xs text-brand-100">Branch total</p>
+        </section>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Link to="/loans" className="panel block min-w-0 p-3">
+            <span className="block text-sm font-semibold text-slate-600">Open loans</span>
+            <span className="mt-1 block text-2xl font-bold text-slate-900">{count(openLoans)}</span>
+          </Link>
+          <Link to="/reports/overdue?section=overdue" className="panel block min-w-0 p-3">
+            <span className="block text-sm font-semibold text-slate-600">Overdue loans</span>
+            <span className="mt-1 block text-2xl font-bold text-red-700">{count(statusCounts.overdue)}</span>
+          </Link>
+        </div>
+
+        <Link to="/loans" className="btn-primary h-12 justify-between px-4">
+          <span className="inline-flex items-center gap-2"><Search size={18} aria-hidden="true" />Find a loan to collect</span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </Link>
+
+        <CollectorSection title="Overdue accounts"
+          action={<Link to="/reports/overdue?section=overdue" className={collectorLink}>View all</Link>}>
+          {overdueTableRows.length > 0 ? (
+            <ul className="grid gap-2">
+              {overdueTableRows.slice(0, COLLECTOR_LIST_SIZE).map(row => (
+                <CollectorRow key={row.loanId} to={`/loan-details/${row.loanId}`} name={row.name} detail={row.loanAccountNo}
+                  badge={<span className="status-danger">{overdueLabel(row.daysOverdue)}</span>} amount={formatCurrency(row.totalOutstanding)} />
+              ))}
+            </ul>
+          ) : <p className={collectorEmpty}>{loading ? "Loading overdue accounts..." : "No overdue accounts found."}</p>}
+        </CollectorSection>
+
+        <CollectorSection title="Due soon"
+          action={<Link to="/reports/overdue?section=upcoming" className={collectorLink}>View all ({dueSoonTotal})</Link>}>
+          {paginatedDueSoonRows.length > 0 ? (
+            <ul className="grid gap-2">
+              {paginatedDueSoonRows.slice(0, COLLECTOR_LIST_SIZE).map(loan => (
+                <CollectorRow key={loan.id} to={`/loan-details/${loan.id}`} name={loan.memberName} detail={loan.loanAccountNo}
+                  badge={<span className={dueTone(loan.daysUntilDue)}>{dueLabel(loan.daysUntilDue)}</span>} amount={formatCurrency(loan.outstanding)} />
+              ))}
+            </ul>
+          ) : <p className={collectorEmpty}>{loading ? "Loading upcoming due dates..." : "No upcoming due dates to show."}</p>}
+        </CollectorSection>
+
+        <CollectorSection title="Recent collections"
+          action={<Link to="/collector-history" className={collectorLink}>See history</Link>}>
+          {recentCollections.length > 0 ? (
+            <ul className="grid gap-2">
+              {recentCollections.slice(0, COLLECTOR_LIST_SIZE).map(payment => (
+                <li key={payment.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-slate-900">{payment.memberName}</p>
+                    <p className="mt-0.5 break-all text-xs text-slate-600">{payment.loanAccountNo}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold text-emerald-700">{formatCurrency(payment.amount)}</p>
+                    <p className="mt-0.5 text-xs text-slate-600">{formatDate(payment.collectedAt, true)}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : <p className={collectorEmpty}>{loading ? "Loading recent collections..." : "No payments posted yet."}</p>}
+        </CollectorSection>
+      </main>
+    );
   }
 
   return (

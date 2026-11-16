@@ -168,7 +168,7 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
   return createPortal(
     <nav
       style={{ gridTemplateColumns: `repeat(${Math.max(1, navItems.length)}, minmax(0, 1fr))` }}
-      className="collector-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[100] mx-auto grid max-w-md items-center gap-1 rounded-[26px] border border-white/80 bg-white/88 p-2 shadow-[0_18px_45px_rgba(8,24,36,0.18)] backdrop-blur-xl lg:hidden"
+      className="collector-mobile-bottom-nav fixed inset-x-0 bottom-0 z-[100] grid items-stretch gap-1 border-t border-slate-200 bg-white px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-2 lg:hidden"
       aria-label="Mobile navigation"
     >
       {navItems.map((item) => {
@@ -178,13 +178,14 @@ function MobileBottomNav({ navItems, pathname }: { navItems: NavDefinition[]; pa
           <NavLink
             key={item.to}
             to={item.to}
-            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-semibold transition ${
-              isActive ? "bg-brand-600 text-white shadow-[0_10px_24px_rgba(0,61,150,0.28)]" : "text-slate-600 hover:bg-slate-100"
+            aria-current={isActive ? "page" : undefined}
+            className={`flex h-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-[11px] font-semibold transition ${
+              isActive ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             <span
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
-                isActive ? "bg-white text-brand-700 shadow-[0_6px_16px_rgba(8,24,36,0.12)]" : "bg-slate-100 text-slate-700"
+              className={`inline-flex h-6 w-6 items-center justify-center ${
+                isActive ? "text-white" : "text-slate-600"
               }`}
             >
               {item.icon}
@@ -286,7 +287,7 @@ function ShellLayout() {
         : user?.role === "las" ? "Loan Account Specialist" : "Collector";
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isCollectorMobileNav ? "field-shell" : ""}`}>
       <ConfirmDialog
         open={logoutConfirmOpen}
         tone="warning"
@@ -355,17 +356,17 @@ function ShellLayout() {
 
         <section className="content-panel pb-24 lg:pb-6">
           {isCollectorMobileNav ? (
-            <div className="mobile-shell-bar mobile-shell-bar-sticky lg:hidden">
+            <header className="mobile-shell-bar field-top-bar lg:hidden">
+              {/* Solid and edge to edge, so the page scrolls under it without showing through. */}
               <SystemLogo className="h-10 w-10" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-slate-900">{user?.username ?? "User"}</p>
-                <p className="text-xs uppercase tracking-wide text-slate-500">{mobileWorkspaceLabel}</p>
+                <p className="text-xs font-semibold text-slate-600">{mobileWorkspaceLabel}</p>
               </div>
-              <button type="button" className="btn-muted h-9 gap-1.5 px-3" onClick={handleLogout} aria-label="Sign out">
-                <LogOut size={15} />
-                <span>Sign Out</span>
+              <button type="button" className="btn-muted h-11 w-11 shrink-0 p-0" onClick={handleLogout} aria-label="Sign out" title="Sign out">
+                <LogOut size={18} aria-hidden="true" />
               </button>
-            </div>
+            </header>
           ) : (
             <div className="mobile-shell-bar mobile-shell-bar-sticky lg:hidden">
               <button type="button" className="btn-muted h-9 w-9 p-0" onClick={() => setMobileOpen(true)} aria-label="Open menu">

@@ -1,6 +1,6 @@
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { createPortal } from "react-dom";
-import { Camera, Download, Paperclip, Search } from "lucide-react";
+import { Camera, Download, Paperclip, RefreshCw, Search } from "lucide-react";
 import { dateFilterOptions, dateRangeOf, FilterButton, type FilterField, type FilterValues } from "../components/FilterButton";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { RemarkPhotoView } from "../components/RemarkPhoto";
@@ -80,7 +80,8 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState(params.get("search") ?? "");
   const initialDates = initialExportDates();
-  const anyDate = params.get("period") === "any";
+  // Collectors and LAS start on all time (empty dates); admins and managers start on this month.
+  const anyDate = isFieldUser || params.get("period") === "any";
   const [exportFrom, setExportFrom] = useState(params.get("from") ?? (anyDate ? "" : initialDates.from));
   const [exportTo, setExportTo] = useState(params.get("to") ?? (anyDate ? "" : initialDates.to));
   const [exporting, setExporting] = useState(false);
@@ -96,7 +97,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
   if (!isFieldUser) requestParams.delete("collectorId");
   if (isFieldUser) requestParams.set("collectorId", String(user.id));
   if (activeTab !== "all") requestParams.set("type", activeTab);
-  // The date inputs default to this month before the URL has dates, so totals must follow the inputs.
+  // The date inputs can hold a default before the URL has dates, so totals must follow the inputs.
   if (exportFrom) requestParams.set("from", exportFrom); else requestParams.delete("from");
   if (exportTo) requestParams.set("to", exportTo); else requestParams.delete("to");
   const query = requestParams.toString();
@@ -175,12 +176,26 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     setParams(next);
   }
 
+  // Field users may export all time (empty dates) or an open-ended range; admins choose a full range.
+  const exportRangeInvalid = isFieldUser
+    ? Boolean(exportFrom && exportTo && exportFrom > exportTo)
+    : !exportFrom || !exportTo || exportFrom > exportTo;
+  const rangeLabel = exportFrom && exportTo ? `${exportFrom} to ${exportTo}`
+    : exportFrom ? `From ${exportFrom}` : exportTo ? `Up to ${exportTo}` : "All time";
+  const rangeFileName = rangeLabel.toLowerCase().replace(/ /g, "-");
+  function exportRangeParams() {
+    const exportParams = new URLSearchParams({ export: "true" });
+    if (exportFrom) exportParams.set("from", exportFrom);
+    if (exportTo) exportParams.set("to", exportTo);
+    return exportParams;
+  }
+
   async function exportExcelReport() {
     if (exporting) return;
-    if (!exportFrom || !exportTo || exportFrom > exportTo) { setExportError(isFieldUser ? "Select a valid export date range." : "Choose a date range under Filters before exporting."); return; }
+    if (exportRangeInvalid) { setExportError(isFieldUser ? "Select a valid export date range." : "Choose a date range under Filters before exporting."); return; }
     setExporting(true); setExportError("");
     try {
-      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
+      const exportParams = exportRangeParams();
       if (activeTab !== "all") exportParams.set("type", activeTab);
       if (params.get("userId")) exportParams.set("userId", params.get("userId")!);
       if (params.get("branchId")) exportParams.set("branchId", params.get("branchId")!);
@@ -194,21 +209,21 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       }));
       const sheet = XLSX.utils.json_to_sheet(rows);
       const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, "Collection History");
-      XLSX.writeFile(workbook, `collection-history-${exportFrom}-to-${exportTo}.xlsx`);
+      XLSX.writeFile(workbook, `collection-history-${rangeFileName}.xlsx`);
     } catch (e) { setExportError(e instanceof Error ? e.message : "Unable to export collection history."); }
     finally { setExporting(false); }
   }
 
   async function exportPaymentReport() {
     if (exporting) return;
-    if (!exportFrom || !exportTo || exportFrom > exportTo) {
+    if (exportRangeInvalid) {
       setExportError(isFieldUser ? "Select a valid export date range." : "Choose a date range under Filters before exporting.");
       return;
     }
     setExporting(true);
     setExportError("");
     try {
-      const exportParams = new URLSearchParams({ from: exportFrom, to: exportTo, export: "true" });
+      const exportParams = exportRangeParams();
       if (activeTab !== "all") exportParams.set("type", activeTab);
       const selectedCollectorId = isFieldUser ? String(user.id) : params.get("collectorId");
       if (selectedCollectorId) exportParams.set("collectorId", selectedCollectorId);
@@ -238,7 +253,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
         pdf.setFontSize(9);
         pdf.setFont("helvetica", "normal");
         pdf.text(`Account: ${collector}`, 10, 18);
-        pdf.text(`Period: ${exportFrom} to ${exportTo}`, 10, 23);
+        pdf.text(`Period: ${rangeLabel}`, 10, 23);
         pdf.text(`Activities: ${report.total}    Total collected: ${money(Number(report.summary.amount))}`, 10, 28);
         pdf.setFillColor(0, 61, 150);
         pdf.setTextColor(255, 255, 255);
@@ -270,7 +285,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       });
       if (report.items.length === 0) pdf.text("No activity found for the selected date range.", 10, 49);
       const safeName = collector.replace(/[^a-z0-9_-]+/gi, "-");
-      pdf.save(`collection-history-${safeName}-${exportFrom}-to-${exportTo}.pdf`);
+      pdf.save(`collection-history-${safeName}-${rangeFileName}.pdf`);
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "Unable to export payment report.");
     } finally {
@@ -281,7 +296,59 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
 
   return <main className="page-shell">
     {!isFieldUser && <Link to="/collector-history" className="text-sm font-semibold text-brand-700">← Back to collectors</Link>}
-    <PageHeader title={collectorName ? `${collectorName}'s History` : isFieldUser ? "My Collection History" : "Collection History"}
+    {isFieldUser ? <>
+      {/* Phone layout for collectors and LAS: title, date range, totals, then the list controls. */}
+      <header className="flex items-center justify-between gap-3">
+        <h1 className="page-title">My Collection History</h1>
+        <button type="button" className="btn-muted h-11 w-11 shrink-0 p-0" aria-label="Refresh" title="Refresh"
+          onClick={() => setRefresh(value => value + 1)}>
+          <RefreshCw size={18} aria-hidden="true" className={loading ? "animate-spin motion-reduce:animate-none" : ""} />
+        </button>
+      </header>
+      <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+        <label className="grid min-w-0 gap-1 text-sm font-semibold text-slate-700">From
+          <input type="date" className="field h-11 min-w-0 w-full font-normal" value={exportFrom} max={exportTo || undefined} onChange={event => { setExportFrom(event.target.value); change("from", event.target.value); }} />
+        </label>
+        <label className="grid min-w-0 gap-1 text-sm font-semibold text-slate-700">To
+          <input type="date" className="field h-11 min-w-0 w-full font-normal" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
+        </label>
+      </div>
+      {/* Totals stay on screen while a new range loads, dimmed, so the controls below don't jump. */}
+      {data && <section className={`panel p-4 ${loading ? "opacity-60" : ""}`} aria-label="Totals for this date range" aria-busy={loading}>
+        <p className="text-sm font-semibold text-slate-600">Total collected</p>
+        <p className="mt-1 break-words text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900">{money(Number(data.summary.amount))}</p>
+        <dl className="mt-3 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.1fr)_minmax(0,1.1fr)] gap-1 border-t border-slate-200 pt-3 text-center">
+          {[["Payments", data.summary.payments], ["Members reached", data.summary.members],
+            ["Follow-up notes", data.summary.total - data.summary.payments]].map(([label, value]) =>
+            <div key={label} className="flex min-w-0 flex-col-reverse justify-end">
+              <dt className="mt-0.5 text-xs font-semibold text-slate-600">{label}</dt>
+              <dd className="text-lg font-bold text-slate-900">{value}</dd>
+            </div>)}
+        </dl>
+      </section>}
+      <div role="tablist" aria-label="Activity type" className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.25fr)] gap-1 rounded-xl bg-slate-100 p-1 sm:max-w-md">
+        {ACTIVITY_TABS.map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value}
+          className={`h-11 whitespace-nowrap rounded-lg px-1 text-sm font-semibold transition ${activeTab === value ? "bg-white text-brand-700 shadow-sm" : "text-slate-600"}`}
+          onClick={() => change("type", value === "all" ? "" : value)}>{label}</button>)}
+      </div>
+      <div>
+        <div className="flex items-center gap-2 sm:max-w-md">
+          <div className="relative min-w-0 flex-1">
+            <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input id="history-search" className="field h-11 pl-9" value={search} maxLength={120} aria-label="Search activity"
+              placeholder="Search member, loan, receipt, note"
+              onChange={event => setSearch(event.target.value)} />
+          </div>
+          <button type="button" className="btn-muted h-11 w-11 shrink-0 p-0" disabled={exporting}
+            aria-label={exporting ? "Exporting collection history..." : "Export collection history"} title="Export to Excel or PDF"
+            onClick={() => { setExportError(""); setExportChoiceOpen(true); }}>
+            <Download size={18} aria-hidden="true" className={exporting ? "animate-pulse" : ""} />
+          </button>
+        </div>
+        {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
+      </div>
+    </> : <>
+    <PageHeader title={collectorName ? `${collectorName}'s History` : "Collection History"}
       eyebrow="Collection Activity"
       actions={<button className="btn-muted" onClick={() => setRefresh(value => value + 1)}>Refresh</button>} />
     {!loading && data && (
@@ -295,44 +362,27 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
       </div>
     )}
     <section className="panel p-4">
-      {isFieldUser && <div role="tablist" aria-label="Activity type" className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 lg:w-full lg:max-w-sm">
-        {ACTIVITY_TABS.map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${activeTab === value ? "bg-white text-brand-700 shadow-sm" : "text-slate-600"}`}
-          onClick={() => change("type", value === "all" ? "" : value)}>{label}</button>)}
-      </div>}
       <div className="flex flex-wrap items-end gap-3">
         {/* Same toolbar as Collection Records: search as you type, then Filters and Export. */}
         <div className="flex w-full max-w-md items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input id="history-search" className="field pl-9" value={search} maxLength={120} aria-label="Search activity"
-              placeholder={isFieldUser ? "Search member, loan, receipt, note" : "Search member, collector, loan, receipt, note"}
+              placeholder="Search member, collector, loan, receipt, note"
               onChange={event => setSearch(event.target.value)} />
           </div>
-          {!isFieldUser && <>
-            <FilterButton fields={filterFields} values={filterValues} onChange={changeFilters} />
-            <button type="button" disabled={exporting} onClick={() => { setExportError(""); setExportChoiceOpen(true); }}
-              aria-label={exporting ? "Exporting collection history..." : "Export collection history"} title="Export to Excel or PDF"
-              className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-60">
-              <Download size={16} aria-hidden="true" className={exporting ? "animate-pulse" : ""} />
-              {exporting ? "Exporting..." : "Export"}
-            </button>
-          </>}
-        </div>
-        {isFieldUser && <div className="grid w-full grid-cols-2 items-end gap-3 sm:flex sm:w-auto">
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40">From
-            <input type="date" className="field min-w-0 w-full" value={exportFrom} max={exportTo || undefined} onChange={event => { setExportFrom(event.target.value); change("from", event.target.value); }} />
-          </label>
-          <label className="grid min-w-0 gap-1 text-sm sm:min-w-40">To
-            <input type="date" className="field min-w-0 w-full" value={exportTo} min={exportFrom || undefined} onChange={event => { setExportTo(event.target.value); change("to", event.target.value); }} />
-          </label>
-          <button type="button" className="btn-primary col-span-2 w-full sm:w-auto" disabled={exporting} onClick={() => setExportChoiceOpen(true)}>
+          <FilterButton fields={filterFields} values={filterValues} onChange={changeFilters} />
+          <button type="button" disabled={exporting} onClick={() => { setExportError(""); setExportChoiceOpen(true); }}
+            aria-label={exporting ? "Exporting collection history..." : "Export collection history"} title="Export to Excel or PDF"
+            className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-60">
+            <Download size={16} aria-hidden="true" className={exporting ? "animate-pulse" : ""} />
             {exporting ? "Exporting..." : "Export"}
           </button>
-        </div>}
+        </div>
       </div>
       {exportError && <p className="mt-2 text-sm text-red-700" role="alert">{exportError}</p>}
     </section>
+    </>}
     <div id="history-panel" aria-busy={loading} className="grid gap-4">
     {error && <ToastNotification message={error} tone="error" onClose={() => setError("")} />}
     {loading ? <p className="panel p-4" role="status">Loading collection history...</p> : data && <>
@@ -405,7 +455,7 @@ function CollectorHistoryDetails({ collectorName }: { collectorName?: string }) 
     </>}
     </div>
     <ExportChoiceDialog open={exportChoiceOpen} title="Export collection history"
-      description={`${exportFrom} to ${exportTo} · uses your current filters`}
+      description={`${rangeLabel} · uses your current filters`}
       onExcel={() => void exportExcelReport()} onPdf={() => void exportPaymentReport()} onClose={() => setExportChoiceOpen(false)} />
     {selectedActivity && typeof document !== "undefined" && createPortal(<div className="modal-sheet-shell" role="presentation" onMouseDown={() => setSelectedActivity(null)}>
       <section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" onMouseDown={event => event.stopPropagation()}>

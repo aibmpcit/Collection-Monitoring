@@ -14,7 +14,7 @@ test("a payment needs an OR number and proof (location optional), then sets the 
   await page.getByRole("button", { name: "Add Payment" }).click();
   const form = page.getByRole("dialog", { name: "Add Payment" });
   await form.getByLabel("Amount").fill("1500");
-  await form.getByLabel("Payment Type").selectOption("partial");
+  await form.getByText("Partially Paid", { exact: true }).click();
 
   // Proof is required: saving without it is refused.
   await form.getByRole("button", { name: "Save Payment" }).click();

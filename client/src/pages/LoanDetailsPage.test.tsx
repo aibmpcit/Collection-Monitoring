@@ -18,6 +18,9 @@ const loan = {
 };
 
 beforeEach(() => {
+  // jsdom has no modal dialogs; the forms only need them to open and close.
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
   vi.mocked(apiRequest).mockReset().mockImplementation(async (path: string) => {
     if (path === "/loans/9") return loan;
     return [];
@@ -31,14 +34,20 @@ const renderPage = () => render(
 );
 
 describe("loan details", () => {
-  it("shows just the member card until the name is tapped, then all details in a window", async () => {
+  it("shows who to reach and what is owed, with the full record in a window", async () => {
     const user = userEvent.setup();
     renderPage();
-    const card = await screen.findByRole("button", { name: "View loan details for Ana Garcia" });
-    expect(card).toHaveTextContent("MC-2026-0004 | Business Loan");
-    expect(screen.queryByText("Total Outstanding")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Ana Garcia" })).toBeInTheDocument();
+    expect(screen.getByText("LN-9 | Business Loan")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Call Ana Garcia" })).toHaveAttribute("href", "tel:09171234567");
 
-    await user.click(card);
+    const due = screen.getByRole("region", { name: "Amount due" });
+    expect(within(due).getByText("Total outstanding")).toBeInTheDocument();
+    expect(within(due).getByText("Penalty")).toBeInTheDocument();
+    // The full record stays out of the page until asked for.
+    expect(screen.queryByText("Loan Account No")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "View all loan details" }));
     const dialog = screen.getByRole("dialog", { name: "Ana Garcia" });
     expect(within(dialog).getByText("Total Outstanding")).toBeInTheDocument();
     expect(within(dialog).getByText("Loan Account No")).toBeInTheDocument();
@@ -46,5 +55,23 @@ describe("loan details", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Ana Garcia" })).not.toBeInTheDocument();
+  });
+
+  it("gives collectors a + button that shows Add Action Taken and Add Payment when tapped", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Ana Garcia" });
+    const bar = screen.getByRole("group", { name: "Record on this loan" });
+    // Closed until tapped.
+    expect(within(bar).queryByRole("menuitem")).not.toBeInTheDocument();
+
+    await user.click(within(bar).getByRole("button", { name: "Add payment or action taken" }));
+    expect(within(bar).getByRole("menuitem", { name: "Add Action Taken" })).toBeInTheDocument();
+    expect(within(bar).getByRole("menuitem", { name: "Add Payment" })).toBeInTheDocument();
+
+    // Choosing one closes the choices and opens its form.
+    await user.click(within(bar).getByRole("menuitem", { name: "Add Payment" }));
+    expect(within(bar).queryByRole("menuitem")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Add Payment" })).toBeInTheDocument();
   });
 });

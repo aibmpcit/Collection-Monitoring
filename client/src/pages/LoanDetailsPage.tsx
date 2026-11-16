@@ -1,7 +1,7 @@
 import { newRequestId } from "../services/requestId";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { motion } from "framer-motion";
-import { Camera } from "lucide-react";
+import { ArrowLeft, Camera, Check, Phone, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams, useParams } from "react-router-dom";
@@ -26,6 +26,9 @@ interface LoanDetails extends Loan {
 }
 
 const HISTORY_PAGE_SIZE = 5;
+
+/** Shown as one-tap buttons at the top of the Add Action Taken form. */
+const QUICK_REMARK_CATEGORIES: RemarkCategory[] = ["visited", "promised_to_pay", "follow_up_collection", "rescheduled_payment"];
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -61,6 +64,8 @@ function toLocalDateTimeInputValue(value: string): string {
 
 export function LoanDetailsPage() {
   const { user } = useAuth();
+  // Collectors and LAS work on phones: compact header, and a floating + button for the two add forms.
+  const isFieldUser = user?.role === "staff" || user?.role === "las";
   const { loanId = "0" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const numericLoanId = Number(loanId);
@@ -98,6 +103,34 @@ export function LoanDetailsPage() {
   const [paymentDateTime, setPaymentDateTime] = useState(getLocalDateTimeInputValue());
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [remarkModalOpen, setRemarkModalOpen] = useState(false);
+  // Phone "+" button for collectors and LAS: opens the Add Payment / Add Action Taken choices.
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  // While the choices show: the page behind stays put, and focus starts on the first choice.
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    addMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [addMenuOpen]);
+  // Focus goes back to the + first, so it is also where focus returns after a form closes.
+  function closeAddMenu() {
+    addButtonRef.current?.focus();
+    setAddMenuOpen(false);
+  }
+  // Up and Down move between the choices, as in any menu.
+  function handleAddMenuKeys(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next].focus();
+  }
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
   const [editingRemarkId, setEditingRemarkId] = useState<number | null>(null);
   const [confirmingRemarkDelete, setConfirmingRemarkDelete] = useState(false);
@@ -335,9 +368,38 @@ export function LoanDetailsPage() {
     }
   }
 
+  function openAddPayment() {
+    setPaymentError("");
+    setEditingPaymentId(null);
+    setPaymentAmount("");
+    setPaymentOrNo("");
+    setPaymentStatus("");
+    setPaymentProof(null);
+    setEditingPaymentHasProof(false);
+    setPaymentDateTime(getLocalDateTimeInputValue());
+    paymentRequestId.current = newRequestId();
+    setPaymentModalOpen(true);
+  }
+
+  function openAddRemark() {
+    setRemarkError("");
+    setEditingRemarkId(null);
+    setEditingHasEvidence(false);
+    setRemarkInput("");
+    setRemarkCategory(DEFAULT_REMARK_CATEGORY);
+    setRemarkProof(null);
+    setRemarkModalOpen(true);
+  }
+
+  // A number to dial from the contact text, which may also hold names or a second number.
+  const phone = loan?.contactInfo?.match(/\+?\d[\d\s-]{5,}\d/)?.[0].replace(/[\s-]/g, "") ?? "";
+  const canAddPayment = hasPermission(user, "add_payments");
+  const canAddRemark = hasPermission(user, "add_remarks");
+
   // Escape closes the payment summary and the loan details window (the forms are native dialogs).
   useEscapeToClose(Boolean(summaryPayment), () => setSummaryPayment(null));
   useEscapeToClose(detailsExpanded, () => setDetailsExpanded(false));
+  useEscapeToClose(addMenuOpen, closeAddMenu);
 
   if (loading) {
     return (
@@ -348,7 +410,7 @@ export function LoanDetailsPage() {
   }
 
   return (
-    <main className="page-shell">
+    <main className={`page-shell ${isFieldUser ? "pb-20 lg:pb-0" : ""}`}>
       {loan && summaryPayment && createPortal(
         <section className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="payment-summary-title"
           onMouseDown={event => { if (event.target === event.currentTarget) setSummaryPayment(null); }}>
@@ -389,29 +451,36 @@ export function LoanDetailsPage() {
       />}
       {paymentModalOpen && createPortal(
         <dialog ref={paymentDialogRef} aria-labelledby="payment-modal-title"
-          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
+          className="modal-card form-sheet fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
           onCancel={event => { event.preventDefault(); if (!paymentsSubmitting) { setPaymentModalOpen(false); setEditingPaymentId(null); } }}>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 id="payment-modal-title" className="text-lg font-semibold">{editingPaymentId ? "Edit Payment" : "Add Payment"}</h2>
-            <button type="button" className="btn-muted" disabled={paymentsSubmitting} onClick={() => { setPaymentModalOpen(false); setEditingPaymentId(null); }}>Close</button>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 id="payment-modal-title" className="text-lg font-semibold">{editingPaymentId ? "Edit Payment" : "Add Payment"}</h2>
+              {loan && <p className="mt-0.5 break-words text-xs text-slate-600">{loan.memberName} · {loan.loanAccountNo}</p>}
+            </div>
+            <button type="button" className="btn-muted h-11 shrink-0 sm:h-10" disabled={paymentsSubmitting} onClick={() => { setPaymentModalOpen(false); setEditingPaymentId(null); }}>Close</button>
           </div>
               <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleAddPayment}>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Amount
-                  <input
-                    className="field"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={paymentAmount}
-                    onChange={(event) => setPaymentAmount(event.target.value)}
-                    required
-                  />
+                  <span className="relative block">
+                    <span aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-500 sm:text-sm sm:font-semibold">₱</span>
+                    <input
+                      className="field h-14 pl-10 text-2xl font-bold sm:h-10 sm:pl-9 sm:text-sm sm:font-normal"
+                      type="number"
+                      inputMode="decimal"
+                      min="0.01"
+                      step="0.01"
+                      value={paymentAmount}
+                      onChange={(event) => setPaymentAmount(event.target.value)}
+                      required
+                    />
+                  </span>
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   OR Number
                   <input
-                    className="field"
+                    className="field h-12 sm:h-10"
                     value={paymentOrNo}
                     onChange={(event) => setPaymentOrNo(event.target.value)}
                     placeholder="Official receipt number"
@@ -419,17 +488,30 @@ export function LoanDetailsPage() {
                     required
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Payment Type
-                  <select className="field" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)} required>
-                    <option value="" disabled>Choose payment type...</option>
-                    {PAYMENT_STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
-                  </select>
-                </label>
+                {/* Two large buttons instead of a dropdown: one tap in the field. The submit handler asks for a choice if none is made. */}
+                <fieldset className="min-w-0">
+                  <legend className="mb-1 text-sm font-medium text-black/80">Payment Type</legend>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PAYMENT_STATUSES.map(status => {
+                      const chosen = paymentStatus === status.value;
+                      return (
+                        <label key={status.value}
+                          className={`flex h-12 cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 text-sm font-semibold transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-brand-600 sm:h-10 ${
+                            chosen ? "border-brand-600 bg-brand-100 text-brand-700 ring-1 ring-brand-600" : "border-slate-300 bg-white text-slate-700"
+                          }`}>
+                          <input type="radio" name="payment-type" className="sr-only" value={status.value} checked={chosen}
+                            onChange={() => setPaymentStatus(status.value as PaymentStatus)} />
+                          {chosen && <Check size={16} aria-hidden="true" className="shrink-0" />}
+                          {status.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Payment Date/Time
                   <input
-                    className="field"
+                    className="field h-12 sm:h-10"
                     type="datetime-local"
                     value={paymentDateTime}
                     onChange={(event) => setPaymentDateTime(event.target.value)}
@@ -440,7 +522,7 @@ export function LoanDetailsPage() {
                   <PaymentProofField proof={paymentProof} onChange={setPaymentProof} hasExisting={Boolean(editingPaymentId) && editingPaymentHasProof} disabled={paymentsSubmitting} />
                 </div>
                 <div className="flex justify-stretch sm:col-span-2 sm:justify-end">
-                  <button type="submit" className="btn-primary w-full sm:w-auto" disabled={paymentsSubmitting}>
+                  <button type="submit" className="btn-primary h-12 w-full sm:h-10 sm:w-auto" disabled={paymentsSubmitting}>
                     {paymentsSubmitting ? "Saving..." : editingPaymentId ? "Update Payment" : "Save Payment"}
                   </button>
                 </div>
@@ -452,17 +534,38 @@ export function LoanDetailsPage() {
       )}
       {remarkModalOpen && createPortal(
         <dialog ref={remarkDialogRef} aria-labelledby="remark-modal-title"
-          className="modal-card fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
+          className="modal-card form-sheet fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto backdrop:bg-slate-900/50 backdrop:backdrop-blur-[3px]"
           onCancel={event => { event.preventDefault(); if (!remarksSubmitting) { setRemarkModalOpen(false); setEditingRemarkId(null); } }}>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Action Taken" : "Add Action Taken"}</h2>
-            <button type="button" className="btn-muted" disabled={remarksSubmitting} onClick={() => { setRemarkModalOpen(false); setEditingRemarkId(null); }}>Close</button>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 id="remark-modal-title" className="text-lg font-semibold">{editingRemarkId ? "Edit Action Taken" : "Add Action Taken"}</h2>
+              {loan && <p className="mt-0.5 break-words text-xs text-slate-600">{loan.memberName} · {loan.loanAccountNo}</p>}
+            </div>
+            <button type="button" className="btn-muted h-11 shrink-0 sm:h-10" disabled={remarksSubmitting} onClick={() => { setRemarkModalOpen(false); setEditingRemarkId(null); }}>Close</button>
           </div>
               <form className="grid gap-3" onSubmit={handleAddRemark}>
+                {/* The four categories collectors record most, one tap each; the full list stays in the dropdown below. */}
+                <fieldset className="min-w-0">
+                  <legend className="mb-1 text-sm font-medium text-black/80">Common actions</legend>
+                  <div className="grid grid-cols-2 gap-2">
+                    {QUICK_REMARK_CATEGORIES.map(value => {
+                      const chosen = remarkCategory === value;
+                      return (
+                        <button key={value} type="button" aria-pressed={chosen} onClick={() => setRemarkCategory(value)}
+                          className={`flex h-12 items-center justify-center gap-1.5 rounded-xl border px-2 text-center text-sm font-semibold leading-tight transition sm:h-10 ${
+                            chosen ? "border-brand-600 bg-brand-100 text-brand-700 ring-1 ring-brand-600" : "border-slate-300 bg-white text-slate-700"
+                          }`}>
+                          {chosen && <Check size={16} aria-hidden="true" className="shrink-0" />}
+                          {getRemarkCategoryLabel(value)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
                   Category
                   <select
-                    className="field"
+                    className="field h-12 sm:h-10"
                     value={remarkCategory}
                     onChange={(event) => setRemarkCategory(event.target.value as RemarkCategory)}
                     required
@@ -475,7 +578,7 @@ export function LoanDetailsPage() {
                   </select>
                 </label>
                 <label className="grid gap-1 text-sm font-medium text-black/80">
-                  Remark
+                  What happened?
                   <textarea
                     className="field"
                     rows={4}
@@ -496,7 +599,7 @@ export function LoanDetailsPage() {
                   ) : (
                     <button type="button" className="btn-muted w-full text-red-700 sm:mr-auto sm:w-auto" disabled={remarksSubmitting} onClick={() => setConfirmingRemarkDelete(true)}>Delete Action Taken</button>
                   ))}
-                  <button type="submit" className="btn-primary w-full sm:w-auto" disabled={remarksSubmitting}>
+                  <button type="submit" className="btn-primary h-12 w-full sm:h-10 sm:w-auto" disabled={remarksSubmitting}>
                     {remarksSubmitting ? "Saving..." : editingRemarkId ? "Update Action Taken" : "Save Action Taken"}
                   </button>
                 </div>
@@ -506,41 +609,37 @@ export function LoanDetailsPage() {
 
         </dialog>, document.body
       )}
-      <PageHeader
-        title="Loan Details"
-        eyebrow="Collections"
-        actionsTopRight
-        actions={<PageMetaStamp />}
-        footer={
-          <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
-            {backLink.label}
-          </Link>
-        }
-      />
+      {isFieldUser ? (
+        <Link to={backLink.to} className="inline-flex min-h-[2.75rem] items-center gap-1.5 justify-self-start text-sm font-semibold text-brand-700">
+          <ArrowLeft size={16} aria-hidden="true" />{backLink.label}
+        </Link>
+      ) : (
+        <PageHeader
+          title="Loan Details"
+          eyebrow="Collections"
+          actionsTopRight
+          actions={<PageMetaStamp />}
+          footer={
+            <Link to={backLink.to} className="btn-muted w-full sm:w-auto">
+              {backLink.label}
+            </Link>
+          }
+        />
+      )}
 
       {error ? <ToastNotification message={error} tone="error" onClose={() => setError("")} />
         : message ? <ToastNotification message={message} tone="success" onClose={() => setMessage("")} /> : null}
 
       {loan && (
         <>
-          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="panel cursor-pointer p-4 text-sm transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
-            role="button" tabIndex={0} aria-haspopup="dialog"
-            aria-label={`View loan details for ${loan.memberName}`}
-            onClick={() => setDetailsExpanded(true)}
-            onKeyDown={event => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setDetailsExpanded(true);
-              }
-            }}>
+          {/* Who to see and how to reach them, then what they owe; the rest opens in the details window. */}
+          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="panel grid gap-3 p-4 text-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-brand-700 underline decoration-brand-200 underline-offset-4">{loan.memberName}</h2>
-                <p className="text-xs text-slate-600">
-                  {loan.cifKey} | {loan.loanType}
+                <h2 className="break-words text-lg font-semibold text-slate-900">{loan.memberName}</h2>
+                <p className="mt-0.5 break-words text-xs text-slate-600">
+                  {loan.loanAccountNo} | {loan.loanType}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">Tap to view loan details</p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <span className={`${loan.status === "overdue" ? "status-danger" : loan.status === "closed" ? "status-warning" : "status-success"}`}>
@@ -549,14 +648,47 @@ export function LoanDetailsPage() {
                 {loan.actionStatus && <span className={actionStatusClass(loan.actionStatus)} title="Latest payment">{paymentStatusLabel(loan.actionStatus)}</span>}
               </div>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="break-words font-semibold text-slate-900">{loan.contactInfo || "No contact number on record"}</p>
+                {loan.address && <p className="mt-0.5 break-words text-xs text-slate-600">{loan.address}</p>}
+              </div>
+              {phone && (
+                <a href={`tel:${phone}`} className="btn-muted h-11 shrink-0 gap-1.5" aria-label={`Call ${loan.memberName}`}>
+                  <Phone size={16} aria-hidden="true" />Call
+                </a>
+              )}
+            </div>
+            <button type="button" aria-haspopup="dialog"
+              className="-my-1.5 min-h-[2.75rem] justify-self-start text-sm font-semibold text-brand-700 underline decoration-brand-200 underline-offset-4"
+              onClick={() => setDetailsExpanded(true)}>
+              View all loan details
+            </button>
           </motion.section>
 
-          {/* Loan details live in a window opened from the member's name, keeping the page short on phones. */}
+          <section className="panel p-4" aria-label="Amount due">
+            <p className="text-sm font-semibold text-slate-600">Total outstanding</p>
+            <p className="mt-1 break-words text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900">
+              {formatCurrency(Number(loan.principalDue) + Number(loan.interest) + Number(loan.penaltyDue))}
+            </p>
+            <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3">
+              {([["Principal", loan.principalDue], ["Interest", loan.interest], ["Penalty", loan.penaltyDue]] as const).map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="text-xs font-semibold text-slate-600">{label}</dt>
+                  <dd className="mt-0.5 break-words text-sm font-bold text-slate-900">{formatCurrency(Number(value))}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          {/* The full record opens in a window from "View all loan details", keeping the page short on phones. */}
           {detailsExpanded && createPortal(
             <div className="modal-sheet-shell" role="presentation" onMouseDown={() => setDetailsExpanded(false)}>
               <section className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:p-6"
                 role="dialog" aria-modal="true" aria-labelledby="loan-details-title" onMouseDown={event => event.stopPropagation()}>
-                <div className="mb-4 flex items-start justify-between gap-3">
+                {/* The name and Close stay in view while the details scroll under them. The negative top cancels the
+                    sheet's padding, which a sticky element otherwise keeps as a gap that the details show through. */}
+                <div className="sticky -top-5 z-10 sm:-top-6 -mx-5 -mt-5 mb-4 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 pb-3 pt-5 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Loan details</p>
                     <h2 id="loan-details-title" className="mt-1 break-words text-xl font-bold text-slate-900">{loan.memberName}</h2>
@@ -631,18 +763,7 @@ export function LoanDetailsPage() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
-                  {hasPermission(user, "add_payments") && <button type="button" className="btn-primary" onClick={() => {
-                    setPaymentError("");
-                    setEditingPaymentId(null);
-                    setPaymentAmount("");
-                    setPaymentOrNo("");
-                    setPaymentStatus("");
-                    setPaymentProof(null);
-                    setEditingPaymentHasProof(false);
-                    setPaymentDateTime(getLocalDateTimeInputValue());
-                    paymentRequestId.current = newRequestId();
-                    setPaymentModalOpen(true);
-                  }}>Add Payment</button>}
+                  {hasPermission(user, "add_payments") && <button type="button" className={`btn-primary ${isFieldUser ? "hidden lg:inline-flex" : ""}`} onClick={openAddPayment}>Add Payment</button>}
                 </div>
               </div>
 
@@ -702,15 +823,7 @@ export function LoanDetailsPage() {
                   <h2 className="text-lg font-semibold text-slate-900">Loan Actions Taken</h2>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
-                  {hasPermission(user, "add_remarks") && <button type="button" className="btn-primary" onClick={() => {
-                    setRemarkError("");
-                    setEditingRemarkId(null);
-                    setEditingHasEvidence(false);
-                    setRemarkInput("");
-                    setRemarkCategory(DEFAULT_REMARK_CATEGORY);
-                    setRemarkProof(null);
-                    setRemarkModalOpen(true);
-                  }}>Add Action Taken</button>}
+                  {hasPermission(user, "add_remarks") && <button type="button" className={`btn-primary ${isFieldUser ? "hidden lg:inline-flex" : ""}`} onClick={openAddRemark}>Add Action Taken</button>}
                 </div>
               </div>
 
@@ -755,6 +868,32 @@ export function LoanDetailsPage() {
             )}
           </section>
         </>
+      )}
+      {loan && isFieldUser && (canAddPayment || canAddRemark) && typeof document !== "undefined" && createPortal(
+        <>
+          {/* Tapping anywhere else closes the choices. */}
+          {addMenuOpen && <div className="fixed inset-0 z-[89] bg-slate-900/30 lg:hidden" aria-hidden="true" onClick={closeAddMenu} />}
+          {/* The + comes first in the page so Tab moves from it to the choices; flex-col-reverse draws them above it. */}
+          <div role="group" aria-label="Record on this loan" className="field-action-bar fixed right-4 z-[90] flex flex-col-reverse items-end gap-3 lg:hidden">
+            {/* With both permissions the + opens the two choices; with one it opens that form directly. */}
+            {canAddPayment && canAddRemark
+              ? <button type="button" ref={addButtonRef} className="btn-primary h-14 w-14 rounded-full p-0 shadow-lg" aria-haspopup="menu" aria-expanded={addMenuOpen}
+                  aria-controls={addMenuOpen ? "loan-add-menu" : undefined} aria-label={addMenuOpen ? "Close add options" : "Add payment or action taken"}
+                  onClick={() => (addMenuOpen ? closeAddMenu() : setAddMenuOpen(true))}>
+                  <Plus size={26} aria-hidden="true" className={`transition-transform duration-150 motion-reduce:transition-none ${addMenuOpen ? "rotate-45" : ""}`} />
+                </button>
+              : <button type="button" className="btn-primary h-14 w-14 rounded-full p-0 shadow-lg"
+                  aria-label={canAddPayment ? "Add Payment" : "Add Action Taken"} onClick={canAddPayment ? openAddPayment : openAddRemark}>
+                  <Plus size={26} aria-hidden="true" />
+                </button>}
+            {addMenuOpen && <div id="loan-add-menu" ref={addMenuRef} role="menu" aria-label="Add to this loan" className="flex flex-col items-end gap-2" onKeyDown={handleAddMenuKeys}>
+              {canAddRemark && <button type="button" role="menuitem" className="btn-muted h-12 bg-white shadow-lg"
+                onClick={() => { closeAddMenu(); openAddRemark(); }}>Add Action Taken</button>}
+              {canAddPayment && <button type="button" role="menuitem" className="btn-primary h-12 shadow-lg"
+                onClick={() => { closeAddMenu(); openAddPayment(); }}>Add Payment</button>}
+            </div>}
+          </div>
+        </>, document.body
       )}
     </main>
   );
