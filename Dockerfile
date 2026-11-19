@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -17,7 +17,7 @@ ENV VITE_API_BASE_URL=/api
 RUN npm run build
 
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production PORT=4000 SERVE_CLIENT=true
